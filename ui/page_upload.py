@@ -68,5 +68,5 @@ def render_upload() -> None:
         st.session_state["permit_info"] = permit_info
         st.session_state["_ran"] = False
         st.session_state.pop("_result", None)
-        st.session_state["page"] = "agents"
+        st.session_state["_nav_page"] = "agents"
         st.rerun()
