@@ -9,12 +9,31 @@ import threading
 from agents.base import AgentBase, AgentMessage
 from core.llm_engine import LlmEngine
 
-# 固定整改要求话术（降级路径）
-_TEMPLATE_REQUIREMENT = (
-    "请立即停止相关动火作业，落实以下整改：①指定专职监火人并全程监护；"
-    "②配备合格灭火器材（灭火器/防火毯）；③清理周边易燃物；"
-    "④补办/核验作业审批手续。整改完成并经复查合格后方可恢复作业。"
-)
+# 按风险等级动态生成整改要求话术（降级路径）
+# 避免低风险场景仍套用"立即停止作业"等过度严厉的固定模板
+_REQUIREMENTS = {
+    "低": (
+        "当前影像/作业票未识别出明确违规项，建议保持常规安全巡检并留存本次检测记录。"
+    ),
+    "一般": (
+        "存在一般隐患，请现场负责人按规范要求限期整改，并拍照确认整改完成情况。"
+    ),
+    "较大": (
+        "存在较大安全隐患，请立即停止相关危险作业，落实监火人、灭火器材及易燃物清理等整改措施，"
+        "整改完成并经复核后方可复工。"
+    ),
+    "重大": (
+        "存在重大安全隐患，须立即停止相关动火作业并撤离无关人员，按规范落实整改，"
+        "经安全部门复核合格后方可复工。"
+    ),
+}
+
+_DEADLINES = {
+    "低": "无需限期",
+    "一般": "24小时内",
+    "较大": "2小时内",
+    "重大": "立即",
+}
 
 
 class ActionAgent(AgentBase):
@@ -24,12 +43,17 @@ class ActionAgent(AgentBase):
         self._llm = llm or LlmEngine()
         self._wo_dao = work_order_dao
 
-    def _template(self, hazard_desc: str, clause_text: str) -> str:
-        """模板降级：规范原文 + 固定整改话术。"""
+    def _template(self, hazard_desc: str, clause_text: str, risk_level: str) -> str:
+        """模板降级：规范原文 + 按风险等级的整改话术。"""
+        requirement = _REQUIREMENTS.get(risk_level, _REQUIREMENTS["一般"])
+        deadline = _DEADLINES.get(risk_level, "限期整改")
+        # clause_text 为空时避免"违反规范："后面空白
+        clause_display = clause_text or "本次未匹配到具体规范条款，请以影像和作业票信息为准。"
         return (
             f"隐患说明：{hazard_desc}\n"
-            f"违反规范：{clause_text}\n"
-            f"整改要求：{_TEMPLATE_REQUIREMENT}"
+            f"违反规范：{clause_display}\n"
+            f"整改要求：{requirement}\n"
+            f"处理时限：{deadline}"
         )
 
     def _execute(self, msg: AgentMessage) -> AgentMessage:
@@ -38,11 +62,18 @@ class ActionAgent(AgentBase):
         compliance = msg.payload.get("compliance", []) or []
         training_tips = msg.payload.get("training_tips", []) or []
 
-        # 隐患描述：来自融合理由 / 违规项
+        # 隐患描述：低风险场景不要套用"检测到动火作业安全隐患"
         hazard_parts = list(reasons)
         if not hazard_parts and compliance:
-            hazard_parts = [c.get("label", "") for c in compliance if c.get("verdict") != "合规"]
-        hazard_desc = "；".join([h for h in hazard_parts if h]) or "检测到动火作业安全隐患"
+            hazard_parts = [
+                c.get("label", "") for c in compliance if c.get("verdict") != "合规"
+            ]
+        if hazard_parts:
+            hazard_desc = "；".join([h for h in hazard_parts if h])
+        elif risk_level == "低":
+            hazard_desc = "未检出明确违规目标，现场状况良好"
+        else:
+            hazard_desc = "检测到动火作业安全隐患"
 
         # 违反规范条款：取 RAG 命中的首条 clause
         clause_text = ""
@@ -53,14 +84,17 @@ class ActionAgent(AgentBase):
         if not clause_text and training_tips:
             clause_text = training_tips[0][:60]
 
+        requirement = _REQUIREMENTS.get(risk_level, _REQUIREMENTS["一般"])
+        deadline = _DEADLINES.get(risk_level, "限期整改")
+
         # 主链路：立即返回模板（同步、快速，计入 ≤8s）
-        worker_notice = self._template(hazard_desc, clause_text)
+        worker_notice = self._template(hazard_desc, clause_text, risk_level)
 
         # 异步润色（LLD §5.1：不计入主链路耗时）
         if self._llm.available() and msg.task_id:
             threading.Thread(
                 target=self._polish_async,
-                args=(msg.task_id, hazard_desc, clause_text),
+                args=(msg.task_id, hazard_desc, clause_text, requirement, deadline),
                 daemon=True,
             ).start()
 
@@ -68,7 +102,8 @@ class ActionAgent(AgentBase):
             "risk_level": risk_level,
             "hazard_desc": hazard_desc,
             "clause": clause_text,
-            "requirement": _TEMPLATE_REQUIREMENT,
+            "requirement": requirement,
+            "deadline": deadline,
             "worker_notice": worker_notice,
             "training_tips": training_tips,
         }
@@ -76,14 +111,25 @@ class ActionAgent(AgentBase):
         msg.payload = {"work_order": work_order, "worker_notice": worker_notice}
         return msg
 
-    def _polish_async(self, task_id: str, hazard_desc: str, clause_text: str) -> None:
+    def _polish_async(
+        self,
+        task_id: str,
+        hazard_desc: str,
+        clause_text: str,
+        requirement: str,
+        deadline: str,
+    ) -> None:
         """后台线程润色，完成后回填工单（不阻塞主流程）。"""
         if self._wo_dao is None:
             return
         try:
+            clause_display = clause_text or "本次未匹配到具体规范条款"
             polished = self._llm.polish(
-                f"请用一线工人听得懂的大白话，提醒他注意火灾隐患并说明整改要求："
-                f"{hazard_desc}。规范：{clause_text}")
+                f"请用一线工人听得懂的大白话，提醒他注意动火作业安全："
+                f"隐患说明：{hazard_desc}；规范依据：{clause_display}；"
+                f"整改要求：{requirement}；处理时限：{deadline}。"
+                f"请严格依据以上信息组织语言，不要编造未给出的内容。"
+            )
             if polished:
                 self._wo_dao.update_notice(task_id, polished)
         except Exception:

@@ -90,9 +90,27 @@ def render_agents() -> None:
                 for d in dets:
                     st.caption(f"- {d.get('cls')} (conf {d.get('conf')})")
             elif agent == "rule":
-                comp = payload.get("compliance", [])
-                for c in comp:
-                    st.caption(f"- {c.get('label','')}: {c.get('verdict','')}")
+                if status != "success":
+                    err = payload.get("error") or node.get("error") or "未知异常"
+                    st.error(f"运行异常：{err}")
+                else:
+                    comp = payload.get("compliance", [])
+                    if not comp:
+                        st.info("作业票字段全部合规")
+                    for c in comp:
+                        verdict = c.get("verdict", "合规")
+                        label = c.get("label", "")
+                        clause = c.get("clause", "")
+                        icon = "✅" if verdict == "合规" else "❌"
+                        clause_text = f"（{clause}）" if clause else ""
+                        st.caption(
+                            f"{icon} {label}：{verdict}{clause_text}"
+                        )
+                tips = payload.get("training_tips") or []
+                if tips:
+                    st.markdown("**培训要点**")
+                    for tip in tips:
+                        st.caption(f"- {tip}")
             elif agent == "fusion":
                 st.write(f"风险等级：**{payload.get('risk_level','—')}**")
                 for r in payload.get("reasons", []):
