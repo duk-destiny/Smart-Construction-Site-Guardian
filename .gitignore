@@ -29,3 +29,6 @@ venv313/
 .idea/
 .vscode/
 *.log
+# 运行期临时日志（streamlit 启动重定向）
+streamlit.log
+streamlit.err

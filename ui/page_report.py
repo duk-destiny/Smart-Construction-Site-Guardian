@@ -101,12 +101,12 @@ def _render_history_list() -> None:
             st.write(f"**任务编号**：{row['task_id']}")
             st.write(f"**时间**：{ts}")
             st.write(f"**隐患描述**：{row['hazard_desc']}")
-            st.write(f"**违反规范**：{row.get('clause','')}")
-            st.write(f"**整改要求**：{row.get('requirement','')}")
+            st.write(f"**违反规范**：{row['clause']}")
+            st.write(f"**整改要求**：{row['requirement']}")
             st.write(f"**风险等级**：{level}")
             if row["override_level"]:
                 st.warning(f"人工改判 → {row['override_level']}（原因：{row['override_reason']}）")
-            st.info(f"💬 工人白话提示：{row.get('worker_notice','')}")
+            st.info(f"💬 工人白话提示：{row['worker_notice']}")
 
             # 查看检测详情
             if st.button("查看检测数据", key=f"detail_{row['task_id']}"):
@@ -123,7 +123,7 @@ def _render_history_list() -> None:
                 if comps:
                     st.caption(f"规范合规结果（{len(comps)} 条）")
                     for c in comps:
-                        st.write(f"- {c['verdict']} | {c.get('clause_text','')}")
+                        st.write(f"- {c['verdict']} | {c['clause_text']}")
 
 
 def render_report() -> None:
