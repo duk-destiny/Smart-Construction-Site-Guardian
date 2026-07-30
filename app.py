@@ -40,20 +40,21 @@ def main() -> None:
     if role == "admin":
         pages.append(st.Page(page_admin.render_admin, title="管理端", icon="⚙️"))
 
-    # 原生导航：切页不经过 st.rerun()，避免按钮方案下的全局模糊/高亮不同步
     pg = st.navigation(pages, position="sidebar")
-
-    with st.sidebar:
-        st.divider()
-        st.write(f"当前用户：{username}（{role}）")
-        if st.button("退出登录", use_container_width=True):
-            for k in ("role", "user_id", "username", "current_task_id",
-                      "permit_info", "_result", "_ran", "_rt_last",
-                      "_rt_frames", "_rt_violations", "_realtime_session"):
-                st.session_state.pop(k, None)
-            st.rerun()
-
     pg.run()
+
+    # 用户状态与退出放在主内容区顶部，不占用侧边栏，避免折叠冲突
+    _, right, _ = st.columns([1, 2, 1])
+    with right:
+        with st.container():
+            c1, c2 = st.columns([3, 1])
+            c1.caption(f"👤 {username}（{role}）")
+            if c2.button("🚪 退出", use_container_width=True, key="_logout_top"):
+                for k in ("role", "user_id", "username", "current_task_id",
+                          "permit_info", "_result", "_ran", "_rt_last",
+                          "_rt_frames", "_rt_violations", "_realtime_session"):
+                    st.session_state.pop(k, None)
+                st.rerun()
 
 
 if __name__ == "__main__":

@@ -3,14 +3,14 @@
 _THEME_CSS = """
 <style>
 :root {
-  --hz-bg: #0f172a;          /* 深蓝灰底 */
-  --hz-panel: #1e293b;       /* 面板 */
-  --hz-accent: #38bdf8;      /* 亮蓝强调 */
-  --hz-text: #e2e8f0;        /* 浅灰文字 */
-  --hz-muted: #94a3b8;       /* 次要文字 */
+  --hz-bg: #222531;          /* 侧边栏底 */
+  --hz-panel: #2c303c;       /* 面板/卡片 */
+  --hz-accent: #60a5fa;      /* 蓝紫强调 */
+  --hz-text: #e6e8ee;        /* 主文字 */
+  --hz-muted: #9299a8;       /* 次要文字 */
 }
-html, body, .stApp { background-color: #0b1220; color: var(--hz-text); }
-header[data-testid="stHeader"] { background-color: #0b1220; }
+html, body, .stApp { background-color: #1b1e27; color: var(--hz-text); }
+header[data-testid="stHeader"] { background-color: #1b1e27; }
 .stSidebar { background-color: var(--hz-bg); }
 div[data-testid="stToolbar"] { display: none; }
 
@@ -19,10 +19,10 @@ h1, h2, h3 { color: var(--hz-text); font-weight: 700; }
 
 /* 主按钮 */
 .stButton > button[data-baseweb="button"][kind="primary"] {
-  background-color: var(--hz-accent); color: #06283d; border: none; font-weight: 700;
+  background-color: var(--hz-accent); color: #10131c; border: none; font-weight: 700;
 }
 .stButton > button[data-baseweb="button"] {
-  border: 1px solid #334155; color: var(--hz-text); background: var(--hz-panel);
+  border: 1px solid #3d4250; color: var(--hz-text); background: var(--hz-panel);
 }
 .stButton > button[data-baseweb="button"]:hover { border-color: var(--hz-accent); }
 
