@@ -1,6 +1,7 @@
 """页面：检测历史与合规分析（B3/B4/B5/B6）。
 
-实时/上传检测记录的追踪、按日期筛选、合规率与类别命中统计（柱状/饼图）、CSV 导出。
+实时/上传检测记录的追踪、按日期筛选、合规率与类别命中统计（柱状图）、CSV 导出。
+查询结果使用 @st.cache_data 缓存，减少切页/重筛选时的加载时间。
 """
 from __future__ import annotations
 
@@ -9,9 +10,9 @@ import io
 
 import streamlit as st
 
+from core.compliance import LEVEL_LABEL
 from dao.db import get_conn, init_db
 from dao.models import DetectionRecordDAO
-from core.compliance import LEVEL_LABEL
 
 _CN = {
     "spark": "火花（动火明火）", "smoke": "烟雾（火情）", "no_helmet": "未佩戴安全帽",
@@ -22,11 +23,38 @@ _CN = {
 }
 
 
-def render_history() -> None:
-    st.title("📊 检测历史与合规分析")
+@st.cache_data(ttl=300)
+def _stats_by_date(start_s: str | None, end_s: str | None) -> list[dict]:
+    """按日聚合（缓存 5 分钟）。"""
     conn = get_conn()
     init_db(conn)
     dao = DetectionRecordDAO(conn)
+    return dao.stats_by_date(start_s, end_s)
+
+
+@st.cache_data(ttl=300)
+def _severity_breakdown(start_s: str | None, end_s: str | None) -> list[dict]:
+    """类别命中分布（缓存 5 分钟）。"""
+    conn = get_conn()
+    init_db(conn)
+    dao = DetectionRecordDAO(conn)
+    return dao.severity_breakdown(start_s, end_s)
+
+
+@st.cache_data(ttl=300)
+def _cached_query(
+    start_s: str | None, end_s: str | None,
+    severity: str | None, cls: str | None,
+) -> list[dict]:
+    """检测明细查询（缓存 5 分钟）。"""
+    conn = get_conn()
+    init_db(conn)
+    dao = DetectionRecordDAO(conn)
+    return dao.query(start_s, end_s, severity=severity, cls=cls)
+
+
+def render_history() -> None:
+    st.title("📊 检测历史与合规分析")
 
     c1, c2 = st.columns(2)
     with c1:
@@ -37,7 +65,7 @@ def render_history() -> None:
     end_s = end.isoformat() if end else None
 
     # ── 合规率趋势（B4）──
-    by_date = dao.stats_by_date(start_s, end_s)
+    by_date = _stats_by_date(start_s, end_s)
     if by_date:
         st.subheader("每日合规率趋势")
         rows = [{
@@ -64,12 +92,11 @@ def render_history() -> None:
             x="合规级别", y="帧数")
 
     # ── 类别命中分布（B4 柱状图）──
-    brk = dao.severity_breakdown(start_s, end_s)
+    brk = _severity_breakdown(start_s, end_s)
     if brk:
         st.subheader("隐患类别命中分布")
-        labels = {"critical": "不合规", "warning": "警告", "safe": "合规"}
         sev_rows = [{"类别": _CN.get(b["cls"], b["cls"]), "命中次数": b["cnt"]}
-                    for b in brk]
+                     for b in brk]
         st.bar_chart(sev_rows, x="类别", y="命中次数")
 
     # ── 明细列表 + 筛选（B5）──
@@ -77,8 +104,8 @@ def render_history() -> None:
     sev_filter = st.selectbox("按严重度筛选", ["全部", "critical", "warning", "safe"])
     sev_arg = None if sev_filter == "全部" else sev_filter
     cls_filter = st.text_input("按类别筛选（隐患键，可空）", "")
-    records = dao.query(start_s, end_s, severity=sev_arg,
-                        cls=cls_filter.strip() or None)
+    records = _cached_query(start_s, end_s, severity=sev_arg,
+                            cls=cls_filter.strip() or None)
 
     if records:
         # 导出 CSV（B6）
@@ -89,7 +116,7 @@ def render_history() -> None:
             w.writerow([r["created_at"], r["session_id"], r["scene_id"],
                         r["frame_status"], r["cls"], r["conf"], r["severity"]])
         st.download_button("⬇ 导出 CSV", buf.getvalue(),
-                          file_name="detection_records.csv", mime="text/csv")
+                           file_name="detection_records.csv", mime="text/csv")
 
         for r in records[:200]:
             tag = LEVEL_LABEL.get(r["severity"], r["severity"])
