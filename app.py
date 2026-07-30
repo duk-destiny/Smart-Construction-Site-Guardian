@@ -16,7 +16,11 @@ import ui.page_report as page_report
 import ui.page_upload as page_upload
 import ui.theme as theme
 
-st.set_page_config(page_title="海之子·动火安全智能体", layout="wide")
+st.set_page_config(
+    page_title="海之子·动火安全智能体",
+    layout="wide",
+    initial_sidebar_state="expanded",
+)
 theme.apply_theme()
 
 

@@ -12,7 +12,10 @@ _THEME_CSS = """
 html, body, .stApp { background-color: #1b1e27; color: var(--hz-text); }
 header[data-testid="stHeader"] { background-color: #1b1e27; }
 .stSidebar { background-color: var(--hz-bg); }
-div[data-testid="stToolbar"] { display: none; }
+
+/* 只隐藏 Deploy/Settings 等无关按钮，保留侧边栏展开/折叠按钮 */
+button[data-testid="baseButton-headerNoPadding"],
+button[kind="header"] { display: none; }
 
 /* 主标题 */
 h1, h2, h3 { color: var(--hz-text); font-weight: 700; }
