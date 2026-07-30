@@ -7,9 +7,11 @@ from __future__ import annotations
 import streamlit as st
 
 from agents.orchestrator import Orchestrator
+from core.compliance import evaluate
 from dao.db import get_conn, init_db
 from services.audit_service import AuditService
 from services.task_service import TaskService
+from ui.components import compliance_banner
 
 _STATUS_COLOR = {
     "success": "🟢", "degraded": "🟡", "failed": "🔴",
@@ -53,6 +55,16 @@ def render_agents() -> None:
     if not result:
         st.info("点击上方按钮运行研判")
         return
+
+    # 统一三级合规横幅（复用 realtime 的同款组件，保持双模式一致）
+    payload = result.get("payload", {}) if isinstance(result, dict) else {}
+    vision_payload = payload.get("vision", {})
+    vp = vision_payload.get("payload", {}) if isinstance(vision_payload, dict) else {}
+    dets = vp.get("detections", []) if isinstance(vp, dict) else []
+    comp = evaluate(dets)
+    risk_level = payload.get("risk_level") or result.get("risk_level")
+    compliance_banner(comp, risk_level=risk_level,
+                      subtitle=f"检出目标 {len(dets)} 项")
 
     # 顶部进度条
     prog = ts.get_progress(task_id)

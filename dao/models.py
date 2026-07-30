@@ -195,3 +195,82 @@ class KbDocDAO:
     def list_all(self):
         return self.conn.execute(
             "SELECT * FROM kb_docs ORDER BY created_at DESC").fetchall()
+
+
+class DetectionRecordDAO:
+    """实时/上传检测记录写入与历史查询（B3）。"""
+
+    def __init__(self, conn: sqlite3.Connection) -> None:
+        self.conn = conn
+
+    def bulk_insert(self, session_id: str, frame_status: str,
+                   rows: list[dict], mode: str = "realtime") -> None:
+        """写入一帧的检测项；rows: [{"scene_id","cls","conf","severity"}, ...]。"""
+        if not rows:
+            # 仍记录一帧"无违规"占位，保证合规率统计口径完整
+            rows = [{"scene_id": None, "cls": "none", "conf": 1.0, "severity": "safe"}]
+        data = [(
+            _new_id("r"), session_id, r.get("scene_id"), mode, frame_status,
+            r["cls"], r.get("conf"), r.get("severity"),
+        ) for r in rows]
+        self.conn.executemany(
+            "INSERT INTO detection_records"
+            "(id,session_id,scene_id,mode,frame_status,cls,conf,severity,created_at) "
+            "VALUES(?,?,?,?,?,?,?,?,datetime('now'))", data)
+        self.conn.commit()
+
+    def query(self, start: str | None = None, end: str | None = None,
+              severity: str | None = None, cls: str | None = None) -> list:
+        """按日期范围/严重度/类别查询（B5 日期筛选）。"""
+        sql = "SELECT * FROM detection_records WHERE 1=1"
+        params: list = []
+        if start:
+            sql += " AND created_at >= ?"
+            params.append(start)
+        if end:
+            sql += " AND created_at <= ?"
+            params.append(end + " 23:59:59")
+        if severity:
+            sql += " AND severity = ?"
+            params.append(severity)
+        if cls:
+            sql += " AND cls = ?"
+            params.append(cls)
+        sql += " ORDER BY created_at DESC"
+        return self.conn.execute(sql, params).fetchall()
+
+    def stats_by_date(self, start: str | None = None, end: str | None = None) -> list:
+        """按日聚合：检测总次数、各合规级别帧数（B4 合规率趋势）。"""
+        sql = """
+            SELECT date(created_at) AS day,
+                   COUNT(DISTINCT session_id || '|' || created_at) AS frames,
+                   SUM(CASE WHEN frame_status='不合规' THEN 1 ELSE 0 END) AS non_compliant,
+                   SUM(CASE WHEN frame_status='警告' THEN 1 ELSE 0 END) AS warning,
+                   SUM(CASE WHEN frame_status='合规' THEN 1 ELSE 0 END) AS compliant
+            FROM detection_records WHERE 1=1
+        """
+        params: list = []
+        if start:
+            sql += " AND created_at >= ?"
+            params.append(start)
+        if end:
+            sql += " AND created_at <= ?"
+            params.append(end + " 23:59:59")
+        sql += " GROUP BY day ORDER BY day"
+        return self.conn.execute(sql, params).fetchall()
+
+    def severity_breakdown(self, start: str | None = None, end: str | None = None) -> list:
+        """各类别命中次数（B4 柱状图）。"""
+        sql = """
+            SELECT cls, COUNT(*) AS cnt FROM detection_records
+            WHERE cls <> 'none'
+        """
+        params: list = []
+        if start:
+            sql += " AND created_at >= ?"
+            params.append(start)
+        if end:
+            sql += " AND created_at <= ?"
+            params.append(end + " 23:59:59")
+        sql += " GROUP BY cls ORDER BY cnt DESC"
+        return self.conn.execute(sql, params).fetchall()

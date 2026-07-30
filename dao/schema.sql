@@ -74,6 +74,19 @@ CREATE TABLE IF NOT EXISTS audit_logs (
     created_at  TEXT NOT NULL
 );
 
+-- 实时检测记录（B3）：每帧每个检测项一行，用于历史追踪/合规率统计/日期筛选
+CREATE TABLE IF NOT EXISTS detection_records (
+    id          TEXT PRIMARY KEY,
+    session_id  TEXT NOT NULL,            -- 一次实时监测会话（进入页面生成）
+    scene_id    TEXT,                     -- 来源场景（construction_ppe/hot_work）
+    mode        TEXT NOT NULL DEFAULT 'realtime',  -- realtime / upload
+    frame_status TEXT NOT NULL,           -- 该帧三级合规：合规/警告/不合规
+    cls         TEXT NOT NULL,            -- 项目隐患键
+    conf        REAL,
+    severity    TEXT,                     -- safe/warning/critical
+    created_at  TEXT NOT NULL
+);
+
 -- 规范文档登记
 CREATE TABLE IF NOT EXISTS kb_docs (
     id           TEXT PRIMARY KEY,
@@ -91,6 +104,9 @@ CREATE INDEX IF NOT EXISTS idx_risks_task        ON risks(task_id);
 CREATE INDEX IF NOT EXISTS idx_workorders_task   ON work_orders(task_id);
 CREATE INDEX IF NOT EXISTS idx_audit_user_time   ON audit_logs(user_id, created_at);
 CREATE INDEX IF NOT EXISTS idx_kbdocs_name       ON kb_docs(filename);
+CREATE INDEX IF NOT EXISTS idx_detrec_session     ON detection_records(session_id);
+CREATE INDEX IF NOT EXISTS idx_detrec_time        ON detection_records(created_at);
+CREATE INDEX IF NOT EXISTS idx_detrec_cls         ON detection_records(cls);
 
 -- 触发器：禁止更新审计日志
 CREATE TRIGGER IF NOT EXISTS trg_audit_no_update

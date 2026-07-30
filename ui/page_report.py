@@ -7,9 +7,11 @@ import streamlit as st
 
 from dao.db import get_conn, init_db
 from dao.models import WorkOrderDAO, RiskDAO
+from core.compliance import evaluate
 from services.audit_service import AuditService
 from services.export_service import ExportService
 from services.task_service import TaskService
+from ui.components import compliance_banner
 
 RISK_EMOJI = {"重大": "🔴", "较大": "🟠", "一般": "🟡", "低": "🟢"}
 
@@ -17,6 +19,14 @@ RISK_EMOJI = {"重大": "🔴", "较大": "🟠", "一般": "🟡", "低": "🟢
 def _show_work_order(payload: dict, task_id: str) -> None:
     """渲染单个工单详情卡片。"""
     wo = payload.get("work_order") or {}
+    # 统一三级合规横幅（基于视觉检测结果，与实时态一致）
+    vision_payload = payload.get("vision", {})
+    vp = vision_payload.get("payload", {}) if isinstance(vision_payload, dict) else {}
+    dets = vp.get("detections", []) if isinstance(vp, dict) else []
+    comp = evaluate(dets)
+    compliance_banner(comp, risk_level=payload.get("risk_level"),
+                      subtitle=f"检出目标 {len(dets)} 项")
+
     st.subheader("整改工单")
     st.caption(f"任务编号：{task_id}")
     st.write(f"**隐患描述**：{wo.get('hazard_desc','')}")

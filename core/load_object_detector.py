@@ -45,10 +45,16 @@ class LoadObjectDetector:
 
     def _detect_loads(self, img_path: str):
         """返回 (原图 BGR, [(bbox[x,y,w,h], conf), ...])，仅含 Load 类。"""
-        net = self._ensure_net()
         img = cv2.imread(img_path)
         if img is None:
             return None, []
+        return self._detect_loads_frame(img)
+
+    def _detect_loads_frame(self, img: np.ndarray):
+        """对 numpy BGR 帧检测堆放物，返回 [(bbox[x,y,w,h], conf), ...]（仅 Load 类）。"""
+        net = self._ensure_net()
+        if img is None or img.size == 0:
+            return []
         h, w = img.shape[:2]
         blob = cv2.dnn.blobFromImage(img, 1 / 255.0, (self.input_size, self.input_size),
                                      (0, 0, 0), True, crop=False)
@@ -76,7 +82,7 @@ class LoadObjectDetector:
                 name = self._classes[cls_ids[i]] if self._classes else "Load"
                 if name.strip().lower() == "load":
                     loads.append((boxes[i], confs[i]))
-        return img, loads
+        return loads
 
     @staticmethod
     def _assess_tilt(crop: np.ndarray, std_thres: float) -> bool:
@@ -102,14 +108,21 @@ class LoadObjectDetector:
 
     def detect_and_assess(self, img_path: str) -> list[dict]:
         """对单图检测堆放物并判定倾斜，返回检测结果列表。"""
-        img, loads = self._detect_loads(img_path)
+        img = cv2.imread(img_path)
         if img is None:
             return []
+        return self.detect_and_assess_frame(img)
+
+    def detect_and_assess_frame(self, frame: np.ndarray) -> list[dict]:
+        """对单帧（numpy BGR）检测堆放物并判定倾斜，返回检测结果列表。"""
+        if frame is None or frame.size == 0:
+            return []
+        loads = self._detect_loads_frame(frame)
         detections: list[dict] = []
         for (x, y, w, h), conf in loads:
-            cy0, cy1 = max(0, y), min(img.shape[0], y + h)
-            cx0, cx1 = max(0, x), min(img.shape[1], x + w)
-            crop = img[cy0:cy1, cx0:cx1]
+            cy0, cy1 = max(0, y), min(frame.shape[0], y + h)
+            cx0, cx1 = max(0, x), min(frame.shape[1], x + w)
+            crop = frame[cy0:cy1, cx0:cx1]
             tilted = self._assess_tilt(crop, self.tilt_std_thres)
             cls = "load_object_tilted" if tilted else "load_object"
             detections.append({

@@ -9,18 +9,24 @@ import streamlit as st
 
 import ui.page_agents as page_agents
 import ui.page_admin as page_admin
+import ui.page_history as page_history
 import ui.page_login as page_login
+import ui.page_realtime as page_realtime
 import ui.page_report as page_report
 import ui.page_upload as page_upload
+import ui.theme as theme
 
 st.set_page_config(page_title="海之子·动火安全智能体", layout="wide")
+theme.apply_theme()
 
 # 站点导航（仅登录后显示）
 NAV = {
     "login": ("登录", page_login.render_login),
     "upload": ("上传与作业票", page_upload.render_upload),
+    "realtime": ("实时摄像头监测", page_realtime.render_realtime),
     "agents": ("多Agent研判", page_agents.render_agents),
     "report": ("工单/改判/导出", page_report.render_report),
+    "history": ("检测历史与分析", page_history.render_history),
     "admin": ("管理端", page_admin.render_admin),
 }
 
@@ -33,7 +39,8 @@ def main() -> None:
         return
 
     role = st.session_state["role"]
-    options: list[str] = ["upload", "agents", "report"] + (["admin"] if role == "admin" else [])
+    options: list[str] = ["upload", "realtime", "agents", "report", "history"] \
+        + (["admin"] if role == "admin" else [])
     current_page = st.session_state.get("page", "upload")
 
     # 侧边导航：用 button 替代 radio，消除 radio 组件双态切换导致的模糊/跳闪
