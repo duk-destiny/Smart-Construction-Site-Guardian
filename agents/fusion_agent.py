@@ -84,13 +84,26 @@ class FusionAgent(AgentBase):
 
         if matched_risks:
             risk_level = max(matched_risks, key=lambda r: RISK_ORDER.get(r, 0))
-        elif detections:
-            # 全部入误报或白名单外 → 无有效风险
-            risk_level = "低"
-            reasons.append("检出目标均判为误报或未纳入白名单")
         else:
-            risk_level = "低"
-            reasons.append("未检出违规目标")
+            # 无视觉命中时，检查作业票/规范侧是否已有不
+            # 合规字段 — 避免 Fusion 把规范判定的“作业
+            # 票不合规”降级为“低风险”（SRS 3.2.3 补丁）
+            non_compliant_fields = [
+                c.get("label", "") for c in compliance
+                if c.get("verdict") == "不合规"
+            ]
+            if non_compliant_fields:
+                risk_level = "一般"
+                reasons.append(
+                    f"作业票字段不合规（{'; '.join(non_compliant_fields)}），"
+                    "但影像未检出违规目标，请人工复核"
+                )
+            elif detections:
+                risk_level = "低"
+                reasons.append("检出目标均判为误报或未纳入白名单")
+            else:
+                risk_level = "低"
+                reasons.append("未检出违规目标")
 
         # 去重展示：多个同类检测框可能命中同一条 reason
         unique_reasons = []
