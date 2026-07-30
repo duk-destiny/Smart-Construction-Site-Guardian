@@ -52,14 +52,21 @@ class RuleAgent(AgentBase):
         related = self._rag.query(query_text, top_k=5)
 
         # 3. 违规项匹配规范条款
+        # 视觉 Agent 已检出的违规，直接判为不合规；RAG 仅用于补充条款引用。
         for vd in violation_descs:
-            matched = any(vd in r.get("clause_text", "") for r in related)
+            best_clause = ""
+            for r in related:
+                if vd in r.get("clause_text", ""):
+                    best_clause = r["clause_no"]
+                    break
+            if not best_clause and related:
+                best_clause = related[0]["clause_no"]
             compliance.append({
                 "field": "violation",
                 "label": vd,
                 "value": "",
-                "verdict": "不合规" if matched else "待核查",
-                "clause_ref": related[0]["clause_no"] if related else "",
+                "verdict": "不合规",
+                "clause_ref": best_clause,
             })
 
         # 4. 培训要点（取 top-3 条款 + 通用提示）
