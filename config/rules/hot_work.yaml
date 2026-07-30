@@ -9,10 +9,6 @@ matrix:
     risk: 重大
     reason: "明火作业且手续或监护不合规，属重大隐患，须立即停工"
   - detect: spark
-    compliance: 待核查          # 规范侧未直接匹配，需人工确认
-    risk: 较大
-    reason: "检出火花但规范侧暂未匹配条款，需人工复核后定级"
-  - detect: spark
     compliance: 合规
     risk: 一般
     reason: "有火花但手续齐全，提示人工复核即可"

@@ -132,9 +132,15 @@ class Orchestrator:
             }, error=None, cost_ms=0))
         self._push(task_id, "action", amsg.status, amsg.cost_ms)
 
-        # 整体降级判定
+        # 整体降级/失败判定：failed > degraded > success
+        failed = any(m.status == "failed" for m in (vout, rout, fmsg, amsg))
         degraded = any(m.status == "degraded" for m in (vout, rout, fmsg, amsg))
-        overall = "degraded" if degraded else "success"
+        if failed:
+            overall = "failed"
+        elif degraded:
+            overall = "degraded"
+        else:
+            overall = "success"
         return AgentMessage(
             task_id=task_id, agent="orchestrator", status=overall,
             payload={
