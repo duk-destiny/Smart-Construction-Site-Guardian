@@ -1,0 +1,33 @@
+# 施工 PPE / 危险检测风险融合矩阵
+# 视觉检测类别（白名单） × 规范合规结论 → 风险等级
+# 风险等级：低 < 一般 < 较大 < 重大
+
+matrix:
+  # 未佩戴安全帽：头部防护缺失，坠落/撞击高风险
+  - detect: no_helmet
+    compliance: 任何
+    risk: 较大
+    reason: "作业人员未佩戴安全帽，存在头部撞击/坠物伤害风险，须立即佩戴"
+
+  # 未穿反光衣：现场辨识度低，机械/车辆碰撞风险
+  - detect: no_vest
+    compliance: 任何
+    risk: 一般
+    reason: "作业人员未穿反光衣，现场可视性不足，须立即整改"
+
+  # 堆放物倾斜/不规范：坠落伤人或阻碍逃生
+  - detect: load_object_tilted
+    compliance: 任何
+    risk: 较大
+    reason: "检测到堆放物倾斜/不规范，存在坠落伤人与阻碍逃生风险，须立即整理加固"
+
+  # 堆放物（规范）：虽未判倾斜，仍提示关注
+  - detect: load_object
+    compliance: 任何
+    risk: 低
+    reason: "检测到堆放物，建议核查堆放稳定性与消防通道占用情况"
+
+# 误报过滤（施工场景暂无 spark 类，保留结构兼容）
+fp_filter:
+  spark_conf_min: 0.55
+  require_cross_validate: false

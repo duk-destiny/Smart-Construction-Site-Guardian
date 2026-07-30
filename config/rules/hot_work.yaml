@@ -1,0 +1,47 @@
+# 动火作业风险融合矩阵（LLD §3.1 具体化）
+# 视觉检测类别（白名单 4 类） × 规范合规结论 → 风险等级 + 误报过滤
+# 风险等级：低 < 一般 < 较大 < 重大
+
+matrix:
+  # 火花（明火）：最危险，无监护/无票即重大
+  - detect: spark
+    compliance: 不合规          # 无监火人 / 无作业票等
+    risk: 重大
+    reason: "明火作业且手续或监护不合规，属重大隐患，须立即停工"
+  - detect: spark
+    compliance: 待核查          # 规范侧未直接匹配，需人工确认
+    risk: 较大
+    reason: "检出火花但规范侧暂未匹配条款，需人工复核后定级"
+  - detect: spark
+    compliance: 合规
+    risk: 一般
+    reason: "有火花但手续齐全，提示人工复核即可"
+
+  # 未佩戴防护面罩：较严重防护缺失
+  - detect: face_shield
+    compliance: 任何
+    risk: 较大
+    reason: "未佩戴防护面罩，弧光/飞溅易致人员伤害，须立即整改"
+
+  # 灭火器配置缺失/不足：应急能力缺口
+  - detect: extinguisher
+    compliance: 任何
+    risk: 较大
+    reason: "灭火器配置缺失或不足，初期火灾无法及时扑灭"
+
+  # 周边易燃物未清理：一般隐患
+  - detect: flammable
+    compliance: 任何
+    risk: 一般
+    reason: "周边易燃物未清理，需现场立即移除"
+
+  # 烟雾（火情）：已发生阴燃/火情，最高风险
+  - detect: smoke
+    compliance: 任何
+    risk: 重大
+    reason: "检测到烟雾，表明已发生火灾或阴燃，须立即启动灭火并组织撤离"
+
+# 误报过滤（SRS 3.5）
+fp_filter:
+  spark_conf_min: 0.55          # spark 置信度低于此值判为光斑误报
+  require_cross_validate: true  # 单源视觉疑似火花须规范侧有对应要求才升级重大
