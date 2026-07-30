@@ -93,7 +93,7 @@ class YoloEngine:
     def infer(self, img_path: str) -> list[dict]:
         """对单张图片推理，返回映射后的检测结果列表。
 
-        Returns: [{"cls","conf","bbox":[cx,cy,w,h]}, ...]
+        Returns: [{"cls","conf","bbox":[cx,cy,w,h]}, ...]（坐标为模型输入空间）
         """
         if self.session is None:
             raise RuntimeError("YoloEngine 未加载权重，请先 load()")
@@ -103,12 +103,37 @@ class YoloEngine:
         raw = self.session.run(None, {self.input_name: blob})[0]  # [1, C, N]
         return self._decode(raw)
 
+    def infer_frame(self, frame: np.ndarray) -> list[dict]:
+        """对单帧（numpy BGR）推理，返回映射到原图坐标的检测结果。
+
+        实时摄像头态使用：坐标 [cx,cy,w,h] 已按原图尺寸还原，可直接绘图。
+        """
+        if self.session is None:
+            raise RuntimeError("YoloEngine 未加载权重，请先 load()")
+        if frame is None or frame.size == 0:
+            return []
+        h0, w0 = frame.shape[:2]
+        ih, iw = self.input_size
+        blob = self._preprocess_frame(frame)
+        raw = self.session.run(None, {self.input_name: blob})[0]  # [1, C, N]
+        dets = self._decode(raw)
+        # 将模型输入空间坐标还原到原图尺寸
+        sx, sy = w0 / iw, h0 / ih
+        for d in dets:
+            cx, cy, w, h = d["bbox"]
+            d["bbox"] = [round(cx * sx, 1), round(cy * sy, 1),
+                         round(w * sx, 1), round(h * sy, 1)]
+        return dets
+
     def _preprocess(self, img_path: str) -> np.ndarray:
         img = cv2.imread(img_path)
         if img is None:
             raise ValueError(f"图片读取失败: {img_path}")
+        return self._preprocess_frame(img)
+
+    def _preprocess_frame(self, frame: np.ndarray) -> np.ndarray:
         h, w = self.input_size
-        img = cv2.resize(img, (w, h))
+        img = cv2.resize(frame, (w, h))
         img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
         img = img.astype(np.float32) / 255.0
         blob = np.transpose(img, (2, 0, 1))[None, ...]  # [1,3,H,W]

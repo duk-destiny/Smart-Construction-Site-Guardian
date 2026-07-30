@@ -64,3 +64,20 @@ scenes:
       nms_thres: 0.4
       tilt_std_thres: 2.0
       input_size: 416
+
+# 三级合规严重度映射（数据驱动，C2）：键=项目隐患键，值=safe/warning/critical
+# 实时态与历史分析据此将检测项归并为 合规/警告/不合规。可在不改动代码的前提下调整分级。
+compliance:
+  severity:
+    spark: critical
+    smoke: critical
+    no_helmet: critical
+    face_shield: critical
+    extinguisher: critical
+    load_object_tilted: critical
+    flammable: warning
+    no_vest: warning
+    load_object: warning
+    helmet: safe
+    vest: safe
+    person: safe
