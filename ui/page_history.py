@@ -2,6 +2,10 @@
 
 实时/上传检测记录的追踪、按日期筛选、合规率与类别命中统计（柱状图）、CSV 导出。
 查询结果使用 @st.cache_data 缓存，减少切页/重筛选时的加载时间。
+
+注意：本页包含两个层级的数据——
+- 任务风险一览：来自 work_orders + risks（Agent 综合研判，值与报告页一致）
+- 检测明细：来自 detection_records（帧/目标级严重度，纯视觉，粒度更细）
 """
 from __future__ import annotations
 
@@ -12,7 +16,7 @@ import streamlit as st
 
 from core.compliance import LEVEL_LABEL
 from dao.db import get_conn, init_db
-from dao.models import DetectionRecordDAO
+from dao.models import DetectionRecordDAO, WorkOrderDAO
 
 _CN = {
     "spark": "火花（动火明火）", "smoke": "烟雾（火情）", "no_helmet": "未佩戴安全帽",
@@ -21,6 +25,8 @@ _CN = {
     "load_object": "堆放物", "load_object_tilted": "堆放物倾斜",
     "helmet": "佩戴安全帽", "vest": "穿着反光衣", "person": "人员",
 }
+
+RISK_EMOJI = {"重大": "🔴", "较大": "🟠", "一般": "🟡", "低": "🟢"}
 
 
 @st.cache_data(ttl=300)
@@ -53,6 +59,34 @@ def _cached_query(
     return dao.query(start_s, end_s, severity=severity, cls=cls)
 
 
+@st.cache_data(ttl=300)
+def _task_risks(start_s: str | None = None, end_s: str | None = None) -> list[dict]:
+    """任务级风险一览（缓存 5 分钟），与报告页同源。"""
+    import sqlite3
+
+    conn = get_conn()
+    init_db(conn)
+    sql = """
+        SELECT w.task_id, w.hazard_desc, w.risk_level AS wo_risk_level,
+               r.risk_level AS auto_level,
+               r.override_level, r.override_reason,
+               r.reasons_json,
+               w.created_at
+        FROM work_orders w
+        LEFT JOIN risks r ON r.task_id = w.task_id
+        WHERE 1=1
+    """
+    params: list = []
+    if start_s:
+        sql += " AND w.created_at >= ?"
+        params.append(start_s)
+    if end_s:
+        sql += " AND w.created_at <= ?"
+        params.append(end_s + " 23:59:59")
+    sql += " ORDER BY w.created_at DESC"
+    return conn.execute(sql, params).fetchall()
+
+
 def render_history() -> None:
     st.title("📊 检测历史与合规分析")
 
@@ -64,7 +98,36 @@ def render_history() -> None:
     start_s = start.isoformat() if start else None
     end_s = end.isoformat() if end else None
 
-    # ── 合规率趋势（B4）──
+    # ═══════════════════════════════════════════
+    # 任务风险一览（与报告页同源的任务级风险）
+    # ═══════════════════════════════════════════
+    task_rows = _task_risks(start_s, end_s)
+    if task_rows:
+        st.subheader("🔍 任务风险一览（Agent 综合研判，与整改工单页一致）")
+        for row in task_rows:
+            level = row["override_level"] or row["auto_level"] or row["wo_risk_level"] or "—"
+            emoji = RISK_EMOJI.get(level, "⚪")
+            desc = (row["hazard_desc"] or "")[:50]
+            if len(row["hazard_desc"] or "") > 50:
+                desc += "…"
+            override_tag = " ✎已改判" if row["override_level"] else ""
+            label = f"{emoji} [{level}]{override_tag}  {row['task_id']}  —  {desc}"
+            with st.expander(label):
+                st.write(f"**任务编号**：{row['task_id']}")
+                st.write(f"**风险等级**：{level}")
+                st.write(f"**隐患描述**：{row['hazard_desc'] or '—'}")
+                st.write(f"**时间**：{row['created_at']}")
+                if row["override_level"]:
+                    st.warning(f"人工改判 → {row['override_level']}"
+                               f"（原因：{row['override_reason']}）")
+    else:
+        st.info("暂无任务风险记录")
+
+    st.divider()
+
+    # ═══════════════════════════════════════════
+    # 合规率趋势（B4）
+    # ═══════════════════════════════════════════
     by_date = _stats_by_date(start_s, end_s)
     if by_date:
         st.subheader("每日合规率趋势")
@@ -99,10 +162,21 @@ def render_history() -> None:
                      for b in brk]
         st.bar_chart(sev_rows, x="类别", y="命中次数")
 
-    # ── 明细列表 + 筛选（B5）──
-    st.subheader("检测明细")
-    sev_filter = st.selectbox("按严重度筛选", ["全部", "critical", "warning", "safe"])
-    sev_arg = None if sev_filter == "全部" else sev_filter
+    # ═══════════════════════════════════════════
+    # 检测明细（B5）— 帧/目标级严重度
+    # ═══════════════════════════════════════════
+    st.subheader("检测明细（帧/目标级）")
+    st.caption("💡 以下为每帧每个检测目标的级别，粒度比上方的任务风险更细。"
+               "任务风险「重大」≠ 每一帧都违规，反之亦然。")
+
+    SEV_CN = {"critical": "不合规", "warning": "警告", "safe": "合规"}
+    sev_filter = st.selectbox("按目标级别筛选",
+                              ["全部", "critical（不合规）", "warning（警告）", "safe（合规）"])
+    if "（" in sev_filter:
+        sev_arg = sev_filter.split("（")[0]  # 提取原始键
+    else:
+        sev_arg = None
+
     cls_filter = st.text_input("按类别筛选（隐患键，可空）", "")
     records = _cached_query(start_s, end_s, severity=sev_arg,
                             cls=cls_filter.strip() or None)
@@ -111,17 +185,18 @@ def render_history() -> None:
         # 导出 CSV（B6）
         buf = io.StringIO()
         w = csv.writer(buf)
-        w.writerow(["时间", "会话", "场景", "合规级别", "类别", "置信度", "严重度"])
+        w.writerow(["时间", "会话", "场景", "帧合规级别", "类别", "置信度", "目标级别"])
         for r in records:
             w.writerow([r["created_at"], r["session_id"], r["scene_id"],
-                        r["frame_status"], r["cls"], r["conf"], r["severity"]])
+                        r["frame_status"], r["cls"], r["conf"],
+                        SEV_CN.get(r["severity"], r["severity"])])
         st.download_button("⬇ 导出 CSV", buf.getvalue(),
                            file_name="detection_records.csv", mime="text/csv")
 
         for r in records[:200]:
-            tag = LEVEL_LABEL.get(r["severity"], r["severity"])
-            st.caption(f"{r['created_at']} ｜ {r['scene_id']} ｜ "
-                       f"{r['frame_status']} ｜ {_CN.get(r['cls'], r['cls'])} "
-                       f"({r['conf']:.2f})")
+            sev_cn = SEV_CN.get(r["severity"], r["severity"])
+            st.caption(f"{r['created_at']} ｜ {r['scene_id'] or '—'} ｜ "
+                       f"帧{r['frame_status']} ｜ {_CN.get(r['cls'], r['cls'])} "
+                       f"({r['conf']:.2f}) ｜ 目标级别：{sev_cn}")
     else:
-        st.info("暂无记录")
+        st.info("暂无检测记录")
