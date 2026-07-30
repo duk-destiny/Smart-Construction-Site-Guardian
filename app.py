@@ -34,12 +34,21 @@ def main() -> None:
     role = st.session_state["role"]
     username = st.session_state.get("username", "未知用户")
 
+    # _nav_page：从 page_upload / page_agents 写入，驱动 st.navigation 显示目标页
+    target_page = st.session_state.pop("_nav_page", None)
+    default_page = target_page or "upload"
+
     pages: list[st.Page] = [
-        st.Page(page_upload.render_upload, title="上传与作业票", icon="📤", default=True),
-        st.Page(page_realtime.render_realtime, title="实时摄像头监测", icon="📷"),
-        st.Page(page_agents.render_agents, title="多Agent研判", icon="🤖"),
-        st.Page(page_report.render_report, title="工单/改判/导出", icon="📋"),
-        st.Page(page_history.render_history, title="检测历史与分析", icon="📊"),
+        st.Page(page_upload.render_upload, title="上传与作业票", icon="📤",
+                default=(default_page == "upload")),
+        st.Page(page_realtime.render_realtime, title="实时摄像头监测", icon="📷",
+                default=(default_page == "realtime")),
+        st.Page(page_agents.render_agents, title="多Agent研判", icon="🤖",
+                default=(default_page == "agents")),
+        st.Page(page_report.render_report, title="工单/改判/导出", icon="📋",
+                default=(default_page == "report")),
+        st.Page(page_history.render_history, title="检测历史与分析", icon="📊",
+                default=(default_page == "history")),
     ]
     if role == "admin":
         pages.append(st.Page(page_admin.render_admin, title="管理端", icon="⚙️"))

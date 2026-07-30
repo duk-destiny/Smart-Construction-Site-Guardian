@@ -106,5 +106,5 @@ def render_agents() -> None:
 
     if st.button("查看工单 / 改判 / 导出 →"):
         st.session_state["report_result"] = result
-        st.session_state["page"] = "report"
+        st.session_state["_nav_page"] = "report"
         st.rerun()
