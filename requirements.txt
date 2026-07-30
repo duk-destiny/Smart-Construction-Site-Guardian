@@ -1,0 +1,18 @@
+# 海之子·动火安全多Agent智能体 依赖清单（离线部署，无云端 SDK）
+# 注意：实际环境为 Python 3.14，以下为验证可用的版本（不锁死，用 >= 下限兼容）
+streamlit>=1.60.0
+onnxruntime>=1.27.0
+chromadb>=1.5.9
+sentence-transformers>=5.6.0
+pymupdf>=1.28.0
+openpyxl>=3.1.5
+bcrypt>=5.0.0
+opencv-python-headless>=4.13.0
+pyyaml>=6.0.3
+pytest>=8.4.2
+fpdf2>=2.8.7          # 仅测试用：生成含中文的样例 PDF
+# ultralytics：YOLO pt→ONNX 转换时使用（转换脚本 scripts/convert_yolo.py），推理阶段用 onnxruntime 即可
+ultralytics>=8.4.110
+# 本地推理栈（bge 用，仅在构建/查询知识库时加载）
+torch>=2.13.0
+torchvision>=0.28.0
