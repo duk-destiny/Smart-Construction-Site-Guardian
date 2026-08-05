@@ -43,6 +43,15 @@ def main() -> None:
     except Exception:
         pass
 
+    # 后台预热 LLM：ollama 独立进程加载 qwen3:8b 并 keep_alive 常驻内存，
+    # 之后工单润色全走热调用（冷启 11s→热 3s）；best-effort、进程内只跑一次、不阻塞首屏
+    try:
+        import threading as _threading
+        from core.llm_engine import LlmEngine as _Llm
+        _threading.Thread(target=_Llm().warmup, daemon=True).start()
+    except Exception:
+        pass
+
     # 后台 RTSP 自动轮询监控：按 config monitor.* 自动启动（幂等，未启用则跳过）
     try:
         from services import monitor_service

@@ -24,3 +24,6 @@ data/streamlit*
 plugins
 docs
 .github
+# 大模型经 volume 挂载，不烤进镜像
+data/models/BAAI--bge-small-zh-v1.5
+data/models/Qwen2.5-0.5B-Instruct

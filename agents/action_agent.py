@@ -75,11 +75,19 @@ class ActionAgent(AgentBase):
         else:
             hazard_desc = "检测到动火作业安全隐患"
 
-        # 违反规范条款：取 RAG 命中的首条 clause
+        # 违反规范条款：优先用 RAG 命中的条款原文（管理员上传 PDF 的真实内容），
+        # 编号作锚点；只传"第X条"光编号会让 LLM 凭训练知识编造法规名（安全系统硬伤）
         clause_text = ""
         for c in compliance:
-            if c.get("verdict") in ("不合规", "待核查") and c.get("clause_ref"):
-                clause_text = f"第{c['clause_ref']}条"
+            if c.get("verdict") in ("不合规", "待核查") and (c.get("clause_ref") or c.get("clause_text")):
+                ct = (c.get("clause_text") or "").strip()
+                cn = (c.get("clause_ref") or c.get("clause_no") or "").strip()
+                if ct and cn:
+                    clause_text = f"第{cn}条：{ct}"
+                elif ct:
+                    clause_text = ct
+                elif cn:
+                    clause_text = f"第{cn}条"
                 break
         if not clause_text and training_tips:
             clause_text = training_tips[0][:60]
@@ -144,7 +152,7 @@ class ActionAgent(AgentBase):
             clause_display = clause_text or "本次未匹配到具体规范条款"
             polished = self._llm.polish(
                 f"请用一线工人听得懂的大白话，提醒他注意动火作业安全："
-                f"隐患说明：{hazard_desc}；规范依据：{clause_display}；"
+                f"隐患说明：{hazard_desc}；规范依据（条款原文，勿增改、勿编造法规名称）：{clause_display}；"
                 f"整改要求：{requirement}；处理时限：{deadline}。"
                 f"请严格依据以上信息组织语言，不要编造未给出的内容。"
             )

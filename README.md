@@ -16,6 +16,7 @@
 - **告警生命周期 + 外部推送**：高危帧自动创建告警事件、证据截图留存、异步推送到企业微信/钉钉/通用 Webhook，按 `(source, cls)` 冷却去重。
 - **模型版本管理**：版本注册、新旧指标对比、一键切换（管理端 UI）。
 - **工程化**：服务层权限校验、审计日志、统一测试/启动脚本、Docker 容器化、GitHub Actions CI。
+- **内建自检与演示模式**：系统自检页一键跑全链路清单（模型/源/webhook/DB/假告警→推送）；notify 演示模式免 webhook 回环捕获；视频源支持 `demo://` 合成帧，无 key/无摄像头即可自检。
 
 ## 系统架构
 
@@ -49,7 +50,7 @@ flowchart LR
     A --> N["异步外部推送 Webhook"]
 ```
 
-- 实时态只做 检测 → 规则合规 → 告警，**不调用 RAG / 不生成工单**，满足低延迟连续监测；
+- 实时态决策链 检测 → 规则合规 → 告警 全程纯规则，**不调用 RAG / LLM、不生成工单**；告警当帧即出，告警落库后异步回填规范条款（非阻塞、不进决策路径），满足低延迟连续监测；
 - 首帧 `critical` 当帧出红框、声音与告警事件，无多帧确认门控；
 - IoU 跟踪分配稳定 ID 与连续帧数（仅作元数据，不阻塞告警）；
 - 同源同类短时间重复告警按冷却自动去重，持续违规可周期性再报。
@@ -265,24 +266,22 @@ docker compose run --rm app python -m pytest tests -q --tb=short -p no:cacheprov
 - 复用现有训练流水线 `prepare_combined_dataset → train_combined → export → register → switch`，每新增一场景对应一份 `scenes.<scene>` + `config/rules/<scene>.yaml` + 知识库集合。
 
 ### 链路与工程闭环
-- **处置 Agent LLM 接线**：当前 `work_order_dao` 未注入 `ActionAgent`，导致本地 LLM 润色为死代码、工单提示恒为模板；接上 DAO 后工单提示可升级为润色文案；
 - **上传研判异步化**：引入后台执行器 + 进度轮询，主线程提交即返回，进度从「事后轨迹」变为「真·实时」；
 
 ### RAG 知识库与文档解析
 - 当前 RAG 仅接受**文本型 PDF**（`core/pdf_parser.py` 经 PyMuPDF `get_text` 抽取，无 OCR），扫描件/图片型 PDF 抽出为空、无法入库；
 - 扩展加 **OCR 预处理层**（PaddleOCR 或 Tesseract）先对扫描件做文字识别，再走现有条款切分 + 向量入库流水线；
 - 扩展**格式归一化层**：`docx`/`doc`/`txt`/`md` 等非 PDF 文档统一转纯文本后入向量库，`import_pdf` 接口泛化为 `import_doc`；
-- 条款号正则（`第X条`/`X.X.X`/`一、`）对非法规体例文档命中率低，需补充章节标题/段落启发式切分策略。
 
 ### 其他
 - **命名收口**：当前名称「动火作业安全」仅覆盖一道工序，随场景扩展往「建筑施工安全」方向收敛，动火作为子场景；
-- **告警事件 → 异步 Agent 增强**：高危告警状态跃迁时后台补跑 RAG 条款 + LLM 处置建议回写告警记录，不阻塞实时帧；
 - **RTSP 采样与告警 SLA**：火情关键源 `monitor.interval_sec` 建议 ≤3s，必要时改连续抓帧入队模型，明确「采样节奏 ≠ 告警 SLA」。
 ## 部署注意
 
-- `.gitignore` 已忽略：`data/raw/`、`data/combined/`、`data/eval/`、`data/feedback_training/`、`data/runs_combined/`、`data/kb/chroma/`、`data/kb/*.pdf`、`data/uploads/`、`data/exports/`、`data/app.db*`、`__pycache__/`、`*.pyc`、`.venv313/`、`plugins/`、官方 `yolov8n.pt`/`yolov8s.pt` 及 `data/models/BAAI--bge-small-zh-v1.5/`。
+- `.gitignore` 已忽略：`data/raw/`、`data/combined/`、`data/eval/`、`data/feedback_training/`、`data/runs_combined/`、`data/kb/chroma/`、`data/kb/*.pdf`、`data/uploads/`、`data/exports/`、`data/app.db*`、`__pycache__/`、`*.pyc`、`.venv313/`、`plugins/`、官方 `yolov8n.pt`/`yolov8s.pt` 及 `data/models/BAAI--bge-small-zh-v1.5/`、`data/models/Qwen2.5-0.5B-Instruct/`。
 - 仅小体积推理权重（`.onnx`/`.weights`/`.cfg`/`.names`）纳入版本库；大模型 Embedding（`BAAI--bge-small-zh-v1.5`）与原始数据集需另行分发，勿入库。
 - 知识库（RAG）需联网或本地模型首次构建后离线可用；实时监测态不依赖知识库。
+- LLM 润色走 ollama `qwen3:8b`（独立进程，异步润色不进主链路）；app 启动后台预热一次 + 每次 `keep_alive=30m` 常驻，规避 5.2GB 模型反复冷启；断网/不可用自动降级为模板工单。
 
 ## 技术栈
 
