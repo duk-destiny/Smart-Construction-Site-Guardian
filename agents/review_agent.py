@@ -38,6 +38,12 @@ class ReviewAgent(AgentBase):
                     reasons.append(
                         f"规范条款未明确匹配：{item.get('label', '')}，建议人工补充依据")
 
+        # 作业票不合规但影像未检出可直接定级的违规目标：
+        # 证据不足，需人工复核（闭环 fusion「请人工复核」提示，SRS 3.2.3）
+        permit_noncompliant = any(c.get("verdict") == "不合规" for c in compliance)
+        if permit_noncompliant and risk_level == "一般":
+            reasons.append("作业票不合规但影像未检出违规目标，证据不足，建议人工复核")
+
         msg.status = "success"
         msg.payload = {
             "needs_review": bool(reasons),

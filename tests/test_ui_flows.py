@@ -180,3 +180,90 @@ page.render_realtime()
     assert "后台轮询未启动" in text
     assert any(b.label == "启动后台轮询" for b in at.button)
     assert any(b.label == "抓取全部源" for b in at.button)
+
+def test_admin_model_version_dropdown_switches_and_syncs_config(tmp_path):
+    """管理端「模型版本与回滚」下拉框：选历史版本→一键切换→回写 config + DB 翻转。"""
+    import shutil
+    import sqlite3
+    db_file = tmp_path / "hzz_model.db"
+    cfg_copy = tmp_path / "config_copy.yaml"
+    # 复制真实 config 作为隔离写入目标（_sync_config_path 的正则才能命中 v2→v3）
+    shutil.copy2(os.path.join(ROOT, "config", "config.yaml"), cfg_copy)
+
+    source = f"""
+import os, sys
+sys.path.insert(0, {ROOT!r})
+os.chdir({ROOT!r})
+import streamlit as st
+import ui.page_admin as page
+import services.model_service as _ms
+from dao.db import get_conn, init_db
+from services.model_service import ModelService
+
+_ui_db = {str(db_file)!r}
+_cfg_copy = {str(cfg_copy)!r}
+
+# 隔离 config 写入：_sync_config_path 读/写都落到临时副本，不碰真实 config
+class _CL:
+    def __init__(self, path=None):
+        self._path = _cfg_copy
+_ms.ConfigLoader = _CL
+
+def _conn(db_path=None):
+    conn = get_conn(db_path or _ui_db)
+    init_db(conn)
+    return conn
+
+page.get_conn = _conn
+page.init_db = init_db
+page._reload_running_engines = lambda: None  # 避免在 AppTest 进程加载 ONNX/torch
+
+# 预置两个 fire 版本：v2 活跃、v3 备选
+# 仅在首次注册：AppTest 每次 at.run() 都会重跑整段脚本，不守门会产生重复行
+conn = _conn()
+_ms_local = ModelService(conn)
+if not [m for m in _ms_local.list_models()
+        if m["name"] == "fire" and m["version"] == "v3"]:
+    _ms_local.register(
+        name="fire", version="v2", path="data/models/yolov8_fire_smoke_v2.onnx",
+        mAP50=0.80, mAP50_95=0.55, active=True)
+    _ms_local.register(
+        name="fire", version="v3", path="data/models/yolov8_fire_smoke_v3.onnx",
+        mAP50=0.85, mAP50_95=0.60, active=False)
+conn.close()
+
+page.render_admin()
+"""
+    at = _run_script(tmp_path, source, session={
+        "role": "admin", "user_id": "u_admin", "username": "admin"})
+
+    # 1) 下拉框渲染，默认选中当前活跃版本 v2
+    sb = next((s for s in at.selectbox if s.key == "model_ver_sel_fire"), None)
+    assert sb is not None, "fire 版本下拉框未渲染"
+    assert sb.value == "v2", f"默认应选中活跃 v2，实际 {sb.value!r}"
+
+    # 2) 选 v3（非活跃）→ 出现「一键切换」按钮
+    sb.select("v3")
+    at.run(timeout=120)
+    assert not at.exception, [str(e) for e in at.exception]
+    btn = next((b for b in at.button
+                if "一键切换" in b.label and "fire" in b.label and "v3" in b.label), None)
+    assert btn is not None, "选中非活跃版本后未出现一键切换按钮"
+
+    # 3) 点击切换 → 临时 config 同步成 v3 + DB 翻转
+    btn.click()
+    at.run(timeout=120)
+    assert not at.exception, [str(e) for e in at.exception]
+
+    cfg_text = cfg_copy.read_text(encoding="utf-8")
+    assert "data/models/yolov8_fire_smoke_v3.onnx" in cfg_text, "config 未回写为 v3"
+    conn = sqlite3.connect(str(db_file))
+    conn.row_factory = sqlite3.Row
+    # 用 get_active 语义（active=1 + 最新）断言，避免重复行下 fetchone 命中旧行
+    active_fire = conn.execute(
+        "SELECT version, path FROM model_registry WHERE name='fire' AND active=1 "
+        "ORDER BY created_at DESC LIMIT 1"
+    ).fetchone()
+    assert active_fire and active_fire["version"] == "v3", "DB: 活跃 fire 未切到 v3"
+    assert active_fire["path"].endswith("yolov8_fire_smoke_v3.onnx"), "DB: 活跃路径非 v3"
+    conn.close()

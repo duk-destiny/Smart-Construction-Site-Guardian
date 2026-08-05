@@ -19,6 +19,7 @@ _MIGRATIONS: dict[str, list[tuple[str, str]]] = {
     "alarm_events": [
         ("image_path", "TEXT"),
         ("source", "TEXT"),
+        ("clause", "TEXT"),
     ],
     "feedback_samples": [
         ("image_path", "TEXT"),

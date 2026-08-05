@@ -35,6 +35,14 @@ def main() -> None:
     role = st.session_state["role"]
     username = st.session_state.get("username", "未知用户")
 
+    # 主线程预热 BGE 向量模型：Windows 下 onnxruntime 无法在守护线程首次初始化，
+    # 必须在主线程先加载一次，之后告警守护线程复用单例模型做条款 RAG 检索。
+    try:
+        from core.rag_engine import RagEngine
+        RagEngine.preload()
+    except Exception:
+        pass
+
     # 后台 RTSP 自动轮询监控：按 config monitor.* 自动启动（幂等，未启用则跳过）
     try:
         from services import monitor_service

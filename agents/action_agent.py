@@ -90,14 +90,8 @@ class ActionAgent(AgentBase):
         # 主链路：立即返回模板（同步、快速，计入 ≤8s）
         worker_notice = self._template(hazard_desc, clause_text, risk_level)
 
-        # 异步润色（LLD §5.1：不计入主链路耗时）
-        if self._llm.available() and msg.task_id:
-            threading.Thread(
-                target=self._polish_async,
-                args=(msg.task_id, hazard_desc, clause_text, requirement, deadline),
-                daemon=True,
-            ).start()
-
+        # 异步润色改为工单落库后由调用方触发 polish()，
+        # 避免在 work_orders 行写入前回填（update_notice 命中 0 行）
         work_order = {
             "risk_level": risk_level,
             "hazard_desc": hazard_desc,
@@ -120,6 +114,20 @@ class ActionAgent(AgentBase):
             },
         }
         return msg
+
+    def polish(self, task_id: str, hazard_desc: str, clause_text: str,
+               requirement: str, deadline: str) -> None:
+        """工单落库后调用：LLM 可用则异步润色工人提示并回填 DB（不阻塞主链路）。
+
+        必须在 work_orders.insert 之后触发，保证 update_notice 命中已有行。
+        """
+        if self._wo_dao is None or not self._llm.available() or not task_id:
+            return
+        threading.Thread(
+            target=self._polish_async,
+            args=(task_id, hazard_desc, clause_text, requirement, deadline),
+            daemon=True,
+        ).start()
 
     def _polish_async(
         self,

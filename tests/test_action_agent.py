@@ -46,9 +46,9 @@ class _FakeWoDao:
 
 
 def test_action_llm_polish_used():
-    """LLM 可用 → 异步线程润色并通过 work_order_dao.update_notice 回填空话提示。
+    """工单落库后调用 polish() → 异步润色并通过 work_order_dao.update_notice 回填。
 
-    主链路立即返回模板（worker_notice 为模板），润色在后台线程完成，
+    主链路 run() 只返回模板（快速、可计时）；润色在 polish() 后台线程完成，
     不计入主链路耗时（LLD §5.1）。
     """
     import time as _t
@@ -61,10 +61,15 @@ def test_action_llm_polish_used():
         },
         error=None, cost_ms=0,
     )
-    out = ActionAgent(llm=_FakeLlm("兄弟，动火记得戴面罩！"), work_order_dao=wo_dao).run(msg)
+    agent = ActionAgent(llm=_FakeLlm("兄弟，动火记得戴面罩！"), work_order_dao=wo_dao)
+    out = agent.run(msg)
     assert out.status == "success"
     # 主链路返回的是模板（快速、可计时）
     assert "隐患说明" in out.payload["worker_notice"]
+    # 工单落库后由调用方触发润色（模拟 save_result 之后的回填）
+    wo = out.payload["work_order"]
+    agent.polish("t2", wo["hazard_desc"], wo["clause"],
+                 wo["requirement"], wo["deadline"])
     # 后台润色线程完成后回填
     assert wo_dao._event.wait(timeout=5.0), "异步润色未触发 update_notice"
     assert wo_dao.captured[0] == "t2"

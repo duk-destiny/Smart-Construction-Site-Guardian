@@ -18,6 +18,24 @@ from services.training_service import TrainingService
 from ui.correction_workbench import render_target_corrections
 
 
+def _reload_running_engines() -> None:
+    # 模型切换后热加载：让实时页(@st.cache_resource)与后台监控的引擎重建引擎
+    # 列表，复用 _SESSIONS 会话缓存，无需重启进程即用上新 active 模型。
+    try:
+        from ui.page_realtime import _get_engine
+        _get_engine().reload()
+    except Exception:
+        pass
+    try:
+        from services.monitor_service import get_monitor
+        mon = get_monitor()
+        if mon is not None and getattr(mon, "engine", None) is not None:
+            mon.engine.reload()
+    except Exception:
+        pass
+
+
+
 @safe_page("管理端")
 def render_admin() -> None:
     st.title("🛠 管理端（仅管理员）")
@@ -130,6 +148,9 @@ def render_admin() -> None:
                 f"{alarm['scene_id'] or '—'} ｜ conf {alarm['conf'] or '—'} ｜ "
                 f"来源 {alarm['source'] or 'camera'}"
             )
+            _clause = alarm["clause"] if "clause" in alarm.keys() else None
+            if _clause:
+                st.caption(f"违反规范：{_clause}")
             img_path = alarm["image_path"]
             if img_path and os.path.exists(img_path):
                 st.image(img_path,
@@ -232,25 +253,52 @@ def render_admin() -> None:
     st.subheader("模型版本与回滚")
     ms = ModelService(conn)
     models = ms.list_models()
-    if models:
-        for m in models:
-            active_tag = " ｜ ✅ 当前" if m["active"] else ""
-            st.caption(
-                f"{m['name']} {m['version']}{active_tag} ｜ "
-                f"mAP50 {m['mAP50'] or '—'} ｜ mAP50-95 {m['mAP50_95'] or '—'} ｜ "
-                f"{m['path']}"
-            )
-            if not m["active"] and st.button(
-                "切换为当前版本", key=f"switch_model_{m['id']}"):
-                ms.switch(m["name"], m["id"])
-                AuditService(conn).append(
-                    st.session_state.get("user_id"), "switch_model",
-                    {"name": m["name"], "version": m["version"], "model_id": m["id"]})
-                st.success(f"已切换 {m['name']} 到 {m['version']}")
-                st.rerun()
-    else:
+    if not models:
         st.caption("暂无模型注册记录")
+    else:
+        # 按模型族分组（fire/ppe/...），每组一个版本下拉框 + 一键切换；
+        # 复用 ms.switch 回写 config + _reload_running_engines 热加载，形成闭环
+        families: dict = {}
+        for m in models:
+            families.setdefault(m["name"], []).append(m)
+        for name, rows in families.items():
+            rows = sorted(rows, key=lambda r: r["version"], reverse=True)
+            ver_to_row = {r["version"]: r for r in rows}
+            active = next((r for r in rows if r["active"]), None)
+            active_ver = active["version"] if active else rows[0]["version"]
+            versions = [r["version"] for r in rows]
 
+            def _fmt(ver, _rows=rows):
+                r = next((x for x in _rows if x["version"] == ver), None)
+                if r is None:
+                    return ver
+                tag = " ✅当前" if r["active"] else ""
+                return f"{ver}{tag}  | mAP50 {r['mAP50'] or '—'} | mAP50-95 {r['mAP50_95'] or '—'}"
+
+            default_idx = versions.index(active_ver) if active_ver in versions else 0
+            chosen_ver = st.selectbox(
+                f"{name}：选择版本",
+                options=versions,
+                format_func=_fmt,
+                index=default_idx,
+                key=f"model_ver_sel_{name}",
+            )
+            chosen = ver_to_row.get(chosen_ver)
+            if chosen:
+                st.caption(f"路径 {chosen['path']}")
+                if not chosen["active"]:
+                    if st.button(f"一键切换 {name} → {chosen['version']}",
+                                 key=f"switch_model_{name}"):
+                        ms.switch(name, chosen["id"])
+                        _reload_running_engines()  # 让运行中的实时/后台引擎热加载新模型
+                        AuditService(conn).append(
+                            st.session_state.get("user_id"), "switch_model",
+                            {"name": name, "version": chosen["version"],
+                             "model_id": chosen["id"]})
+                        st.success(f"已切换 {name} 到 {chosen['version']}")
+                        st.rerun()
+                else:
+                    st.caption("已是当前活跃版本")
     st.divider()
     st.subheader("复训与模型替换")
     train_svc = TrainingService()
@@ -350,6 +398,7 @@ def render_admin() -> None:
                     f"确认切换 {name} 到 {r.get('version')}",
                     key=f"apply_retrain_{name}_{r.get('version')}"):
                     ms.switch(name, existing[0]["id"])
+                    _reload_running_engines()  # 让运行中的实时/后台引擎热加载新模型
                     AuditService(conn).append(
                         st.session_state.get("user_id"), "switch_model",
                         {"name": name, "version": r.get("version"),
