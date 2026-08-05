@@ -48,12 +48,17 @@ def render_agents() -> None:
 
     if st.button("▶ 运行多Agent研判", type="primary") or st.session_state.get("_ran"):
         scene_id = st.session_state.get("scene", "hot_work")
-        orch = Orchestrator(progress_cb=ts.update_progress, scene_id=scene_id)
+        orch = Orchestrator(progress_cb=ts.update_progress, scene_id=scene_id,
+                            work_order_dao=ts.work_orders)
         result = orch.execute(task_id, images=images, permit_info=permit_info)
         st.session_state["_ran"] = True
         st.session_state["_result"] = result.to_dict()
         # 持久化研判结果到数据库（幂等，已有则跳过）
         ts.save_result(task_id, result.payload)
+        # 工单落库后触发异步润色（保证 update_notice 命中已有行；LLM 不可用则跳过）
+        _wo = result.payload.get("work_order") or {}
+        orch.action.polish(task_id, _wo.get("hazard_desc", ""), _wo.get("clause", ""),
+                           _wo.get("requirement", ""), _wo.get("deadline", ""))
         AuditService(conn).append(st.session_state.get("user_id"), "execute", {"task_id": task_id})
 
     result = st.session_state.get("_result")

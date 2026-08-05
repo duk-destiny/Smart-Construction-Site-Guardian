@@ -19,6 +19,10 @@ data/pytest_tmp/
 runs/
 plugins/
 
+# ===== 文档 =====
+# 设计规格/答辩材料等内部文档，不入仓
+docs/
+
 # ===== 模型权重 =====
 # 小模型（onnx/weights/cfg/names）随仓库提交，保证开箱即用
 # BAAI 嵌入大模型（数百 MB）忽略，赛前另行预置，详见 README

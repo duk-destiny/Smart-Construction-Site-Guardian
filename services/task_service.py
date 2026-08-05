@@ -8,6 +8,7 @@ import json
 import sqlite3
 import csv
 import io
+import threading
 
 from dao.models import (
     TaskDAO, RiskDAO, DetectionDAO, ComplianceDAO, WorkOrderDAO,
@@ -206,7 +207,65 @@ class TaskService:
         if path:
             self.attach_alarm_image(aid, path)
         self.notify_alarm(aid)
+        # 告警已落库+推送后，异步挂载规范条款（RAG 检索，无 LLM，不阻塞触发）
+        self._attach_clause_async(aid, scene_id, cls)
         return aid
+
+    def _attach_clause_async(self, alarm_id: str | None,
+                             scene_id: str | None, cls: str | None) -> None:
+        """告警已落库后异步挂载规范条款（RAG 检索，无 LLM，不阻塞告警触发）。
+
+        实时链路的唯一 AI 增强：告警当帧已响，条款秒级异步回填到同一 alarm_event。
+        决策段（detect→filter→track→evaluate→raise）仍是纯规则，此处不进任何 LLM。
+        检索侧加文档无关噪音过滤：丢弃含 URL / 数字标点占比过高 / 过短的块，取剩余最高分。
+        """
+        def _worker() -> None:
+            try:
+                if not alarm_id or not scene_id or not cls:
+                    return
+                from core.config import ConfigLoader
+                from core.rag_engine import RagEngine
+                from core.yolo_engine import WHITELIST_CN
+                kb = (ConfigLoader().get_scene(scene_id) or {}).get("kb_collection")
+                if not kb:
+                    return
+                desc = WHITELIST_CN.get(cls)
+                query = f"{desc} 不合规" if desc else "动火作业安全规范"
+                rows = RagEngine(collection_name=kb).query(query, top_k=5)
+                top = TaskService._pick_clause(rows)
+                if not top:
+                    return
+                no, text = top.get("clause_no", ""), top.get("clause_text", "")
+                clause = (f"第{no}条 {text}".strip()) if no else text
+                if clause:
+                    self.alarms.update_clause(alarm_id, clause)
+            except Exception:  # noqa: BLE001 条款挂载失败不影响告警
+                pass
+
+        threading.Thread(target=_worker, daemon=True).start()
+
+    @staticmethod
+    def _pick_clause(rows: list[dict]) -> dict | None:
+        """从 RAG 检索结果中剔除文档无关噪音，返回剩余最高分条款。
+
+        噪音判定：含 URL、数字/标点占比>60%、正文<8 字或无中文——通常是页眉页脚残片。
+        """
+        import re
+        best: dict | None = None
+        for r in rows:
+            text = (r.get("clause_text") or "").strip()
+            if len(text) < 8:
+                continue
+            if "http://" in text or "https://" in text:
+                continue
+            if not re.search(r"[一-鿿]", text):
+                continue
+            noise = len(re.findall(r"[\d\s，。、；：！？.\/:;,.!?]", text))
+            if noise / len(text) > 0.6:
+                continue
+            if best is None or (r.get("score", 0.0) > best.get("score", 0.0)):
+                best = r
+        return best
 
     def list_notification_logs(self, limit: int = 200) -> list:
         return self.notifications.list_all(limit=limit)

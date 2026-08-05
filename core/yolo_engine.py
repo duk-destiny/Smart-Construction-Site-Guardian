@@ -60,6 +60,31 @@ def _parse_names(meta_str: str | None) -> list[str] | None:
     return None
 
 
+# 进程级 ONNX 会话缓存：按 (绝对路径, intra_op上限) 复用 InferenceSession，
+# 避免离线任务链每任务重载同一权重（RealtimeEngine / VisionAgent / 自检页共享）。
+_SESSIONS: dict[tuple[str, int], "ort.InferenceSession"] = {}
+
+
+def _get_session(onnx_path: str, intra_op_threads: int | None) -> "ort.InferenceSession":
+    """按 (绝对路径, intra_op上限) 缓存并复用 InferenceSession。
+
+    多个 YoloEngine 实例加载同一权重时共享同一 InferenceSession（run() 线程安全），
+    省去每任务重读磁盘+重建会话的开销；不同 intra_op 上限视为不同会话（封顶是
+    创建期参数，不可跨 cap 复用，故 RealtimeEngine(cap=5) 与 VisionAgent(默认) 各占一槽）。
+    """
+    cap = int(intra_op_threads) if intra_op_threads and intra_op_threads > 0 else 0
+    key = (os.path.abspath(onnx_path), cap)
+    sess = _SESSIONS.get(key)
+    if sess is None:
+        so = ort.SessionOptions()
+        if cap > 0:
+            so.intra_op_num_threads = cap
+        sess = ort.InferenceSession(
+            onnx_path, so, providers=["CPUExecutionProvider"])
+        _SESSIONS[key] = sess
+    return sess
+
+
 class YoloEngine:
     """本地 YOLOv8 ONNX 推理引擎。"""
 
@@ -74,12 +99,17 @@ class YoloEngine:
         self.input_size: tuple[int, int] = (_DEFAULT_INPUT_SIZE, _DEFAULT_INPUT_SIZE)
         self.class_names: list[str] | None = None
 
-    def load(self, onnx_path: str) -> None:
-        """加载 ONNX 权重；文件缺失抛 FileNotFoundError（由上层转 failed）。"""
+    def load(self, onnx_path: str, intra_op_threads: int | None = None) -> None:
+        """加载 ONNX 权重；文件缺失抛 FileNotFoundError（由上层转 failed）。
+
+        intra_op_threads: 每个会话 intra-op 线程上限。多头并行时按 cpu//引擎数
+        分核，避免多个 InferenceSession 同时各吃满核导致抢核反而变慢；None/0=自动。
+        会话按 (绝对路径, intra_op上限) 进程级缓存，RealtimeEngine/VisionAgent/自检页
+        加载同一权重时复用，避免离线任务链每任务重载 ONNX（见 _get_session）。
+        """
         if not os.path.exists(onnx_path):
             raise FileNotFoundError(f"YOLO 权重缺失: {onnx_path}")
-        self.session = ort.InferenceSession(
-            onnx_path, providers=["CPUExecutionProvider"])
+        self.session = _get_session(onnx_path, intra_op_threads)
         self.input_name = self.session.get_inputs()[0].name
         # 读取模型真实输入尺寸（避免与训练/导出 imgsz 不一致，如 416 vs 640）
         shape = self.session.get_inputs()[0].shape

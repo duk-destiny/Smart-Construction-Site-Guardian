@@ -401,6 +401,14 @@ class AlarmEventDAO:
         return self.conn.execute(
             "SELECT * FROM alarm_events WHERE id=?", (alarm_id,)).fetchone()
 
+    def update_clause(self, alarm_id: str, clause: str) -> None:
+        """异步回填规范条款（RAG 检索结果，告警后挂载，不阻塞告警触发）。"""
+        self.conn.execute(
+            "UPDATE alarm_events SET clause=?, updated_at=datetime('now') "
+            "WHERE id=?",
+            (clause, alarm_id))
+        self.conn.commit()
+
     def set_image(self, alarm_id: str, image_path: str | None) -> None:
         """回填告警证据截图路径。"""
         self.conn.execute(

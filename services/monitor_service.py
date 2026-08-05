@@ -3,6 +3,9 @@
 读取 monitor.* 配置；按 interval 对多路视频源抓帧并做实时轻链路检测，
 critical 帧创建告警 + 证据截图 + 异步外部推送；按 (source, cls) 冷却去重，
 确保持续违规时能按冷却周期重复告警，而不是等人工关闭后才会再报。
+
+实时性说明：interval_sec 是"采样节奏"，告警 SLA = 下一采样 ≤ interval_sec
+（默认 3s）；它不是推理延迟。真正亚秒级响应走实时摄像头连续路径（ui/page_realtime）。
 """
 from __future__ import annotations
 
@@ -21,7 +24,7 @@ _LOCK = threading.Lock()
 class RtspMonitor:
     """单个后台轮询监控实例，线程安全地记录状态与计数。"""
 
-    def __init__(self, sources: list[str], interval_sec: float = 10.0,
+    def __init__(self, sources: list[str], interval_sec: float = 3.0,
                  cooldown_sec: float = 60.0,
                  engine: RealtimeEngine | None = None,
                  db_path: str | None = None) -> None:
@@ -141,7 +144,7 @@ def get_monitor() -> RtspMonitor | None:
     return _MONITOR
 
 
-def start_monitor(sources: list[str], interval_sec: float = 10.0,
+def start_monitor(sources: list[str], interval_sec: float = 3.0,
                   cooldown_sec: float = 60.0) -> RtspMonitor:
     """启动后台轮询监控（重复调用返回已有实例）。"""
     global _MONITOR
@@ -175,6 +178,6 @@ def ensure_monitor_started() -> RtspMonitor | None:
         return None
     return start_monitor(
         sources,
-        interval_sec=float(conf.get("interval_sec", 10) or 10),
+        interval_sec=float(conf.get("interval_sec", 3) or 3),
         cooldown_sec=float(conf.get("cooldown_sec", 60) or 60),
     )

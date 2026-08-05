@@ -30,7 +30,8 @@ class Orchestrator:
     """多 Agent 并行编排器。"""
 
     def __init__(self, vision=None, rule=None, fusion=None, review=None, action=None,
-                 progress_cb=None, scene_id: str | None = None):
+                 progress_cb=None, scene_id: str | None = None,
+                 work_order_dao=None):
         self._scene_id = scene_id
         # 视觉/融合 Agent 按场景加载检测头与风险矩阵
         self.vision = vision or VisionAgent(scene_id=scene_id)
@@ -45,24 +46,24 @@ class Orchestrator:
         self.rule = rule or RuleAgent(rag=RagEngine(collection_name=kb_collection)
                                      if kb_collection else RagEngine())
         self.review = review or ReviewAgent()
-        self.action = action or ActionAgent()
+        self.action = action or ActionAgent(work_order_dao=work_order_dao)
         self._progress_cb = progress_cb or (lambda *a, **k: None)
 
     def _push(self, task_id: str, agent: str, status: str, cost_ms: int = 0) -> None:
         self._progress_cb(task_id, agent, status, cost_ms)
 
     @staticmethod
-    def _safe(future, timeout: float, agent: str) -> AgentMessage:
-        """取结果，超时/异常返回降级消息。"""
+    def _safe(future, timeout: float, agent: str, task_id: str = "") -> AgentMessage:
+        """取结果，超时/异常返回降级消息（保留 task_id 便于追踪）。"""
         try:
             return future.result(timeout=timeout)
         except FuturesTimeout:
             return AgentMessage(
-                task_id="", agent=agent, status="degraded",
+                task_id=task_id, agent=agent, status="degraded",
                 payload={}, error=f"{agent} 超时({timeout}s)")
         except Exception as e:  # noqa: BLE001
             return AgentMessage(
-                task_id="", agent=agent, status="failed",
+                task_id=task_id, agent=agent, status="failed",
                 payload={}, error=f"{type(e).__name__}: {e}")
 
     def execute(self, task_id: str, images: list[str] | None = None,
@@ -94,8 +95,8 @@ class Orchestrator:
             with ThreadPoolExecutor(max_workers=2) as ex:
                 fv = ex.submit(self.vision.run, vmsg)
                 fr = ex.submit(self.rule.run, rmsg)
-                vout = self._safe(fv, _TIMEOUT_VISION, "vision")
-                rout = self._safe(fr, _TIMEOUT_RULE, "rule")
+                vout = self._safe(fv, _TIMEOUT_VISION, "vision", task_id=task_id)
+                rout = self._safe(fr, _TIMEOUT_RULE, "rule", task_id=task_id)
         except Exception as e:  # noqa: BLE001 顶层兜底
             self._push(task_id, "vision", "failed")
             self._push(task_id, "rule", "failed")
@@ -123,7 +124,16 @@ class Orchestrator:
                     "skip_rag": False,
                 },
                 error=None, cost_ms=0)
-            rout = self.rule.run(rmsg)
+            # 二阶段 RAG 检索受超时预算保护；超时/异常则保留一阶段结论并降级
+            with ThreadPoolExecutor(max_workers=1) as ex:
+                fr2 = ex.submit(self.rule.run, rmsg)
+                rout2 = self._safe(fr2, _TIMEOUT_RULE, "rule", task_id=task_id)
+            if rout2.status == "success":
+                rout = rout2
+            else:
+                rout = AgentMessage(
+                    task_id=task_id, agent="rule", status="degraded",
+                    payload=rout.payload, error=rout2.error)
             self._push(task_id, "rule", rout.status, rout.cost_ms)
 
         # 融合

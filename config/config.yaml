@@ -19,6 +19,8 @@ infer:
   iou_thres: 0.45         # NMS 重叠阈值，去除重复检测框
   video_max_sec: 10       # 视频抽帧最长秒数
   video_fps: 1            # 抽帧频率（帧/秒）
+  lod_interval_sec: 1.0   # 堆放物(慢变量)检测最小间隔秒；火花/烟雾等关键头仍每帧跑，保证即时告警
+  intra_op_threads: 0     # 每个ONNX会话intra-op线程上限(0=自动≈物理核/引擎数，防抢核；小模型线程宜少)
 
 llm:
   enabled: true                       # 本地 LLM 文案润色开关（可选增强）
@@ -101,6 +103,6 @@ notify:
 # 默认关闭；开启后 app 启动即按 interval_sec 轮询 sources，critical 帧自动告警+推送
 monitor:
   enabled: false
-  interval_sec: 10           # 轮询间隔（秒）
+  interval_sec: 3            # 轮询采样节奏（秒）；告警 SLA = 下一采样 ≤ 此值，火情关键源建议 ≤3s（注：采样节奏非推理延迟，亚秒级响应走实时摄像头连续路径）
   cooldown_sec: 60           # 同源同类告警冷却（秒）
   sources: []                # 每项一个 RTSP/本地视频源，如 ["rtsp://user:pass@host:554/stream"]；也可用 "demo://" 作为无需真实视频源的示例源（见 core/video_source.py）
