@@ -26,6 +26,10 @@ llm:
   enabled: true                       # 本地 LLM 文案润色开关（可选增强）
   base_url: http://localhost:11434    # Ollama 本机地址，仅 localhost 通信（C1）
   model: qwen3:8b                      # 本地 LLM，断网自动降级（C2）
+  think: false                        # 关 qwen3 思考（思考会吞 num_predict 致空输出；非思考模型忽略）
+  num_predict: 220                    # 润色 token 上限（异步路径，不进 ≤8s 主链路）
+  temperature: 0.3                    # 低温度，贴近给定信息、抑制编造
+  keep_alive: "30m"                   # ollama 模型常驻时长（app 启动后台预热一次；冷启 11s→热 3s）
 
 # 多场景危险检测配置：每个场景 = 一组检测头 + 知识库 + 风险矩阵
 # 视觉 Agent 按场景加载 yolo_weights（可多个，含 PPE 头）；
@@ -59,8 +63,8 @@ scenes:
           person: person
     kb_collection: kb_ppe
     risk_matrix: config/rules/construction_ppe.yaml
-    load_object_detection:                              # Detecting-danger 独门能力
-      enabled: true
+    load_object_detection:                              # Detecting-danger 独门能力（权重缺失，暂关闭；补齐 yolov3-personload.weights/.cfg 后改 true）
+      enabled: false
       model: data/models/yolov3-personload.weights
       config: data/models/yolov3-personload.cfg
       names: data/models/PersonLoadNames.names

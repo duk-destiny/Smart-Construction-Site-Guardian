@@ -27,6 +27,8 @@ docs/
 # 小模型（onnx/weights/cfg/names）随仓库提交，保证开箱即用
 # BAAI 嵌入大模型（数百 MB）忽略，赛前另行预置，详见 README
 data/models/BAAI--bge-small-zh-v1.5/
+# Qwen2.5-0.5B-Instruct HF 权重不接入（实测慢+与 onnxruntime 同进程冲突；LLM 走 ollama qwen3:8b）。已删，勿重新下载入库
+data/models/Qwen2.5-0.5B-Instruct/
 
 # ===== Python =====
 __pycache__/

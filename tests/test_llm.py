@@ -22,8 +22,8 @@ def _tags_resp():
     return _resp({"models": [{"name": "qwen3:8b"}]})
 
 
-def _gen_resp(text):
-    return _resp({"response": text})
+def _chat_resp(text):
+    return _resp({"message": {"content": text}})
 
 
 def test_available_true_when_model_present():
@@ -41,11 +41,39 @@ def test_available_false_when_ollama_down():
 
 
 def test_polish_returns_text_when_available():
-    """可用时 polish 返回模型响应文本。"""
-    with mock.patch("urllib.request.urlopen", side_effect=lambda *a, **k: _gen_resp("请立即停工")):
+    """可用时 polish 走 /api/chat、带 think=false 与 keep_alive，并返回响应文本。"""
+    captured = []
+
+    def _fake(req, *a, **k):
+        captured.append(req)
+        return _chat_resp("请立即停工")
+
+    with mock.patch("urllib.request.urlopen", side_effect=_fake):
         eng = LlmEngine()
         out = eng.polish("提醒工人注意火灾")
         assert out == "请立即停工"
+        assert captured and captured[-1].full_url.endswith("/api/chat")
+        body = json.loads(captured[-1].data)
+        assert body["think"] is False
+        assert body["keep_alive"]  # 常驻防冷启
+
+
+def test_warmup_best_effort_and_idempotent():
+    """warmup 进程内只跑一次、失败静默、不抛异常。"""
+    import core.llm_engine as mod
+    mod.LlmEngine._warmed = False
+    calls = {"n": 0}
+
+    def _fake(req, *a, **k):
+        calls["n"] += 1
+        return _chat_resp("ok")
+
+    with mock.patch("urllib.request.urlopen", side_effect=_fake):
+        eng = LlmEngine()
+        eng.warmup()
+        eng.warmup()  # 已预热，不应再发请求
+    assert calls["n"] == 1
+    mod.LlmEngine._warmed = False  # 复位，避免影响其他测试
 
 
 def test_polish_none_on_failure():
