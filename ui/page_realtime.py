@@ -14,11 +14,16 @@ import wave
 import cv2
 import numpy as np
 import streamlit as st
+from ui.page_helpers import safe_page
 
 from core.realtime_engine import RealtimeEngine
+from core.video_source import MultiSourceMonitor
 from dao.db import get_conn, init_db
 from dao.models import DetectionRecordDAO
+from services.task_service import TaskService
 from ui.components import compliance_banner, severity_summary
+from core.logging import get_logger
+log = get_logger(__name__)
 
 
 # ── 声音警报（A2）：numpy 生成 800Hz 方波 wav → base64 → <audio autoplay> ──
@@ -55,10 +60,12 @@ def _persist(session_id: str, frame_status: str, dets: list[dict]) -> None:
             "cls": d.get("cls"),
             "conf": d.get("conf", 0.0),
             "severity": _sev_of(d.get("cls")),
+            "track_id": d.get("track_id"),
+            "track_frames": d.get("track_frames"),
         } for d in dets]
         dao.bulk_insert(session_id, frame_status, rows, mode="realtime")
     except Exception as e:  # noqa: BLE001 历史写入失败不应中断监测
-        print(f"[realtime] 历史持久化失败: {e}")
+        log.warning(f"历史持久化失败: {e}")
 
 
 def _sev_of(cls: str | None) -> str:
@@ -66,6 +73,7 @@ def _sev_of(cls: str | None) -> str:
     return SEVERITY.get(cls, "warning")
 
 
+@safe_page("实时摄像头监测")
 def render_realtime() -> None:
     st.title("📷 实时摄像头监测")
 
@@ -75,12 +83,93 @@ def render_realtime() -> None:
     engine = _get_engine()
     if not engine.available:
         st.error("未加载到任何检测模型，请确认 data/models 下权重文件存在（"
-                 "yolov8_fire_smoke.onnx / ppe_yolov8.onnx / yolov3-personload.*）。")
+                 "yolov8_fire_smoke_v2.onnx / ppe_yolov8_v2.onnx / yolov3-personload.*）。")
         return
 
     st.caption("动火作业安全 + 施工 PPE 双场景同时接入（复用现有检测头）。"
                "不合规时自动播放 800Hz 声音警报并弹窗提醒。")
     continuous = st.toggle("连续监控（捕获后自动刷新下一帧）", value=True)
+    alarm_cooldown = st.slider("告警冷却（秒）", 1, 30, 5,
+                               key="alarm_cooldown", help="同一帧/短时间重复告警前的最小间隔")
+
+    with st.expander("多路 RTSP / 本地视频源"):
+        sources_text = st.text_area(
+            "每行一个源地址",
+            key="rtsp_sources",
+            placeholder="rtsp://user:pass@host:554/stream\nD:/videos/cam1.mp4",
+        )
+        if st.button("抓取全部源", type="primary", key="rtsp_grab"):
+            sources = [line.strip() for line in sources_text.splitlines() if line.strip()]
+            if not sources:
+                st.warning("请先输入至少一个 RTSP/本地视频源")
+            else:
+                results = MultiSourceMonitor(sources).grab_all(engine.analyze, engine.draw)
+                st.session_state["_rtsp_results"] = results
+                for r in results:
+                    if not r.get("ok"):
+                        continue
+                    comp_r = r["compliance"]
+                    dets_r = r["detections"] or []
+                    _persist(st.session_state["_realtime_session"],
+                             comp_r["status"], dets_r)
+                    if comp_r.get("level") == "critical" and dets_r:
+                        crit = [d for d in dets_r if _sev_of(d.get("cls")) == "critical"] or [dets_r[0]]
+                        for d in crit[:1]:
+                            try:
+                                conn = get_conn()
+                                init_db(conn)
+                                TaskService(conn).raise_alarm(
+                                    session_id=st.session_state.get("_realtime_session"),
+                                    scene_id=d.get("scene"),
+                                    cls=d.get("cls"),
+                                    conf=d.get("conf"),
+                                    source=r.get("source"),
+                                    annotated_bgr=r.get("annotated"),
+                                )
+                            except Exception:
+                                pass
+                st.success(f"已抓取 {sum(1 for r in results if r.get('ok'))} 路源")
+    with st.expander("后台自动轮询监控"):
+        import services.monitor_service as mon_svc
+        mon = mon_svc.get_monitor()
+        if mon is None:
+            st.caption("后台轮询未启动：config.yaml 中 monitor.enabled=false 或未配置 sources。")
+            if st.button("启动后台轮询", key="mon_start"):
+                from core.config import ConfigLoader
+                mconf = ConfigLoader().get("monitor") or {}
+                msrcs = [str(x).strip() for x in (mconf.get("sources") or []) if str(x).strip()]
+                if not msrcs:
+                    st.warning("config.yaml 的 monitor.sources 为空，无法启动")
+                else:
+                    mon_svc.start_monitor(
+                        msrcs,
+                        interval_sec=float(mconf.get("interval_sec", 10) or 10),
+                        cooldown_sec=float(mconf.get("cooldown_sec", 60) or 60))
+                    st.success("后台轮询已启动")
+                    st.rerun()
+        else:
+            mstatus = mon.status()
+            m1, m2, m3 = st.columns(3)
+            m1.metric("运行状态", "运行中" if mstatus["running"] else "已停止")
+            m2.metric("轮询次数", mstatus["polls"])
+            m3.metric("产生告警", mstatus["alarms"])
+            st.caption(f"间隔 {mstatus['interval_sec']:.0f}s ｜ 冷却 {mstatus['cooldown_sec']:.0f}s ｜ 源数 {len(mstatus['sources'])}")
+            if mstatus["sources"]:
+                st.code("\n".join(mstatus["sources"]))
+            if mstatus["last_error"]:
+                st.error(mstatus["last_error"])
+            if st.button("停止后台轮询", key="mon_stop"):
+                mon_svc.stop_monitor()
+                st.success("后台轮询已停止")
+                st.rerun()
+            st.divider()
+            if st.button("源连通性自检", key="mon_src_check"):
+                from core.video_source import check_source
+                for _src in (mstatus["sources"] or ["demo://"]):
+                    _r = check_source(_src)
+                    _flag = "✅" if _r["ok"] else "❌"
+                    st.caption(f"{_flag} {_src} ｜ {_r['width']}×{_r['height']} ｜ {_r['fps']:.1f}fps" + (f" ｜ {_r['error']}" if _r['error'] else ""))
+    _show_rtsp_results()
 
     img = st.camera_input("现场画面", key="realtime_cam")
     if img is None:
@@ -115,12 +204,33 @@ def render_realtime() -> None:
     }
     _show_last()
 
+    # 告警生命周期：高危帧创建告警事件 → 证据截图留存 → 异步外部推送
+    if comp["level"] == "critical" and dets:
+        crit = [d for d in dets if _sev_of(d.get("cls")) == "critical"] or [dets[0]]
+        try:
+            conn = get_conn()
+            init_db(conn)
+            for d in crit[:1]:
+                TaskService(conn).raise_alarm(
+                    session_id=st.session_state.get("_realtime_session"),
+                    scene_id=d.get("scene"),
+                    cls=d.get("cls"),
+                    conf=d.get("conf"),
+                    source="camera",
+                    annotated_bgr=annotated,
+                )
+        except Exception:
+            pass
+
     # 不合规：声音警报（A2）+ Toast（B2）
-    if comp["level"] == "critical":
-        st.toast("⚠️ 检测到高危违规，请立即处置！", icon="⚠️")
-        st.markdown(_alarm_html(), unsafe_allow_html=True)
-    elif comp["level"] == "warning":
-        st.toast("⚠️ 发现需关注项，请尽快整改。", icon="⚠️")
+    now = time.time()
+    if now - st.session_state.get("_alarm_last", 0) >= alarm_cooldown:
+        if comp["level"] == "critical":
+            st.toast("⚠️ 检测到高危违规，请立即处置！", icon="⚠️")
+            st.markdown(_alarm_html(), unsafe_allow_html=True)
+        elif comp["level"] == "warning":
+            st.toast("⚠️ 发现需关注项，请尽快整改。", icon="⚠️")
+        st.session_state["_alarm_last"] = now
 
     if continuous:
         time.sleep(0.3)
@@ -166,6 +276,38 @@ def _show_last() -> None:
         if last["dets"]:
             for d in last["dets"]:
                 st.caption(f"- {d.get('violation_desc', d.get('cls'))} "
-                           f"(conf {d.get('conf')}, 场景 {d.get('scene')})")
+                           f"(conf {d.get('conf')}, 场景 {d.get('scene')}, "
+                           f"track #{d.get('track_id') or '—'}, "
+                           f"连续 {d.get('track_frames') or 1} 帧)")
         else:
             st.caption("（无检测目标）")
+
+
+def _show_rtsp_results() -> None:
+    """展示最近一次多路 RTSP/本地视频源抓取结果。"""
+    results = st.session_state.get("_rtsp_results") or []
+    if not results:
+        return
+    st.divider()
+    st.subheader("多路视频源结果")
+    for r in results:
+        st.caption(f"源 {r['index'] + 1}：{r['source']}")
+        if not r.get("ok"):
+            st.warning("读取失败，请检查 RTSP/文件路径后重试")
+            continue
+        comp = r["compliance"]
+        compliance_banner(comp, subtitle=severity_summary(r["detections"]))
+        col1, col2 = st.columns([3, 2])
+        with col1:
+            st.image(cv2.cvtColor(r["annotated"], cv2.COLOR_BGR2RGB),
+                     caption="远程/文件画面（红框=不合规 / 黄框=警告 / 绿框=合规）",
+                     use_column_width=True)
+        with col2:
+            st.subheader("处置建议")
+            for reason in comp["reasons"]:
+                if reason.startswith("【不合规】"):
+                    st.error(reason)
+                elif reason.startswith("【警告】"):
+                    st.warning(reason)
+                else:
+                    st.success(reason)

@@ -6,9 +6,31 @@ from __future__ import annotations
 
 import os
 import sqlite3
+from pathlib import Path
 
+DEFAULT_DB_PATH = str(Path(__file__).resolve().parent.parent / "data" / "app.db")
 
-def get_conn(db_path: str = "data/app.db") -> sqlite3.Connection:
+_MIGRATIONS: dict[str, list[tuple[str, str]]] = {
+    "detection_records": [
+        ("track_id", "TEXT"),
+        ("track_frames", "INTEGER"),
+    ],
+    "agent_runs": [("input_json", "TEXT")],
+    "alarm_events": [
+        ("image_path", "TEXT"),
+        ("source", "TEXT"),
+    ],
+    "feedback_samples": [
+        ("image_path", "TEXT"),
+        ("detection_json", "TEXT"),
+        ("corrected_labels_json", "TEXT"),
+        ("status", "TEXT NOT NULL DEFAULT 'pending'"),
+        ("reviewed_by", "TEXT"),
+        ("reviewed_at", "TEXT"),
+    ],
+}
+
+def get_conn(db_path: str = DEFAULT_DB_PATH) -> sqlite3.Connection:
     """建立 SQLite 连接并开启 WAL 与外键约束；自动创建父目录。
 
     统一设置 row_factory=sqlite3.Row，使查询行支持列名访问（row["id"]）
@@ -27,4 +49,13 @@ def init_db(conn: sqlite3.Connection) -> None:
     schema_path = os.path.join(os.path.dirname(__file__), "schema.sql")
     with open(schema_path, encoding="utf-8") as f:
         conn.executescript(f.read())
+    for table, columns in _MIGRATIONS.items():
+        existing = {
+            row["name"]
+            for row in conn.execute(f"PRAGMA table_info({table})")
+        }
+        for column, ddl in columns:
+            if column not in existing:
+                conn.execute(
+                    f"ALTER TABLE {table} ADD COLUMN {column} {ddl}")
     conn.commit()

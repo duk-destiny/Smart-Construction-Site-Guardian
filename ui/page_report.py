@@ -4,14 +4,17 @@ from __future__ import annotations
 import json
 
 import streamlit as st
+from ui.page_helpers import safe_page
 
 from dao.db import get_conn, init_db
 from dao.models import WorkOrderDAO, RiskDAO
 from core.compliance import evaluate
+from core.yolo_engine import WHITELIST
 from services.audit_service import AuditService
 from services.export_service import ExportService
 from services.task_service import TaskService
 from ui.components import compliance_banner
+from ui.correction_workbench import render_target_corrections
 
 RISK_EMOJI = {"重大": "🔴", "较大": "🟠", "一般": "🟡", "低": "🟢"}
 
@@ -33,7 +36,30 @@ def _show_work_order(payload: dict, task_id: str) -> None:
     st.write(f"**违反规范**：{wo.get('clause','')}")
     st.write(f"**整改要求**：{wo.get('requirement','')}")
     st.write(f"**风险等级**：{payload.get('risk_level','—')}")
+    if wo.get("review_required"):
+        st.warning("该工单需要人工复核：" + "；".join(wo.get("review_reasons") or []))
     st.info(f"💬 工人白话提示：{payload.get('worker_notice','')}")
+
+    with st.expander("Agent 证据链"):
+        conn = get_conn()
+        init_db(conn)
+        runs = TaskService(conn).list_agent_runs(task_id)
+        if not runs:
+            st.caption("暂无 Agent 运行记录")
+        for run in runs:
+            st.caption(
+                f"{run['agent']} ｜ {run['status']} ｜ {run['cost_ms']}ms ｜ {run['created_at']}"
+            )
+            if run["input_json"]:
+                try:
+                    st.json({"输入": json.loads(run["input_json"])})
+                except ValueError:
+                    pass
+            if run["output_json"]:
+                try:
+                    st.json({"输出": json.loads(run["output_json"])})
+                except ValueError:
+                    st.caption(run["output_json"][:200])
 
     st.divider()
     st.subheader("人工改判")
@@ -45,17 +71,68 @@ def _show_work_order(payload: dict, task_id: str) -> None:
         else:
             conn = get_conn()
             init_db(conn)
-            ok = TaskService(conn).manual_override(task_id, new_level, reason)
+            ts = TaskService(conn)
+            ok = ts.manual_override(
+                task_id, new_level, reason,
+                user_id=st.session_state.get("user_id"))
+            risk = RiskDAO(conn).get_by_task(task_id) if ok else None
+            ts.save_feedback_sample(
+                task_id=task_id,
+                user_id=st.session_state.get("user_id"),
+                corrected_level=new_level,
+                reason=reason,
+                auto_level=risk["risk_level"] if risk else None,
+                source_json={
+                    "reasons_json": risk["reasons_json"] if risk else None,
+                    "filtered_fp_json": risk["filtered_fp_json"] if risk else None,
+                },
+                image_path=st.session_state.get("uploaded_path"),
+                detections=dets,
+                corrected_labels=[{
+                    "risk_level": new_level,
+                    "reason": reason,
+                }],
+            )
             AuditService(conn).append(st.session_state.get("user_id"), "override",
                                      {"task_id": task_id, "level": new_level, "reason": reason})
             st.success("改判已记录" if ok else "未找到该任务风险记录")
+
+    st.divider()
+    with st.expander("逐目标纠偏（可生成训练样本）"):
+        if not dets:
+            st.caption("当前任务没有视觉检测目标")
+        else:
+            corrections = render_target_corrections(
+                st.session_state.get("uploaded_path"),
+                dets, [], f"report_{task_id}")
+            if st.button("保存逐目标纠偏", key=f"save_fix_{task_id}"):
+                conn = get_conn()
+                init_db(conn)
+                ts = TaskService(conn)
+                ts.save_feedback_sample(
+                    task_id=task_id,
+                    user_id=st.session_state.get("user_id"),
+                    corrected_level=payload.get("risk_level", "一般"),
+                    reason="逐目标纠偏",
+                    auto_level=payload.get("risk_level", "一般"),
+                    feedback_type="detection_fix",
+                    image_path=st.session_state.get("uploaded_path"),
+                    detections=dets,
+                    corrected_labels=corrections,
+                )
+                AuditService(conn).append(
+                    st.session_state.get("user_id"), "detection_fix",
+                    {"task_id": task_id, "items": len(corrections)})
+                st.success("逐目标纠偏已保存为待审核反馈样本")
 
     st.divider()
     st.subheader("导出台账")
     if st.button("导出 Excel 台账", key="btn_export"):
         conn = get_conn()
         init_db(conn)
-        r = ExportService(conn).export_excel(task_id=task_id)
+        r = ExportService(conn).export_excel(
+            task_id=task_id,
+            user_id=st.session_state.get("user_id"))
         if r["ok"]:
             st.success(f"已导出：{r['data']['file_path']}")
         else:
@@ -126,6 +203,7 @@ def _render_history_list() -> None:
                         st.write(f"- {c['verdict']} | {c['clause_text']}")
 
 
+@safe_page("工单/改判/导出")
 def render_report() -> None:
     st.title("📋 整改工单 / 历史记录")
 

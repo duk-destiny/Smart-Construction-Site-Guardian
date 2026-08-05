@@ -40,6 +40,14 @@ def test_check_permission_safety_limited(auth):
     uid = auth.login("alice", "secret123")["user_id"]
     assert auth.check_permission(uid, "upload") is True
     assert auth.check_permission(uid, "import_pdf") is False
+    assert auth.check_permission(uid, "clear_data") is False
+
+
+def test_admin_clear_data_permission():
+    conn = get_conn(":memory:")
+    init_db(conn)
+    uid = UserDAO(conn).insert("root", "hashed", "admin")
+    assert AuthService(conn).check_permission(uid, "clear_data") is True
 
 
 def test_hash_password_roundtrip():

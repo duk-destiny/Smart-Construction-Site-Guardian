@@ -13,17 +13,17 @@ matrix:
     risk: 一般
     reason: "有火花但手续齐全，提示人工复核即可"
 
-  # 未佩戴防护面罩：较严重防护缺失
+  # 检测到防护面罩：正向安全信号
   - detect: face_shield
     compliance: 任何
-    risk: 较大
-    reason: "未佩戴防护面罩，弧光/飞溅易致人员伤害，须立即整改"
+    risk: 低
+    reason: "已检测到防护面罩，防护到位"
 
-  # 灭火器配置缺失/不足：应急能力缺口
+  # 检测到灭火器：正向安全信号
   - detect: extinguisher
     compliance: 任何
-    risk: 较大
-    reason: "灭火器配置缺失或不足，初期火灾无法及时扑灭"
+    risk: 低
+    reason: "已检测到灭火器，应急配置到位"
 
   # 周边易燃物未清理：一般隐患
   - detect: flammable

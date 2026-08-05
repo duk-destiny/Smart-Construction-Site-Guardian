@@ -13,10 +13,15 @@ from agents.base import AgentMessage
 from agents.fusion_agent import FusionAgent
 from agents.rule_agent import RuleAgent
 from core.rag_engine import RagEngine
+from tests.cjk_font import cjk_font_path
 
-FONT_SIMHEI = "C:/Windows/Fonts/simhei.ttf"
+FONT_SIMHEI = cjk_font_path()
 VALID_RISKS = {"低", "一般", "较大", "重大"}
 
+
+import os
+if not os.path.isdir("data/models/BAAI--bge-small-zh-v1.5/snapshots/master"):
+    pytest.skip("BGE embedding model not present; RAG tests skipped", allow_module_level=True)
 
 def _make_spec_pdf(path: str):
     pdf = FPDF()

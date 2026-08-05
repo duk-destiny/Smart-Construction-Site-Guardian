@@ -15,7 +15,7 @@ class AuthService:
 
     # RBAC 矩阵（LLD §2.2.1）：safety 受限，admin 全通
     _ROLE_ACTIONS: dict[str, set[str]] = {
-        "admin": {"upload", "view", "export", "import_pdf", "view_all_logs", "override"},
+        "admin": {"upload", "view", "export", "import_pdf", "view_all_logs", "override", "clear_data"},
         "safety": {"upload", "view", "export", "override"},
     }
 

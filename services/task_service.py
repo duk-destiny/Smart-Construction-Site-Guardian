@@ -6,10 +6,14 @@ from __future__ import annotations
 
 import json
 import sqlite3
+import csv
+import io
 
 from dao.models import (
     TaskDAO, RiskDAO, DetectionDAO, ComplianceDAO, WorkOrderDAO,
+    AgentRunDAO, FeedbackDAO, AlarmEventDAO, NotificationLogDAO,
 )
+from services.permission_service import PermissionService
 
 
 class TaskService:
@@ -18,6 +22,20 @@ class TaskService:
     # 内存进度：task_id -> {agent: {status, cost_ms}}
     _progress: dict[str, dict] = {}
 
+    # 清空范围：仅业务数据；用户、审计日志、知识库与模型注册保留
+    _CLEARABLE_TABLES = (
+        "detection_records",
+        "alarm_events",
+        "notification_logs",
+        "feedback_samples",
+        "agent_runs",
+        "work_orders",
+        "risks",
+        "compliances",
+        "detections",
+        "tasks",
+    )
+
     def __init__(self, conn: sqlite3.Connection) -> None:
         self.conn = conn
         self.tasks = TaskDAO(conn)
@@ -25,12 +43,35 @@ class TaskService:
         self.detections = DetectionDAO(conn)
         self.compliances = ComplianceDAO(conn)
         self.work_orders = WorkOrderDAO(conn)
+        self.agent_runs = AgentRunDAO(conn)
+        self.feedback = FeedbackDAO(conn)
+        self.alarms = AlarmEventDAO(conn)
+        self.notifications = NotificationLogDAO(conn)
+        self.permissions = PermissionService(conn)
 
     def create_task(self, user_id: str, files: list[str], permit_info: dict) -> str:
         """创建任务，返回 task_id；写审计由调用方负责。"""
+        self.permissions.require(user_id, "upload")
         tid = self.tasks.insert(user_id, json.dumps(permit_info, ensure_ascii=False), "running")
         TaskService._progress[tid] = {}
         return tid
+
+    def clear_all_data(self, user_id: str | None, confirmation: str) -> dict:
+        """清空全部业务数据；保留账号、审计日志、知识库与模型注册。"""
+        self.permissions.require(user_id, "clear_data")
+        if confirmation.strip() != "RESET":
+            raise ValueError("清空确认码必须为 RESET")
+
+        counts: dict[str, int] = {}
+        with self.conn:
+            for table in self._CLEARABLE_TABLES:
+                counts[table] = self.conn.execute(f"DELETE FROM {table}").rowcount
+            TaskService._progress.clear()
+            self.conn.execute(
+                "INSERT INTO audit_logs(user_id, action, detail_json, created_at) "
+                "VALUES(?,?,?,datetime('now'))",
+                (user_id, "clear_data", json.dumps({"deleted": counts}, ensure_ascii=False)))
+        return {"ok": True, "deleted": counts}
 
     def update_progress(self, task_id: str, agent: str, status: str, cost_ms: int = 0) -> None:
         """供 Orchestrator 回调，更新某 Agent 的进度。"""
@@ -41,13 +82,142 @@ class TaskService:
         """返回 {agent: {status, cost_ms}}。"""
         return dict(TaskService._progress.get(task_id, {}))
 
-    def manual_override(self, task_id: str, new_level: str, reason: str) -> bool:
+    def list_agent_runs(self, task_id: str) -> list:
+        """返回任务级 Agent 运行证据链。"""
+        return self.agent_runs.list_by_task(task_id)
+
+    def manual_override(self, task_id: str, new_level: str, reason: str,
+                        user_id: str | None = None) -> bool:
         """人工改判风险等级（写审计在调用方）。"""
+        self.permissions.require(user_id, "override")
         row = self.risks.get_by_task(task_id)
         if row is None:
             return False
         self.risks.override(row["id"], new_level, reason)
         return True
+
+    def save_feedback_sample(
+        self, task_id: str, user_id: str | None,
+        corrected_level: str, reason: str,
+        auto_level: str | None = None,
+        source_json: dict | None = None,
+        feedback_type: str = "override",
+        image_path: str | None = None,
+        detections: list[dict] | None = None,
+        corrected_labels: list[dict] | None = None,
+        status: str = "pending",
+    ) -> str | None:
+        """保存人工纠偏样本，构成人机纠偏闭环的反馈数据源。"""
+        self.permissions.require(user_id, "override")
+        return self.feedback.insert(
+            task_id=task_id,
+            user_id=user_id,
+            auto_risk_level=auto_level,
+            corrected_risk_level=corrected_level,
+            reason=reason,
+            feedback_type=feedback_type,
+            source_json=json.dumps(source_json or {}, ensure_ascii=False),
+            image_path=image_path,
+            detection_json=json.dumps(detections or [], ensure_ascii=False),
+            corrected_labels_json=json.dumps(corrected_labels or [], ensure_ascii=False),
+            status=status,
+        )
+
+    def list_feedback_samples(self, limit: int = 500) -> list:
+        """返回人工纠偏样本，供管理端查看。"""
+        return self.feedback.list_all(limit=limit)
+
+    def review_feedback_sample(self, feedback_id: str, status: str,
+                               user_id: str | None = None) -> None:
+        self.permissions.require(user_id, "override")
+        self.feedback.update_review(feedback_id, status, user_id)
+
+    def update_feedback_corrections(
+        self,
+        feedback_id: str,
+        corrected_labels: list[dict],
+        user_id: str | None = None,
+    ) -> None:
+        """更新已有反馈样本的逐目标修正结果。"""
+        self.permissions.require(user_id, "override")
+        self.feedback.update_corrections(
+            feedback_id,
+            json.dumps(corrected_labels, ensure_ascii=False),
+            user_id,
+        )
+
+    def feedback_csv(self) -> str:
+        """导出纠偏样本为 CSV，供后续训练/评估使用。"""
+        rows = self.feedback.list_all(limit=5000)
+        buf = io.StringIO()
+        writer = csv.writer(buf)
+        writer.writerow([
+            "created_at", "task_id", "user_id", "auto_risk_level",
+            "corrected_risk_level", "reason", "feedback_type", "source_json",
+        ])
+        for r in rows:
+            writer.writerow([
+                r["created_at"], r["task_id"], r["user_id"],
+                r["auto_risk_level"], r["corrected_risk_level"],
+                r["reason"], r["feedback_type"], r["source_json"],
+            ])
+        return buf.getvalue()
+
+    def create_alarm_event(self, session_id: str | None, task_id: str | None,
+                           scene_id: str | None, cls: str | None,
+                           conf: float | None, source: str | None = None,
+                           image_path: str | None = None,
+                           force: bool = False) -> str | None:
+        """创建告警事件；默认同一会话同一类别已有未关闭告警则跳过。"""
+        if not force and session_id and cls and self.alarms.find_open(session_id, cls):
+            return None
+        return self.alarms.insert(session_id, task_id, scene_id, cls, conf,
+                                  image_path=image_path, source=source)
+
+    def attach_alarm_image(self, alarm_id: str, image_path: str | None) -> None:
+        """回填告警证据截图路径。"""
+        self.alarms.set_image(alarm_id, image_path)
+
+    def notify_alarm(self, alarm_id: str) -> None:
+        """对单个告警发起异步外部推送（webhook/企业微信/钉钉）。"""
+        from services.notify_service import NotificationService
+        NotificationService().push_alarm_async(alarm_id)
+
+    def raise_alarm(self, session_id: str | None, scene_id: str | None,
+                    cls: str | None, conf: float | None,
+                    source: str | None = None,
+                    annotated_bgr=None, force: bool = False) -> str | None:
+        """完整告警链路：创建告警 → 证据截图留存 → 回填 → 异步推送。
+
+        返回告警 ID；同会话同类未关闭告警去重时返回 None。
+        """
+        aid = self.create_alarm_event(
+            session_id, None, scene_id, cls, conf,
+            source=source, force=force)
+        if not aid:
+            return None
+        path = None
+        if annotated_bgr is not None:
+            try:
+                from core.evidence import save_alarm_evidence
+                path = save_alarm_evidence(session_id, cls, annotated_bgr)
+            except Exception:  # noqa: BLE001 证据留存失败不应中断告警
+                path = None
+        if path:
+            self.attach_alarm_image(aid, path)
+        self.notify_alarm(aid)
+        return aid
+
+    def list_notification_logs(self, limit: int = 200) -> list:
+        return self.notifications.list_all(limit=limit)
+
+    def list_alarm_events(self, limit: int = 500) -> list:
+        return self.alarms.list_all(limit=limit)
+
+    def update_alarm_event(self, alarm_id: str, status: str,
+                           user_id: str | None = None) -> None:
+        self.permissions.require(user_id, "override")
+        self.alarms.update_status(alarm_id, status, user_id)
 
     def save_result(self, task_id: str, agent_results: dict) -> None:
         """持久化研判全链条结果（幂等：同一 task_id 已存在则跳过）。
@@ -88,7 +258,7 @@ class TaskService:
             comp_rows.append({
                 "task_id": task_id,
                 "verdict": c.get("verdict", ""),
-                "clause_no": c.get("label", ""),
+                "clause_no": c.get("clause_no") or c.get("clause_ref") or "",
                 "clause_text": c.get("clause_text", ""),
                 "score": None,
             })
@@ -115,5 +285,76 @@ class TaskService:
             worker_notice=action_payload.get("worker_notice", ""),
         )
 
+        # 5) Agent 运行证据链：展示多 Agent 协同、耗时与输出摘要
+        self.save_agent_runs(task_id, agent_results)
+
         # 标记任务完成
         self.tasks.update_status(task_id, "completed")
+
+    def save_agent_runs(self, task_id: str, agent_results: dict) -> None:
+        """持久化各 Agent 的执行轨迹，供证据链追溯与答辩演示使用。"""
+        rows: list[dict] = []
+        for agent, node in (agent_results or {}).items():
+            if not isinstance(node, dict):
+                continue
+            rows.append({
+                "task_id": task_id,
+                "agent": agent,
+                "status": node.get("status", "unknown"),
+                "cost_ms": node.get("cost_ms", 0),
+                "input_json": json.dumps(
+                    self._summarize_input(node.get("payload")),
+                    ensure_ascii=False),
+                "output_json": json.dumps(
+                    self._summarize_output(node.get("payload")),
+                    ensure_ascii=False),
+                "error": node.get("error"),
+            })
+        if rows:
+            self.agent_runs.bulk_insert(rows)
+
+    @staticmethod
+    def _summarize_input(payload) -> dict:
+        """提取 Agent 输出中保留的输入摘要。"""
+        if not isinstance(payload, dict):
+            return {}
+        return payload.get("input_summary", {}) or {}
+
+    @staticmethod
+    def _summarize_output(payload) -> dict:
+        """将 Agent 输出压缩为轻量摘要，避免把大段检测坐标写入证据链。"""
+        if not isinstance(payload, dict):
+            return {"summary": str(payload)[:300]}
+        summary: dict = {}
+        if isinstance(payload.get("detections"), list):
+            summary["detections"] = [
+                {"cls": d.get("cls"), "conf": d.get("conf")}
+                for d in payload["detections"][:50]
+            ]
+        if isinstance(payload.get("compliance"), list):
+            summary["compliance"] = [
+                {
+                    "label": c.get("label"),
+                    "verdict": c.get("verdict"),
+                    "clause_ref": c.get("clause_ref") or c.get("clause_no") or "",
+                }
+                for c in payload["compliance"][:50]
+            ]
+        if isinstance(payload.get("work_order"), dict):
+            wo = payload["work_order"]
+            summary["work_order"] = {
+                "risk_level": wo.get("risk_level"),
+                "hazard_desc": wo.get("hazard_desc"),
+                "clause": wo.get("clause"),
+                "requirement": wo.get("requirement"),
+            }
+        for key in ("risk_level", "reasons", "training_tips",
+                    "filtered_fp", "worker_notice", "fire_model_limitation",
+                    "needs_review", "review_reasons"):
+            if key in payload:
+                value = payload[key]
+                if isinstance(value, str):
+                    summary[key] = value[:500]
+                else:
+                    summary[key] = value
+        return summary or {"keys": list(payload.keys())[:20]}

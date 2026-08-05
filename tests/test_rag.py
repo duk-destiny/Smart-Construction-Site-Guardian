@@ -3,9 +3,14 @@
 import pytest
 from fpdf import FPDF
 from core.rag_engine import RagEngine
+from tests.cjk_font import cjk_font_path
 
-FONT_SIMHEI = "C:/Windows/Fonts/simhei.ttf"
+FONT_SIMHEI = cjk_font_path()
 
+
+import os
+if not os.path.isdir("data/models/BAAI--bge-small-zh-v1.5/snapshots/master"):
+    pytest.skip("BGE embedding model not present; RAG tests skipped", allow_module_level=True)
 
 def _make_cjk_pdf(save_path: str, lines: list[str]):
     pdf = FPDF()

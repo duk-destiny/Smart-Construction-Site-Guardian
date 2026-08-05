@@ -23,12 +23,13 @@ def test_audit_append_only():
             pass
 
 
-def test_init_creates_eight_tables():
+def test_init_creates_expected_tables():
     conn = _fresh()
     names = [r[0] for r in conn.execute(
         "SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'")]
     for t in ["users", "tasks", "detections", "compliances", "risks",
-              "work_orders", "audit_logs", "kb_docs"]:
+              "work_orders", "audit_logs", "kb_docs", "agent_runs",
+              "feedback_samples", "alarm_events", "model_registry"]:
         assert t in names, f"缺少表 {t}"
 
 
@@ -48,3 +49,45 @@ def test_dao_audit_only_insert_select():
     assert UserDAO(conn).get_by_name("alice")[0] == uid
     log_id = AuditDAO(conn).insert(uid, "login", "{}")
     assert isinstance(log_id, int)
+
+
+def test_init_db_migrates_old_agent_runs():
+    conn = sqlite3.connect(":memory:")
+    conn.row_factory = sqlite3.Row
+    conn.executescript("""
+        CREATE TABLE agent_runs (
+            id TEXT PRIMARY KEY,
+            task_id TEXT,
+            agent TEXT,
+            status TEXT,
+            cost_ms INTEGER,
+            output_json TEXT,
+            error TEXT,
+            created_at TEXT
+        );
+    """)
+    init_db(conn)
+    cols = [r["name"] for r in conn.execute("PRAGMA table_info(agent_runs)")]
+    assert "input_json" in cols
+
+
+def test_init_db_migrates_detection_records_tracking():
+    conn = sqlite3.connect(":memory:")
+    conn.row_factory = sqlite3.Row
+    conn.executescript("""
+        CREATE TABLE detection_records (
+            id TEXT PRIMARY KEY,
+            session_id TEXT,
+            scene_id TEXT,
+            mode TEXT,
+            frame_status TEXT,
+            cls TEXT,
+            conf REAL,
+            severity TEXT,
+            created_at TEXT
+        );
+    """)
+    init_db(conn)
+    cols = [r["name"] for r in conn.execute("PRAGMA table_info(detection_records)")]
+    assert "track_id" in cols
+    assert "track_frames" in cols

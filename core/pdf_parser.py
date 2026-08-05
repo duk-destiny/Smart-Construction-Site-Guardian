@@ -6,6 +6,8 @@ from __future__ import annotations
 
 import re
 from pathlib import Path
+from core.logging import get_logger
+log = get_logger(__name__)
 
 
 class PdfParser:
@@ -28,7 +30,7 @@ class PdfParser:
         try:
             import fitz  # PyMuPDF
         except ImportError:
-            print("[PdfParser] PyMuPDF 未安装")
+            log.warning("PyMuPDF 未安装")
             return []
 
         try:
@@ -38,7 +40,7 @@ class PdfParser:
                 full_text += page.get_text() + "\n"
             doc.close()
         except Exception as e:
-            print(f"[PdfParser] 打开 {path} 失败: {e}")
+            log.warning(f"打开 {path} 失败: {e}")
             return []
 
         clauses = PdfParser._split_clauses(full_text.strip())

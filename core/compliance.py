@@ -17,7 +17,7 @@ from core.yolo_engine import WHITELIST_CN
 _SEVERITY_DEFAULT: dict[str, str] = {
     # 高危·不合规（红）
     "spark": "critical", "smoke": "critical", "no_helmet": "critical",
-    "face_shield": "critical", "extinguisher": "critical",
+    "face_shield": "safe", "extinguisher": "safe",
     "load_object_tilted": "critical",
     # 需关注·警告（黄）
     "flammable": "warning", "no_vest": "warning", "load_object": "warning",
@@ -87,6 +87,9 @@ def evaluate(detections: list[dict]) -> dict:
             "label": _label(cls), "severity": sev,
             "bbox": d.get("bbox", [0, 0, 0, 0]),
         }
+        for key in ("track_id", "track_frames"):
+            if d.get(key) is not None:
+                item[key] = d[key]
         if sev == "safe":
             safe_items.append(item)
         else:

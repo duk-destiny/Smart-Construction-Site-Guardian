@@ -19,9 +19,14 @@ from dao.models import UserDAO, TaskDAO, AuditDAO, WorkOrderDAO, RiskDAO
 from services.task_service import TaskService
 from core.rag_engine import RagEngine
 from services.audit_service import AuditService
+from tests.cjk_font import cjk_font_path
 
-FONT_SIMHEI = "C:/Windows/Fonts/simhei.ttf"
+FONT_SIMHEI = cjk_font_path()
 
+
+import os
+if not os.path.isdir("data/models/BAAI--bge-small-zh-v1.5/snapshots/master"):
+    pytest.skip("BGE embedding model not present; RAG tests skipped", allow_module_level=True)
 
 class StubVision:
     """合成视觉：返回火花检测（模拟 YOLO 实检输出）。"""

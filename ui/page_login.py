@@ -5,11 +5,13 @@
 from __future__ import annotations
 
 import streamlit as st
+from ui.page_helpers import safe_page
 
 from dao.db import get_conn, init_db
 from services.auth_service import AuthService
 
 
+@safe_page("登录")
 def render_login() -> None:
     st.title("🌊 海之子 · 动火作业安全智能体")
     st.caption("本地离线 · 多Agent 安全研判")

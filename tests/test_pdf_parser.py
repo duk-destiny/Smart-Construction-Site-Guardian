@@ -3,8 +3,9 @@
 import pytest
 from fpdf import FPDF
 from core.pdf_parser import PdfParser
+from tests.cjk_font import cjk_font_path
 
-FONT_SIMHEI = "C:/Windows/Fonts/simhei.ttf"
+FONT_SIMHEI = cjk_font_path()
 
 
 def _make_cjk_pdf(save_path: str, lines: list[str]):

@@ -2,11 +2,11 @@
 # 所有路径相对于项目根目录；敏感值不入库不进代码（C4）。
 models:
   # 默认火情检测模型（兜底用；场景化后优先读 scenes.<scene>.yolo_weights）
-  yolo_onnx: data/models/yolov8_fire_smoke.onnx   # 火情检测模型（Fire/default/smoke 3 类，已导出 ONNX）
+  yolo_onnx: data/models/yolov8_fire_smoke_v2.onnx   # 火情检测模型（Fire/default/smoke 3 类，已导出 ONNX）
   yolo_class_map:                                # 模型类名 → 项目隐患键（None=忽略）
-    Fire: spark
-    default: null
+    spark: spark
     smoke: smoke
+    extinguisher: extinguisher
   bge_dir: data/models/BAAI--bge-small-zh-v1.5/snapshots/master  # 本地中文 Embedding 模型
 
 kb:
@@ -30,28 +30,30 @@ llm:
 # load_object_detection 启用 Detecting-danger 独有的"堆放物倾斜检测"。
 scenes:
   hot_work:                                            # 动火作业安全（默认场景）
+    conf_thres: 0.35
     yolo_weights:
-      - path: data/models/yolov8_fire_smoke.onnx
+      - path: data/models/yolov8_fire_smoke_v2.onnx
         class_map:
-          Fire: spark
-          default: null
+          spark: spark
           smoke: smoke
+          extinguisher: extinguisher
     kb_collection: kb_hot_work
     risk_matrix: config/rules/hot_work.yaml
     load_object_detection:
       enabled: false
 
   construction_ppe:                                    # 施工 PPE / 危险检测
+    conf_thres: 0.25
     yolo_weights:
       # 核心 PPE 头：沿用 industrial-safety-vision 工程路线（YOLO+ONNX）
       # 权重由该流水线训练/导出后放置于此路径即可启用，缺省则优雅跳过
       # 类名需与训练数据集 data.yaml 的 names 完全一致（见 construction-safety-gsnvb）
-      - path: data/models/ppe_yolov8.onnx
+      - path: data/models/ppe_yolov8_v2.onnx
         class_map:
           helmet: helmet
-          no-helmet: no_helmet
+          no_helmet: no_helmet
+          no_vest: no_vest
           vest: vest
-          no-vest: no_vest
           person: person
     kb_collection: kb_ppe
     risk_matrix: config/rules/construction_ppe.yaml
@@ -72,8 +74,8 @@ compliance:
     spark: critical
     smoke: critical
     no_helmet: critical
-    face_shield: critical
-    extinguisher: critical
+    face_shield: safe
+    extinguisher: safe
     load_object_tilted: critical
     flammable: warning
     no_vest: warning
@@ -81,3 +83,24 @@ compliance:
     helmet: safe
     vest: safe
     person: safe
+
+# ================= 告警外部推送（P0/P1）=================
+# 默认关闭；开启后，实时监测/后台轮询产生的高危告警会自动推送到 webhook。
+# channel 支持：wecom（企业微信机器人）/ dingtalk（钉钉机器人）/ generic（通用 JSON webhook）
+notify:
+  enabled: false
+  demo_mode: false             # 演示模式：true 时跳过真实 HTTP，捕获 payload 到 data/mock_capture.jsonl（管理端可会话级开关）
+  channel: generic
+  webhook_url: ""            # 机器人 webhook 地址，例如 https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=xxx
+  timeout_sec: 5             # 单次 HTTP 超时（秒）
+  retries: 2                 # 失败重试次数（不含首次）
+  cooldown_sec: 60           # 后台轮询下同源同类告警的推送冷却（秒）
+  image_base_url: ""         # 证据截图可访问前缀（如 http://192.168.1.10:8501），留空则只发相对路径
+
+# ================= 后台 RTSP 自动轮询监控（P0/P1）=================
+# 默认关闭；开启后 app 启动即按 interval_sec 轮询 sources，critical 帧自动告警+推送
+monitor:
+  enabled: false
+  interval_sec: 10           # 轮询间隔（秒）
+  cooldown_sec: 60           # 同源同类告警冷却（秒）
+  sources: []                # 每项一个 RTSP/本地视频源，如 ["rtsp://user:pass@host:554/stream"]；也可用 "demo://" 作为无需真实视频源的示例源（见 core/video_source.py）

@@ -14,7 +14,10 @@ import yaml
 
 from agents.base import AgentBase, AgentMessage
 from core.config import ConfigLoader
+from core.false_positive import filter_ppe_contradiction, filter_smoke_vest_conflict
 from core.yolo_engine import WHITELIST
+from core.logging import get_logger
+log = get_logger(__name__)
 
 # 风险等级序：用于取"最高"风险
 RISK_ORDER = {"低": 0, "一般": 1, "较大": 2, "重大": 3}
@@ -36,7 +39,7 @@ class FusionAgent(AgentBase):
 
     def _load(self, path: str) -> None:
         if not os.path.exists(path):
-            print(f"[FusionAgent] 规则矩阵缺失: {path}，使用空矩阵")
+            log.warning(f"规则矩阵缺失: {path}，使用空矩阵")
             self._matrix, self._fp_filter = [], {}
             return
         with open(path, encoding="utf-8") as f:
@@ -63,6 +66,11 @@ class FusionAgent(AgentBase):
         filtered_fp: list[dict] = []
         matched_risks: list[str] = []
         reasons: list[str] = []
+
+        detections, conflict_fp = filter_smoke_vest_conflict(detections)
+        filtered_fp.extend(conflict_fp)
+        detections, ppe_fp = filter_ppe_contradiction(detections)
+        filtered_fp.extend(ppe_fp)
 
         for det in detections:
             cls = det.get("cls")
@@ -118,5 +126,9 @@ class FusionAgent(AgentBase):
             "risk_level": risk_level,
             "filtered_fp": filtered_fp,
             "reasons": unique_reasons,
+            "input_summary": {
+                "detections": len(detections),
+                "compliance": len(compliance),
+            },
         }
         return msg

@@ -58,10 +58,11 @@ def test_decode_maps_model_classes_via_class_map():
 def test_load_real_fire_onnx_parses_names():
     """加载真实火情 ONNX，验证类别名从元数据正确解析并映射。"""
     import os
-    onnx = os.path.join("data", "models", "yolov8_fire_smoke.onnx")
+    onnx = os.path.join("data", "models", "yolov8_fire_smoke_v2.onnx")
     if not os.path.exists(onnx):
         pytest.skip("火情 ONNX 未导出，跳过")
     eng = YoloEngine(conf_thres=0.45,
-                     class_map={"Fire": "spark", "default": None, "smoke": "smoke"})
+                     class_map={"spark": "spark", "smoke": "smoke",
+                                "extinguisher": "extinguisher"})
     eng.load(onnx)
-    assert eng.class_names == ["Fire", "default", "smoke"]
+    assert eng.class_names == ["spark", "smoke", "extinguisher"]
