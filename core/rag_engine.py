@@ -8,6 +8,8 @@ import os
 from pathlib import Path
 
 from core.pdf_parser import PdfParser
+from core.logging import get_logger
+log = get_logger(__name__)
 
 
 class RagEngine:
@@ -29,7 +31,7 @@ class RagEngine:
                 model_path = self._bge_dir or "data/models/BAAI--bge-small-zh-v1.5/snapshots/master"
                 self._model = SentenceTransformer(model_path)
             except Exception as e:
-                print(f"[RagEngine] BGE 加载失败: {e}")
+                log.warning(f"BGE 加载失败: {e}")
                 self._model = False  # type: ignore[assignment]
         return self._model if self._model is not False else None
 
@@ -45,7 +47,7 @@ class RagEngine:
                     metadata={"hnsw:space": "cosine"},
                 )
             except Exception as e:
-                print(f"[RagEngine] Chroma 加载失败: {e}")
+                log.warning(f"Chroma 加载失败: {e}")
                 self._collection = False  # type: ignore[assignment]
         return self._collection if self._collection is not False else None
 
@@ -121,5 +123,5 @@ class RagEngine:
                     })
             return out
         except Exception as e:
-            print(f"[RagEngine] 查询失败: {e}")
+            log.warning(f"查询失败: {e}")
             return []

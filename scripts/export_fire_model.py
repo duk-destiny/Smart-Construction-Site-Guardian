@@ -5,7 +5,7 @@ torch.load 无法处理含单引号的用户目录路径（k'k），故先将 be
 
 源：YOLOv8-Fire-and-Smoke-Detection-main/runs/detect/train/weights/best.pt
 类别（datasets/fire-8/data.yaml）：0=Fire, 1=default, 2=smoke
-输出：data/models/yolov8_fire_smoke.onnx
+输出：data/models/yolov8_fire_smoke_v2.onnx
 """
 from __future__ import annotations
 
@@ -17,7 +17,7 @@ from ultralytics import YOLO
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 SRC = r"C:\Users\k'k\Desktop\海之子\YOLOv8-Fire-and-Smoke-Detection-main\runs\detect\train\weights\best.pt"
 TMP_PT = r"C:\Windows\Temp\_fire_best.pt"
-OUT_ONNX = os.path.join(ROOT, "data", "models", "yolov8_fire_smoke.onnx")
+OUT_ONNX = os.path.join(ROOT, "data", "models", "yolov8_fire_smoke_v2.onnx")
 
 
 def main() -> None:

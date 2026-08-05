@@ -5,12 +5,19 @@ data/kb/*.pdf
 data/uploads/
 data/exports/
 data/demo/
+data/combined/
+data/eval/
+data/feedback_training/
 data/app.db
 data/app.db-wal
 data/app.db-shm
 data/app.log
+data/runs_combined/
+data/train/
+data/pytest_tmp/
 .cache/
 runs/
+plugins/
 
 # ===== 模型权重 =====
 # 小模型（onnx/weights/cfg/names）随仓库提交，保证开箱即用
@@ -24,6 +31,10 @@ __pycache__/
 .venv/
 venv/
 venv313/
+.venv313/
+pytest_last.txt
+yolov8n.pt
+yolov8s.pt
 
 # ===== 编辑器 / 系统 / 日志 =====
 .idea/
@@ -32,3 +43,7 @@ venv313/
 # 运行期临时日志（streamlit 启动重定向）
 streamlit.log
 streamlit.err
+
+data/alarms/   # 告警现场证据截图（运行时产生，不入仓）
+
+.pytest_tmp/

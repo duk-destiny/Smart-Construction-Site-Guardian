@@ -14,6 +14,7 @@ from concurrent.futures import ThreadPoolExecutor, TimeoutError as FuturesTimeou
 from agents.action_agent import ActionAgent
 from agents.base import AgentMessage
 from agents.fusion_agent import FusionAgent
+from agents.review_agent import ReviewAgent
 from agents.rule_agent import RuleAgent
 from agents.vision_agent import VisionAgent
 from core.config import ConfigLoader
@@ -28,7 +29,7 @@ _TIMEOUT_RULE = 2.0
 class Orchestrator:
     """多 Agent 并行编排器。"""
 
-    def __init__(self, vision=None, rule=None, fusion=None, action=None,
+    def __init__(self, vision=None, rule=None, fusion=None, review=None, action=None,
                  progress_cb=None, scene_id: str | None = None):
         self._scene_id = scene_id
         # 视觉/融合 Agent 按场景加载检测头与风险矩阵
@@ -43,6 +44,7 @@ class Orchestrator:
                 kb_collection = None
         self.rule = rule or RuleAgent(rag=RagEngine(collection_name=kb_collection)
                                      if kb_collection else RagEngine())
+        self.review = review or ReviewAgent()
         self.action = action or ActionAgent()
         self._progress_cb = progress_cb or (lambda *a, **k: None)
 
@@ -85,7 +87,7 @@ class Orchestrator:
             payload={"image_paths": images}, error=None, cost_ms=0)
         rmsg = AgentMessage(
             task_id=task_id, agent="rule", status="pending",
-            payload={"permit_info": permit_info, "violation_descs": []},
+            payload={"permit_info": permit_info, "violation_descs": [], "skip_rag": True},
             error=None, cost_ms=0)
 
         try:
@@ -104,11 +106,25 @@ class Orchestrator:
         self._push(task_id, "vision", vout.status, vout.cost_ms)
         self._push(task_id, "rule", rout.status, rout.cost_ms)
 
-        # 视觉输出回灌规范 Agent 的违规描述（R 已先跑，这里用视觉结果补全）
+        # 视觉输出回灌规范 Agent：预检阶段只查作业票，拿到视觉证据后再补 RAG，
+        # 避免同一任务重复执行一次完整的规范检索。
         violation_descs = vout.payload.get("violation_descs", []) if vout.status == "success" else []
-        if violation_descs and rout.status == "success":
-            rmsg.payload["violation_descs"] = violation_descs
+        permit_noncompliant = any(
+            c.get("verdict") == "不合规"
+            for c in rout.payload.get("compliance", [])
+        ) if rout.status == "success" else False
+        if rout.status == "success" and (violation_descs or permit_noncompliant):
+            self._push(task_id, "rule", "running")
+            rmsg = AgentMessage(
+                task_id=task_id, agent="rule", status="pending",
+                payload={
+                    "permit_info": permit_info,
+                    "violation_descs": violation_descs,
+                    "skip_rag": False,
+                },
+                error=None, cost_ms=0)
             rout = self.rule.run(rmsg)
+            self._push(task_id, "rule", rout.status, rout.cost_ms)
 
         # 融合
         self._push(task_id, "fusion", "running")
@@ -120,6 +136,18 @@ class Orchestrator:
             }, error=None, cost_ms=0))
         self._push(task_id, "fusion", fmsg.status, fmsg.cost_ms)
 
+        # 复核：高风险或证据不足的结果标记人工复核
+        self._push(task_id, "review", "running")
+        rvmsg = self.review.run(AgentMessage(
+            task_id=task_id, agent="review", status="pending",
+            payload={
+                "detections": vout.payload.get("detections", []) if vout.status == "success" else [],
+                "compliance": rout.payload.get("compliance", []) if rout.status == "success" else [],
+                "risk_level": fmsg.payload.get("risk_level", "一般"),
+                "filtered_fp": fmsg.payload.get("filtered_fp", []),
+            }, error=None, cost_ms=0))
+        self._push(task_id, "review", rvmsg.status, rvmsg.cost_ms)
+
         # 闭环处置
         self._push(task_id, "action", "running")
         amsg = self.action.run(AgentMessage(
@@ -129,12 +157,14 @@ class Orchestrator:
                 "reasons": fmsg.payload.get("reasons", []),
                 "compliance": rout.payload.get("compliance", []) if rout.status == "success" else [],
                 "training_tips": rout.payload.get("training_tips", []) if rout.status == "success" else [],
+                "needs_review": rvmsg.payload.get("needs_review", False),
+                "review_reasons": rvmsg.payload.get("review_reasons", []),
             }, error=None, cost_ms=0))
         self._push(task_id, "action", amsg.status, amsg.cost_ms)
 
         # 整体降级/失败判定：failed > degraded > success
-        failed = any(m.status == "failed" for m in (vout, rout, fmsg, amsg))
-        degraded = any(m.status == "degraded" for m in (vout, rout, fmsg, amsg))
+        failed = any(m.status == "failed" for m in (vout, rout, fmsg, rvmsg, amsg))
+        degraded = any(m.status == "degraded" for m in (vout, rout, fmsg, rvmsg, amsg))
         if failed:
             overall = "failed"
         elif degraded:
@@ -147,6 +177,7 @@ class Orchestrator:
                 "vision": {"status": vout.status, "payload": vout.payload},
                 "rule": {"status": rout.status, "payload": rout.payload},
                 "fusion": {"status": fmsg.status, "payload": fmsg.payload},
+                "review": {"status": rvmsg.status, "payload": rvmsg.payload},
                 "action": {"status": amsg.status, "payload": amsg.payload},
                 "risk_level": fmsg.payload.get("risk_level"),
                 "reasons": fmsg.payload.get("reasons"),

@@ -4,7 +4,10 @@
 """
 from __future__ import annotations
 
+import json
+
 import streamlit as st
+from ui.page_helpers import safe_page
 
 from agents.orchestrator import Orchestrator
 from core.compliance import evaluate
@@ -21,10 +24,12 @@ _AGENT_TITLE = {
     "vision": "感知视觉 Agent（巡检员）",
     "rule": "安全规范 Agent（资料员）",
     "fusion": "风险融合 Agent（安全主管）",
+    "review": "复核 Agent（质检员）",
     "action": "闭环处置 Agent（督办员）",
 }
 
 
+@safe_page("多Agent研判")
 def render_agents() -> None:
     st.title("🤖 多Agent 分步研判")
     task_id = st.session_state.get("current_task_id")
@@ -68,10 +73,29 @@ def render_agents() -> None:
 
     # 顶部进度条
     prog = ts.get_progress(task_id)
-    cols = st.columns(4)
+    cols = st.columns(len(_AGENT_TITLE))
     for i, (agent, title) in enumerate(_AGENT_TITLE.items()):
         info = prog.get(agent, {})
         cols[i].metric(title.split("（")[0], info.get("status", "—"), f"{info.get('cost_ms',0)}ms")
+
+    with st.expander("证据链 / Agent 运行轨迹"):
+        runs = ts.list_agent_runs(task_id)
+        if not runs:
+            st.caption("本次运行结果保存后自动生成，用于追溯每个 Agent 的耗时与输出。")
+        for run in runs:
+            st.caption(
+                f"{run['agent']} ｜ {run['status']} ｜ {run['cost_ms']}ms ｜ {run['created_at']}"
+            )
+            if run["input_json"]:
+                try:
+                    st.json({"输入": json.loads(run["input_json"])})
+                except ValueError:
+                    pass
+            if run["output_json"]:
+                try:
+                    st.json({"输出": json.loads(run["output_json"])})
+                except ValueError:
+                    st.caption(run["output_json"][:200])
 
     # 4 张 Agent 卡片（orchestrator 返回的是 AgentMessage dict，数据在 payload 里）
     result_payload = result.get("payload", {})
@@ -100,11 +124,15 @@ def render_agents() -> None:
                     for c in comp:
                         verdict = c.get("verdict", "合规")
                         label = c.get("label", "")
-                        clause = c.get("clause", "")
+                        clause = (c.get("clause_ref") or c.get("clause_no")
+                                  or c.get("clause", ""))
+                        clause_text = c.get("clause_text", "")
                         icon = "✅" if verdict == "合规" else "❌"
-                        clause_text = f"（{clause}）" if clause else ""
+                        clause_display = f"（第{clause}条）" if clause else ""
+                        if clause_text:
+                            clause_display += f"：{clause_text[:60]}"
                         st.caption(
-                            f"{icon} {label}：{verdict}{clause_text}"
+                            f"{icon} {label}：{verdict}{clause_display}"
                         )
                 tips = payload.get("training_tips") or []
                 if tips:
@@ -115,6 +143,14 @@ def render_agents() -> None:
                 st.write(f"风险等级：**{payload.get('risk_level','—')}**")
                 for r in payload.get("reasons", []):
                     st.caption(f"- {r}")
+            elif agent == "review":
+                needs_review = payload.get("needs_review", False)
+                if needs_review:
+                    st.warning("需要人工复核")
+                    for r in payload.get("review_reasons", []):
+                        st.caption(f"- {r}")
+                else:
+                    st.success("无需人工复核")
             elif agent == "action":
                 wo = payload.get("work_order", {})
                 if wo:

@@ -83,8 +83,82 @@ CREATE TABLE IF NOT EXISTS detection_records (
     frame_status TEXT NOT NULL,           -- 该帧三级合规：合规/警告/不合规
     cls         TEXT NOT NULL,            -- 项目隐患键
     conf        REAL,
+    image_path  TEXT,
+    source      TEXT,
     severity    TEXT,                     -- safe/warning/critical
     created_at  TEXT NOT NULL
+);
+
+-- Agent 运行证据链：每次研判链路中的 Agent 输入输出摘要，用于追溯与答辩展示
+CREATE TABLE IF NOT EXISTS agent_runs (
+    id          TEXT PRIMARY KEY,
+    task_id     TEXT NOT NULL REFERENCES tasks(id),
+    agent       TEXT NOT NULL,
+    status      TEXT NOT NULL,
+    cost_ms     INTEGER NOT NULL DEFAULT 0,
+    input_json  TEXT,
+    output_json TEXT,
+    error       TEXT,
+    created_at  TEXT NOT NULL
+);
+
+-- 人工纠偏反馈样本：安全员改判/误报/漏报记录，用于证据链与后续训练集构建
+CREATE TABLE IF NOT EXISTS feedback_samples (
+    id                   TEXT PRIMARY KEY,
+    task_id              TEXT NOT NULL REFERENCES tasks(id),
+    user_id              TEXT,
+    auto_risk_level      TEXT,
+    corrected_risk_level TEXT NOT NULL,
+    reason               TEXT NOT NULL,
+    feedback_type        TEXT NOT NULL DEFAULT 'override',
+    source_json          TEXT,
+    image_path           TEXT,
+    detection_json       TEXT,
+    corrected_labels_json TEXT,
+    status               TEXT NOT NULL DEFAULT 'pending',
+    reviewed_by          TEXT,
+    reviewed_at          TEXT,
+    created_at           TEXT NOT NULL
+);
+
+-- 告警生命周期：实时监测产生的高风险告警，支持确认/误报/已处理
+CREATE TABLE IF NOT EXISTS alarm_events (
+    id          TEXT PRIMARY KEY,
+    session_id  TEXT,
+    task_id     TEXT,
+    scene_id    TEXT,
+    cls         TEXT,
+    conf        REAL,
+    status      TEXT NOT NULL DEFAULT 'new'
+                CHECK(status IN ('new','confirmed','false_alarm','resolved')),
+    created_at  TEXT NOT NULL,
+    updated_at  TEXT,
+    reviewed_by TEXT
+);
+
+-- 外部推送留痕：每次告警推送记录（webhook/企业微信/钉钉），支持重试与失败追溯
+CREATE TABLE IF NOT EXISTS notification_logs (
+    id         INTEGER PRIMARY KEY AUTOINCREMENT,
+    alarm_id   TEXT NOT NULL,                -- 软引用告警 ID（测试/跳过类推送无对应告警）
+    channel    TEXT NOT NULL,
+    status     TEXT NOT NULL DEFAULT 'pending',
+    error      TEXT,
+    created_at TEXT NOT NULL
+);
+
+-- 模型版本注册：记录训练数据、指标与 ONNX 路径，支持版本切换与回滚
+CREATE TABLE IF NOT EXISTS model_registry (
+    id         TEXT PRIMARY KEY,
+    name       TEXT NOT NULL,
+    version    TEXT NOT NULL,
+    path       TEXT NOT NULL,
+    data_yaml  TEXT,
+    imgsz      INTEGER,
+    mAP50      REAL,
+    mAP50_95   REAL,
+    active     INTEGER NOT NULL DEFAULT 0,
+    notes      TEXT,
+    created_at TEXT NOT NULL
 );
 
 -- 规范文档登记
@@ -107,6 +181,11 @@ CREATE INDEX IF NOT EXISTS idx_kbdocs_name       ON kb_docs(filename);
 CREATE INDEX IF NOT EXISTS idx_detrec_session     ON detection_records(session_id);
 CREATE INDEX IF NOT EXISTS idx_detrec_time        ON detection_records(created_at);
 CREATE INDEX IF NOT EXISTS idx_detrec_cls         ON detection_records(cls);
+CREATE INDEX IF NOT EXISTS idx_agent_runs_task    ON agent_runs(task_id, created_at);
+CREATE INDEX IF NOT EXISTS idx_feedback_time      ON feedback_samples(created_at);
+CREATE INDEX IF NOT EXISTS idx_alarm_status       ON alarm_events(status, created_at);
+CREATE INDEX IF NOT EXISTS idx_notify_alarm       ON notification_logs(alarm_id, created_at);
+CREATE INDEX IF NOT EXISTS idx_model_name_active  ON model_registry(name, active);
 
 -- 触发器：禁止更新审计日志
 CREATE TRIGGER IF NOT EXISTS trg_audit_no_update

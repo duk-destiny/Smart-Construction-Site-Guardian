@@ -1,4 +1,4 @@
-"""本地 4070 训练 PPE 检测模型，导出 ONNX 到 data/models/ppe_yolov8.onnx。
+"""本地 4070 训练 PPE 检测模型，导出 ONNX 到 data/models/ppe_yolov8_v2.onnx。
 
 用法（在 venv313 中，项目根目录下）：
   venv313/Scripts/python.exe scripts/train_ppe_local.py
@@ -93,9 +93,9 @@ def main() -> None:
     if not best.exists():
         best = last_pt
     exported = YOLO(str(best)).export(format="onnx", imgsz=416, opset=17)
-    src = Path(exported) if os.path.exists(exported) else (RUN_DIR / "ppe_yolov8.onnx")
+    src = Path(exported) if os.path.exists(exported) else (RUN_DIR / "ppe_yolov8_v2.onnx")
     DATA_MODELS.mkdir(parents=True, exist_ok=True)
-    dst = DATA_MODELS / "ppe_yolov8.onnx"
+    dst = DATA_MODELS / "ppe_yolov8_v2.onnx"
     shutil.copy(src, dst)
     print("已导出 ONNX:", dst, flush=True)
 

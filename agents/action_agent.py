@@ -106,9 +106,19 @@ class ActionAgent(AgentBase):
             "deadline": deadline,
             "worker_notice": worker_notice,
             "training_tips": training_tips,
+            "review_required": msg.payload.get("needs_review", False),
+            "review_reasons": msg.payload.get("review_reasons", []),
         }
         msg.status = "success"
-        msg.payload = {"work_order": work_order, "worker_notice": worker_notice}
+        msg.payload = {
+            "work_order": work_order,
+            "worker_notice": worker_notice,
+            "input_summary": {
+                "risk_level": risk_level,
+                "reasons_count": len(reasons),
+                "needs_review": msg.payload.get("needs_review", False),
+            },
+        }
         return msg
 
     def _polish_async(

@@ -208,15 +208,20 @@ class DetectionRecordDAO:
         """写入一帧的检测项；rows: [{"scene_id","cls","conf","severity"}, ...]。"""
         if not rows:
             # 仍记录一帧"无违规"占位，保证合规率统计口径完整
-            rows = [{"scene_id": None, "cls": "none", "conf": 1.0, "severity": "safe"}]
+            rows = [{
+                "scene_id": None, "cls": "none", "conf": 1.0,
+                "severity": "safe", "track_id": None, "track_frames": 1,
+            }]
         data = [(
             _new_id("r"), session_id, r.get("scene_id"), mode, frame_status,
             r["cls"], r.get("conf"), r.get("severity"),
+            r.get("track_id"), r.get("track_frames"),
         ) for r in rows]
         self.conn.executemany(
             "INSERT INTO detection_records"
-            "(id,session_id,scene_id,mode,frame_status,cls,conf,severity,created_at) "
-            "VALUES(?,?,?,?,?,?,?,?,datetime('now'))", data)
+            "(id,session_id,scene_id,mode,frame_status,cls,conf,severity,"
+            "track_id,track_frames,created_at) "
+            "VALUES(?,?,?,?,?,?,?,?,?,?,datetime('now'))", data)
         self.conn.commit()
 
     def query(self, start: str | None = None, end: str | None = None,
@@ -274,3 +279,206 @@ class DetectionRecordDAO:
             params.append(end + " 23:59:59")
         sql += " GROUP BY cls ORDER BY cnt DESC"
         return self.conn.execute(sql, params).fetchall()
+
+
+class AgentRunDAO:
+    """Agent 运行证据链：一次任务内各 Agent 的执行摘要。"""
+
+    def __init__(self, conn: sqlite3.Connection) -> None:
+        self.conn = conn
+
+    def bulk_insert(self, rows: list[dict]) -> None:
+        """写入多条 Agent 运行记录。rows: [{task_id, agent, status, cost_ms, input_json, output_json, error}]。"""
+        data = [(
+            _new_id("ar"), r["task_id"], r["agent"], r.get("status", "unknown"),
+            int(r.get("cost_ms", 0) or 0), r.get("input_json"),
+            r.get("output_json"), r.get("error"),
+        ) for r in rows]
+        self.conn.executemany(
+            "INSERT INTO agent_runs"
+            "(id,task_id,agent,status,cost_ms,input_json,output_json,error,created_at) "
+            "VALUES(?,?,?,?,?,?,?,?,datetime('now'))", data)
+        self.conn.commit()
+
+    def list_by_task(self, task_id: str) -> list:
+        """按任务返回 Agent 运行轨迹，按创建时间与执行顺序排列。"""
+        return self.conn.execute(
+            "SELECT * FROM agent_runs WHERE task_id=? ORDER BY created_at ASC, id ASC",
+            (task_id,)).fetchall()
+
+
+class FeedbackDAO:
+    """人工纠偏反馈样本：改判/误报/漏报记录，用于证据链与后续训练集构建。"""
+
+    def __init__(self, conn: sqlite3.Connection) -> None:
+        self.conn = conn
+
+    def insert(self, task_id: str, user_id: str | None,
+               auto_risk_level: str | None, corrected_risk_level: str,
+               reason: str, feedback_type: str = "override",
+               source_json: str | None = None,
+               image_path: str | None = None,
+               detection_json: str | None = None,
+               corrected_labels_json: str | None = None,
+               status: str = "pending") -> str:
+        fid = _new_id("fb")
+        self.conn.execute(
+            "INSERT INTO feedback_samples"
+            "(id,task_id,user_id,auto_risk_level,corrected_risk_level,"
+            "reason,feedback_type,source_json,image_path,detection_json,"
+            "corrected_labels_json,status,created_at) "
+            "VALUES(?,?,?,?,?,?,?,?,?,?,?,?,datetime('now'))",
+            (fid, task_id, user_id, auto_risk_level, corrected_risk_level,
+             reason, feedback_type, source_json, image_path, detection_json,
+             corrected_labels_json, status))
+        self.conn.commit()
+        return fid
+
+    def list_all(self, limit: int = 500) -> list:
+        """按时间倒序返回纠偏样本。"""
+        return self.conn.execute(
+            "SELECT * FROM feedback_samples ORDER BY created_at DESC LIMIT ?",
+            (limit,)).fetchall()
+
+    def count(self) -> int:
+        row = self.conn.execute("SELECT COUNT(*) AS cnt FROM feedback_samples").fetchone()
+        return int(row["cnt"]) if row else 0
+
+    def update_review(self, feedback_id: str, status: str,
+                      reviewed_by: str | None) -> None:
+        self.conn.execute(
+            "UPDATE feedback_samples SET status=?, reviewed_by=?, "
+            "reviewed_at=datetime('now') WHERE id=?",
+            (status, reviewed_by, feedback_id))
+        self.conn.commit()
+
+    def update_corrections(self, feedback_id: str,
+                           corrected_labels_json: str,
+                           reviewed_by: str | None) -> None:
+        self.conn.execute(
+            "UPDATE feedback_samples SET corrected_labels_json=?, "
+            "reviewed_by=?, reviewed_at=datetime('now') WHERE id=?",
+            (corrected_labels_json, reviewed_by, feedback_id))
+        self.conn.commit()
+
+
+class AlarmEventDAO:
+    """告警生命周期：记录实时监测告警并支持人工状态流转。"""
+
+    def __init__(self, conn: sqlite3.Connection) -> None:
+        self.conn = conn
+
+    def insert(self, session_id: str | None, task_id: str | None,
+               scene_id: str | None, cls: str | None, conf: float | None,
+               image_path: str | None = None, source: str | None = None,
+               status: str = "new") -> str:
+        aid = _new_id("al")
+        self.conn.execute(
+            "INSERT INTO alarm_events"
+            "(id,session_id,task_id,scene_id,cls,conf,image_path,source,"
+            "status,created_at) "
+            "VALUES(?,?,?,?,?,?,?,?,?,datetime('now'))",
+            (aid, session_id, task_id, scene_id, cls, conf,
+             image_path, source, status))
+        self.conn.commit()
+        return aid
+
+    def find_open(self, session_id: str, cls: str) -> object | None:
+        """查找同一会话/类别下仍未关闭的告警，避免短时间重复创建。"""
+        return self.conn.execute(
+            "SELECT * FROM alarm_events "
+            "WHERE session_id=? AND cls=? AND status IN ('new','confirmed') "
+            "ORDER BY created_at DESC LIMIT 1",
+            (session_id, cls)).fetchone()
+
+    def list_all(self, limit: int = 500) -> list:
+        return self.conn.execute(
+            "SELECT * FROM alarm_events ORDER BY created_at DESC LIMIT ?",
+            (limit,)).fetchall()
+
+    def get_by_id(self, alarm_id: str):
+        """按 ID 返回告警行（供推送/证据回填）。"""
+        return self.conn.execute(
+            "SELECT * FROM alarm_events WHERE id=?", (alarm_id,)).fetchone()
+
+    def set_image(self, alarm_id: str, image_path: str | None) -> None:
+        """回填告警证据截图路径。"""
+        self.conn.execute(
+            "UPDATE alarm_events SET image_path=?, updated_at=datetime('now') "
+            "WHERE id=?",
+            (image_path, alarm_id))
+        self.conn.commit()
+
+    def update_status(self, alarm_id: str, status: str,
+                      reviewed_by: str | None) -> None:
+        self.conn.execute(
+            "UPDATE alarm_events SET status=?, reviewed_by=?, updated_at=datetime('now') "
+            "WHERE id=?",
+            (status, reviewed_by, alarm_id))
+        self.conn.commit()
+
+
+class NotificationLogDAO:
+    """外部推送留痕：每次告警推送的状态与错误信息。"""
+
+    def __init__(self, conn: sqlite3.Connection) -> None:
+        self.conn = conn
+
+    def insert(self, alarm_id: str, channel: str,
+               status: str = "pending", error: str | None = None) -> int:
+        cur = self.conn.execute(
+            "INSERT INTO notification_logs(alarm_id,channel,status,error,created_at) "
+            "VALUES(?,?,?,?,datetime('now'))",
+            (alarm_id, channel, status, error))
+        self.conn.commit()
+        return cur.lastrowid
+
+    def list_by_alarm(self, alarm_id: str, limit: int = 50) -> list:
+        return self.conn.execute(
+            "SELECT * FROM notification_logs WHERE alarm_id=? "
+            "ORDER BY created_at DESC LIMIT ?",
+            (alarm_id, limit)).fetchall()
+
+    def list_all(self, limit: int = 200) -> list:
+        return self.conn.execute(
+            "SELECT * FROM notification_logs ORDER BY created_at DESC LIMIT ?",
+            (limit,)).fetchall()
+
+
+class ModelRegistryDAO:
+    """模型版本注册表。"""
+
+    def __init__(self, conn: sqlite3.Connection) -> None:
+        self.conn = conn
+
+    def insert(self, name: str, version: str, path: str,
+               data_yaml: str | None = None, imgsz: int | None = None,
+               mAP50: float | None = None, mAP50_95: float | None = None,
+               notes: str | None = None, active: int = 0) -> str:
+        mid = _new_id("md")
+        self.conn.execute(
+            "INSERT INTO model_registry"
+            "(id,name,version,path,data_yaml,imgsz,mAP50,mAP50_95,active,notes,created_at) "
+            "VALUES(?,?,?,?,?,?,?,?,?,?,datetime('now'))",
+            (mid, name, version, path, data_yaml, imgsz, mAP50, mAP50_95,
+             active, notes))
+        self.conn.commit()
+        return mid
+
+    def list_all(self, limit: int = 200) -> list:
+        return self.conn.execute(
+            "SELECT * FROM model_registry ORDER BY created_at DESC LIMIT ?",
+            (limit,)).fetchall()
+
+    def get_active(self, name: str):
+        return self.conn.execute(
+            "SELECT * FROM model_registry WHERE name=? AND active=1 "
+            "ORDER BY created_at DESC LIMIT 1",
+            (name,)).fetchone()
+
+    def set_active(self, name: str, model_id: str) -> None:
+        self.conn.execute(
+            "UPDATE model_registry SET active=0 WHERE name=?", (name,))
+        self.conn.execute(
+            "UPDATE model_registry SET active=1 WHERE id=?", (model_id,))
+        self.conn.commit()

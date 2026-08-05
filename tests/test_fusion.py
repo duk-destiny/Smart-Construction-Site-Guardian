@@ -54,8 +54,8 @@ def test_fp_filter(fusion):
     assert out.payload["risk_level"] != "重大"
 
 
-def test_fusion_larger_for_ppe(fusion):
-    """未戴面罩 / 缺灭火器 → 较大。"""
+def test_fusion_safe_ppe_signals_low(fusion):
+    """检测到防护面罩 / 灭火器 → 低风险正向信号。"""
     msg = AgentMessage(
         task_id="t4", agent="fusion", status="pending",
         payload={
@@ -65,7 +65,18 @@ def test_fusion_larger_for_ppe(fusion):
         error=None, cost_ms=0,
     )
     out = fusion.run(msg)
-    assert out.payload["risk_level"] == "较大"
+    assert out.payload["risk_level"] == "低"
+
+    msg = AgentMessage(
+        task_id="t4b", agent="fusion", status="pending",
+        payload={
+            "detections": [{"cls": "extinguisher", "conf": 0.8}],
+            "compliance": [],
+        },
+        error=None, cost_ms=0,
+    )
+    out = fusion.run(msg)
+    assert out.payload["risk_level"] == "低"
 
 
 def test_whitelist_filtered(fusion):
@@ -91,4 +102,22 @@ def test_no_detection_low(fusion):
         error=None, cost_ms=0,
     )
     out = fusion.run(msg)
+    assert out.payload["risk_level"] == "低"
+
+
+def test_ppe_contradiction_filtered(fusion):
+    """helmet/no_helmet 矛盾框进入误报，不触发 PPE 风险。"""
+    msg = AgentMessage(
+        task_id="t7", agent="fusion", status="pending",
+        payload={
+            "detections": [
+                {"cls": "helmet", "conf": 0.72, "bbox": [0.5, 0.5, 0.3, 0.3]},
+                {"cls": "no_helmet", "conf": 0.55, "bbox": [0.5, 0.5, 0.4, 0.4]},
+            ],
+            "compliance": [],
+        },
+        error=None, cost_ms=0,
+    )
+    out = fusion.run(msg)
+    assert any(fp["cls"] == "no_helmet" for fp in out.payload["filtered_fp"])
     assert out.payload["risk_level"] == "低"

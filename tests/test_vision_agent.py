@@ -69,3 +69,21 @@ def test_vision_agent_missing_weight_failed(monkeypatch):
     out = VisionAgent().run(m)
     assert out.status == "failed"
     assert out.error
+
+
+def test_safe_signals_not_in_violation_descs():
+    class _StubSafeYolo:
+        session = True
+        conf_thres = 0.45
+        def infer(self, p):
+            return [
+                {"cls": "helmet", "conf": 0.9, "bbox": [1, 2, 3, 4]},
+                {"cls": "vest", "conf": 0.9, "bbox": [1, 2, 3, 4]},
+                {"cls": "person", "conf": 0.9, "bbox": [1, 2, 3, 4]},
+            ]
+
+    out = VisionAgent(yolo=_StubSafeYolo()).run(AgentMessage(
+        task_id="t_safe", agent="vision", status="pending",
+        payload={"image_paths": ["x.jpg"]}, error=None, cost_ms=0))
+    assert out.status == "success"
+    assert out.payload["violation_descs"] == []

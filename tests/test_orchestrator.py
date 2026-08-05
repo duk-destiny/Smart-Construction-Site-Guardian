@@ -62,3 +62,41 @@ def test_orchestrator_crash_isolated():
     out = orch.execute("t3", images=["x.jpg"], permit_info={})
     # 顶层不应抛出；视觉节点 failed
     assert out.payload["vision"].get("status") == "failed"
+
+
+def test_orchestrator_rule_preflight_then_refine():
+    """规范 Agent 先做免 RAG 预检，拿到视觉证据后再补全条款检索。"""
+    class _RecordingRule:
+        def __init__(self):
+            self.messages = []
+
+        def run(self, msg):
+            self.messages.append(msg)
+            return AgentMessage(
+                task_id=msg.task_id, agent="rule", status="success",
+                payload={
+                    "compliance": [{
+                        "field": "watcher", "label": "监火人",
+                        "verdict": "不合规", "clause_ref": "",
+                    }],
+                    "training_tips": [],
+                }, error=None, cost_ms=5)
+
+    recording = _RecordingRule()
+    orch = Orchestrator(
+        vision=_StubAgent(_ok("vision", {
+            "detections": [{"cls": "spark", "conf": 0.9}],
+            "violation_descs": ["火花"],
+        })),
+        rule=recording,
+        fusion=_StubAgent(_ok("fusion", {"risk_level": "重大", "reasons": ["x"]})),
+        action=_StubAgent(_ok("action", {
+            "work_order": {"risk_level": "重大"}, "worker_notice": "n",
+        })),
+    )
+    out = orch.execute("t4", images=["x.jpg"], permit_info={"watcher": ""})
+    assert out.status == "success"
+    assert len(recording.messages) == 2
+    assert recording.messages[0].payload.get("skip_rag") is True
+    assert recording.messages[1].payload.get("skip_rag") is False
+    assert recording.messages[1].payload.get("violation_descs") == ["火花"]

@@ -9,6 +9,7 @@ import sqlite3
 from core.pdf_parser import PdfParser
 from core.rag_engine import RagEngine
 from dao.models import KbDocDAO
+from services.permission_service import PermissionService
 
 
 class KbAdmin:
@@ -20,9 +21,11 @@ class KbAdmin:
         self.chroma_dir = chroma_dir
         self.collection = collection
         self.bge_dir = bge_dir
+        self.permissions = PermissionService(conn)
 
     def import_pdf(self, pdf_path: str, imported_by: str) -> dict:
         """导入一份规范 PDF：解析 → 向量化 → 登记。"""
+        self.permissions.require(imported_by, "import_pdf")
         clauses = PdfParser.parse(pdf_path)
         if not clauses:
             return {"ok": False, "error": "解析失败或为空"}

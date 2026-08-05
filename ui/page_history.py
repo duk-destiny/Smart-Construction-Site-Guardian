@@ -13,6 +13,7 @@ import csv
 import io
 
 import streamlit as st
+from ui.page_helpers import safe_page
 
 from core.compliance import LEVEL_LABEL
 from dao.db import get_conn, init_db
@@ -20,8 +21,8 @@ from dao.models import DetectionRecordDAO, WorkOrderDAO
 
 _CN = {
     "spark": "火花（动火明火）", "smoke": "烟雾（火情）", "no_helmet": "未佩戴安全帽",
-    "no_vest": "未穿反光衣", "face_shield": "未佩戴防护面罩",
-    "extinguisher": "灭火器缺失", "flammable": "易燃物未清理",
+    "no_vest": "未穿反光衣", "face_shield": "防护面罩",
+    "extinguisher": "灭火器", "flammable": "易燃物未清理",
     "load_object": "堆放物", "load_object_tilted": "堆放物倾斜",
     "helmet": "佩戴安全帽", "vest": "穿着反光衣", "person": "人员",
 }
@@ -35,7 +36,7 @@ def _stats_by_date(start_s: str | None, end_s: str | None) -> list[dict]:
     conn = get_conn()
     init_db(conn)
     dao = DetectionRecordDAO(conn)
-    return dao.stats_by_date(start_s, end_s)
+    return [dict(r) for r in dao.stats_by_date(start_s, end_s)]
 
 
 @st.cache_data(ttl=300)
@@ -44,7 +45,7 @@ def _severity_breakdown(start_s: str | None, end_s: str | None) -> list[dict]:
     conn = get_conn()
     init_db(conn)
     dao = DetectionRecordDAO(conn)
-    return dao.severity_breakdown(start_s, end_s)
+    return [dict(r) for r in dao.severity_breakdown(start_s, end_s)]
 
 
 @st.cache_data(ttl=300)
@@ -56,7 +57,7 @@ def _cached_query(
     conn = get_conn()
     init_db(conn)
     dao = DetectionRecordDAO(conn)
-    return dao.query(start_s, end_s, severity=severity, cls=cls)
+    return [dict(r) for r in dao.query(start_s, end_s, severity=severity, cls=cls)]
 
 
 @st.cache_data(ttl=300)
@@ -84,9 +85,10 @@ def _task_risks(start_s: str | None = None, end_s: str | None = None) -> list[di
         sql += " AND w.created_at <= ?"
         params.append(end_s + " 23:59:59")
     sql += " ORDER BY w.created_at DESC"
-    return conn.execute(sql, params).fetchall()
+    return [dict(r) for r in conn.execute(sql, params).fetchall()]
 
 
+@safe_page("检测历史与分析")
 def render_history() -> None:
     st.title("📊 检测历史与合规分析")
 
@@ -185,11 +187,13 @@ def render_history() -> None:
         # 导出 CSV（B6）
         buf = io.StringIO()
         w = csv.writer(buf)
-        w.writerow(["时间", "会话", "场景", "帧合规级别", "类别", "置信度", "目标级别"])
+        w.writerow(["时间", "会话", "场景", "帧合规级别", "类别", "置信度",
+                    "目标级别", "目标ID", "连续帧"])
         for r in records:
             w.writerow([r["created_at"], r["session_id"], r["scene_id"],
                         r["frame_status"], r["cls"], r["conf"],
-                        SEV_CN.get(r["severity"], r["severity"])])
+                        SEV_CN.get(r["severity"], r["severity"]),
+                        r.get("track_id") or "", r.get("track_frames") or ""])
         st.download_button("⬇ 导出 CSV", buf.getvalue(),
                            file_name="detection_records.csv", mime="text/csv")
 
@@ -197,6 +201,8 @@ def render_history() -> None:
             sev_cn = SEV_CN.get(r["severity"], r["severity"])
             st.caption(f"{r['created_at']} ｜ {r['scene_id'] or '—'} ｜ "
                        f"帧{r['frame_status']} ｜ {_CN.get(r['cls'], r['cls'])} "
-                       f"({r['conf']:.2f}) ｜ 目标级别：{sev_cn}")
+                       f"({r['conf']:.2f}) ｜ 目标级别：{sev_cn} ｜ "
+                       f"track {r.get('track_id') or '—'} 连续 "
+                       f"{r.get('track_frames') or 1} 帧")
     else:
         st.info("暂无检测记录")

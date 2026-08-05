@@ -5,11 +5,13 @@
 from __future__ import annotations
 
 import streamlit as st
+from ui.page_helpers import safe_page
 
 from dao.db import get_conn, init_db
 from services.task_service import TaskService
 
 
+@safe_page("上传与作业票")
 def render_upload() -> None:
     st.title("📤 上传现场资料与作业票")
     uploaded = st.file_uploader("现场图片/视频", type=["jpg", "jpeg", "png", "mp4"])

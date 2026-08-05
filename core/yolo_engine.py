@@ -16,8 +16,8 @@ import numpy as np
 import onnxruntime as ort
 
 # 项目隐患白名单（C4）。多场景共用：
-#  - 动火/火情：spark=火花/动火明火；face_shield=未戴防护面罩；
-#    extinguisher=灭火器缺失；flammable=易燃物未清理；smoke=烟雾（火情）
+#  - 动火/火情：spark=火花/动火明火；face_shield=防护面罩（已佩戴）；
+#    extinguisher=灭火器（已检测到）；flammable=易燃物未清理；smoke=烟雾（火情）
 #  - 施工 PPE（industrial-safety-vision 路线）：helmet/no_helmet、vest/no_vest、person
 #  - 堆放物（Detecting-danger 独门能力）：load_object、load_object_tilted
 WHITELIST = [
@@ -27,8 +27,8 @@ WHITELIST = [
 ]
 WHITELIST_CN = {
     "spark": "火花（动火明火）",
-    "face_shield": "未佩戴防护面罩",
-    "extinguisher": "灭火器配置缺失/不足",
+    "face_shield": "防护面罩",
+    "extinguisher": "灭火器",
     "flammable": "周边易燃物未清理",
     "smoke": "烟雾（火情）",
     "helmet": "佩戴安全帽",

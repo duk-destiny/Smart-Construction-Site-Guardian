@@ -12,6 +12,11 @@ from agents.base import AgentBase, AgentMessage
 from core.config import ConfigLoader
 from core.yolo_adapter import COCO_CN
 from core.yolo_engine import FIRE_CLASSES, WHITELIST_CN, YoloEngine
+from core.logging import get_logger
+log = get_logger(__name__)
+
+# 正向安全信号：检测到这些类别说明防护到位，不应进入违规描述
+SAFE_SIGNAL_CLASSES = {"helmet", "vest", "person"}
 
 if TYPE_CHECKING:
     pass
@@ -40,18 +45,19 @@ class VisionAgent(AgentBase):
 
         scene = cfg.get_scene(self.scene_id)
         specs = scene.get("yolo_weights", []) or []
+        scene_conf = scene.get("conf_thres", cfg.get("infer.conf_thres", 0.45))
         engines: list[YoloEngine] = []
         for spec in specs:
             path = spec.get("path")
             try:
                 eng = YoloEngine(
-                    conf_thres=cfg.get("infer.conf_thres", 0.45),
+                    conf_thres=scene_conf,
                     iou_thres=cfg.get("infer.iou_thres", 0.45),
                     class_map=spec.get("class_map"))
                 eng.load(path)
                 engines.append(eng)
             except Exception as e:  # noqa: BLE001 单头缺失不应拖垮整页
-                print(f"[VisionAgent] 跳过不可用模型 {path}: {e}")
+                log.warning(f"跳过不可用模型 {path}: {e}")
         return engines
 
     def _execute(self, msg: AgentMessage) -> AgentMessage:
@@ -68,7 +74,7 @@ class VisionAgent(AgentBase):
                 try:
                     detections.extend(eng.infer(p))
                 except Exception as e:  # noqa: BLE001
-                    print(f"[VisionAgent] 推理失败 {p}: {e}")
+                    log.warning(f"推理失败 {p}: {e}")
 
         # 堆放物倾斜检测（Detecting-danger 独门能力，按场景开关）
         if self.scene_id:
@@ -82,9 +88,9 @@ class VisionAgent(AgentBase):
                         try:
                             detections.extend(lod.detect_and_assess(p))
                         except Exception as e:  # noqa: BLE001
-                            print(f"[VisionAgent] 堆放物检测失败 {p}: {e}")
+                            log.warning(f"堆放物检测失败 {p}: {e}")
             except Exception as e:  # noqa: BLE001
-                print(f"[VisionAgent] 堆放物配置读取失败: {e}")
+                log.warning(f"堆放物配置读取失败: {e}")
 
         # 映射可读描述：项目白名单优先，否则 COCO 中文释义，再否则原名
         for d in detections:
@@ -97,7 +103,8 @@ class VisionAgent(AgentBase):
         for d in detections:
             if d["cls"] not in seen_cls:
                 seen_cls.add(d["cls"])
-                violation_descs.append(d["violation_desc"])
+                if d["cls"] not in SAFE_SIGNAL_CLASSES:
+                    violation_descs.append(d["violation_desc"])
 
         # 模型能力提示
         fire_hit = any(d["cls"] in FIRE_CLASSES for d in detections)
@@ -117,5 +124,9 @@ class VisionAgent(AgentBase):
                 "detections": detections,
                 "violation_descs": violation_descs,
                 "fire_model_limitation": lim,
+                "input_summary": {
+                    "image_paths": paths,
+                    "engines": len(engines),
+                },
             },
         )

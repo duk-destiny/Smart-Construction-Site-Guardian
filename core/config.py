@@ -30,7 +30,30 @@ class ConfigLoader:
                 raise ConfigError(f"配置文件不存在: {self._path}")
             with open(self._path, encoding="utf-8") as f:
                 self._cache = yaml.safe_load(f)
+            self._validate(self._cache)
         return self._cache
+
+    @staticmethod
+    def _validate(cfg: Any) -> None:
+        """轻量结构校验：notify/monitor 段类型与必需键。不阻断极简配置（段缺失即跳过）。"""
+        if cfg is None:
+            return
+        if not isinstance(cfg, dict):
+            raise ConfigError("配置根节点必须是字典")
+        notify = cfg.get("notify")
+        if notify is not None:
+            if not isinstance(notify, dict):
+                raise ConfigError("notify 配置段必须是字典")
+            if notify.get("enabled") and not str(
+                    notify.get("webhook_url", "")).strip():
+                raise ConfigError("notify.enabled=true 时 webhook_url 不能为空")
+        monitor = cfg.get("monitor")
+        if monitor is not None:
+            if not isinstance(monitor, dict):
+                raise ConfigError("monitor 配置段必须是字典")
+            sources = monitor.get("sources")
+            if sources is not None and not isinstance(sources, list):
+                raise ConfigError("monitor.sources 必须是列表")
 
     def get_scene(self, scene_id: str) -> dict[str, Any]:
         """按场景 ID 取该场景专属配置（权重/知识库/规则矩阵）。"""

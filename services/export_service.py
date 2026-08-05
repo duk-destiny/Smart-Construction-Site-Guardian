@@ -9,6 +9,7 @@ import sqlite3
 from datetime import datetime
 
 from dao.db import get_conn
+from services.permission_service import PermissionService
 
 _COLUMNS = ["工单ID", "任务ID", "隐患描述", "违反规范", "整改要求",
             "风险等级", "工人提示", "生成时间"]
@@ -19,6 +20,7 @@ class ExportService:
 
     def __init__(self, conn: sqlite3.Connection | None = None):
         self._conn = conn
+        self._permissions = PermissionService(self._get_conn())
 
     def _get_conn(self) -> sqlite3.Connection:
         if self._conn is not None:
@@ -27,8 +29,11 @@ class ExportService:
 
     def export_excel(self, task_id: str | None = None,
                     date_from: str | None = None,
-                    date_to: str | None = None) -> dict:
+                    date_to: str | None = None,
+                    user_id: str | None = None) -> dict:
         """导出 Excel，返回 {ok, data:{file_path}}。"""
+        if user_id:
+            self._permissions.require(user_id, "export")
         import openpyxl
         from openpyxl.styles import Font, Alignment, PatternFill
 
