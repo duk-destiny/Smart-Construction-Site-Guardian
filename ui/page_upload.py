@@ -24,7 +24,7 @@ def render_upload() -> None:
                          index=0)
     st.session_state["scene"] = scene
     st.caption("动火作业安全：火情/火花/烟雾 + 动火规范；"
-               "施工 PPE：安全帽/反光衣 + 堆放物倾斜检测（Detecting-danger 独门能力）")
+               "施工 PPE：安全帽/反光衣检测")
 
     is_hot = scene == "hot_work"
     st.subheader("作业票信息")

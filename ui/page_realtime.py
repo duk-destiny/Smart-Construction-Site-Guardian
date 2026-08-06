@@ -83,7 +83,7 @@ def render_realtime() -> None:
     engine = _get_engine()
     if not engine.available:
         st.error("未加载到任何检测模型，请确认 data/models 下权重文件存在（"
-                 "yolov8_fire_smoke_v2.onnx / ppe_yolov8_v2.onnx / yolov3-personload.*）。")
+                 "yolov8_fire_smoke_v2.onnx / ppe_yolov8_v2.onnx）。")
         return
 
     st.caption("动火作业安全 + 施工 PPE 双场景同时接入（复用现有检测头）。"
@@ -261,7 +261,7 @@ def _show_last() -> None:
     with col1:
         st.image(cv2.cvtColor(annotated, cv2.COLOR_BGR2RGB),
                  caption="实时画面（红框=不合规高亮 / 黄框=警告 / 绿框=合规）",
-                 use_column_width=True)
+                 use_container_width=True)
     with col2:
         st.subheader("处置建议")
         for r in comp["reasons"]:
@@ -301,7 +301,7 @@ def _show_rtsp_results() -> None:
         with col1:
             st.image(cv2.cvtColor(r["annotated"], cv2.COLOR_BGR2RGB),
                      caption="远程/文件画面（红框=不合规 / 黄框=警告 / 绿框=合规）",
-                     use_column_width=True)
+                     use_container_width=True)
         with col2:
             st.subheader("处置建议")
             for reason in comp["reasons"]:

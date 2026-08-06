@@ -13,7 +13,7 @@ from services.auth_service import AuthService
 
 @safe_page("登录")
 def render_login() -> None:
-    st.title("🌊 海之子 · 动火作业安全智能体")
+    st.title("🌊 智护工地 · 施工安全智能体")
     st.caption("本地离线 · 多Agent 安全研判")
 
     with st.form("login_form"):

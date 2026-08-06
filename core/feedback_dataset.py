@@ -65,12 +65,25 @@ def _load_json(value: str | None, default: list) -> list:
         return default
 
 
+def _val(row, key: str, default=None):
+    """兼容 dict 与 sqlite3.Row 的取值（Row 无 .get()）。"""
+    try:
+        v = row[key]
+        return v if v is not None else default
+    except (KeyError, IndexError):
+        return default
+
+
 def write_feedback_dataset(
-    samples: list[dict],
+    samples: list,
     output_dir: Path | str,
     train_ratio: float = 0.8,
 ) -> dict:
-    """写场景级 YOLO 数据，返回 {scene: {train, val, skipped}}。"""
+    """写场景级 YOLO 数据，返回 {scene: {train, val, skipped}}。
+
+    样本支持 dict 与 sqlite3.Row（来自 list_feedback_samples）。
+    仅 status=confirmed 的样本才写入训练集（防止未审核纠偏污染模型）。
+    """
     out = Path(output_dir)
     out.mkdir(parents=True, exist_ok=True)
     stats: dict[str, Counter] = {
@@ -80,15 +93,15 @@ def write_feedback_dataset(
     total_skipped = Counter()
 
     for sample in samples:
-        if sample.get("status") != "confirmed":
+        if _val(sample, "status") != "confirmed":
             total_skipped["not_confirmed"] += 1
             continue
-        detections = _load_json(sample.get("detection_json"), [])
+        detections = _load_json(_val(sample, "detection_json"), [])
         scene = scene_for_detections(detections)
         if scene is None:
             total_skipped["unassigned_scene"] += 1
             continue
-        image_path = sample.get("image_path")
+        image_path = _val(sample, "image_path")
         if not image_path:
             total_skipped["missing_image"] += 1
             continue
@@ -99,7 +112,7 @@ def write_feedback_dataset(
             total_skipped["missing_image"] += 1
             continue
 
-        corrections = _load_json(sample.get("corrected_labels_json"), [])
+        corrections = _load_json(_val(sample, "corrected_labels_json"), [])
         rows = feedback_yolo_rows(detections, corrections, scene)
         if not rows:
             stats[scene]["skipped"] += 1

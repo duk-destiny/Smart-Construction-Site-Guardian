@@ -1,4 +1,4 @@
-# 海之子·动火作业安全多Agent智能体 —— 全局配置
+# 智护工地 · 施工安全智能体 —— 全局配置
 # 所有路径相对于项目根目录；敏感值不入库不进代码（C4）。
 models:
   # 默认火情检测模型（兜底用；场景化后优先读 scenes.<scene>.yolo_weights）
@@ -19,7 +19,6 @@ infer:
   iou_thres: 0.45         # NMS 重叠阈值，去除重复检测框
   video_max_sec: 10       # 视频抽帧最长秒数
   video_fps: 1            # 抽帧频率（帧/秒）
-  lod_interval_sec: 1.0   # 堆放物(慢变量)检测最小间隔秒；火花/烟雾等关键头仍每帧跑，保证即时告警
   intra_op_threads: 0     # 每个ONNX会话intra-op线程上限(0=自动≈物理核/引擎数，防抢核；小模型线程宜少)
 
 llm:
@@ -33,7 +32,6 @@ llm:
 
 # 多场景危险检测配置：每个场景 = 一组检测头 + 知识库 + 风险矩阵
 # 视觉 Agent 按场景加载 yolo_weights（可多个，含 PPE 头）；
-# load_object_detection 启用 Detecting-danger 独有的"堆放物倾斜检测"。
 scenes:
   hot_work:                                            # 动火作业安全（默认场景）
     conf_thres: 0.35
@@ -45,16 +43,13 @@ scenes:
           extinguisher: extinguisher
     kb_collection: kb_hot_work
     risk_matrix: config/rules/hot_work.yaml
-    load_object_detection:
-      enabled: false
-
   construction_ppe:                                    # 施工 PPE / 危险检测
     conf_thres: 0.25
     yolo_weights:
       # 核心 PPE 头：沿用 industrial-safety-vision 工程路线（YOLO+ONNX）
       # 权重由该流水线训练/导出后放置于此路径即可启用，缺省则优雅跳过
       # 类名需与训练数据集 data.yaml 的 names 完全一致（见 construction-safety-gsnvb）
-      - path: data/models/ppe_yolov8_v2.onnx
+      - path: data/models/ppe_yolov8_v3.onnx
         class_map:
           helmet: helmet
           no_helmet: no_helmet
@@ -63,15 +58,6 @@ scenes:
           person: person
     kb_collection: kb_ppe
     risk_matrix: config/rules/construction_ppe.yaml
-    load_object_detection:                              # Detecting-danger 独门能力（权重缺失，暂关闭；补齐 yolov3-personload.weights/.cfg 后改 true）
-      enabled: false
-      model: data/models/yolov3-personload.weights
-      config: data/models/yolov3-personload.cfg
-      names: data/models/PersonLoadNames.names
-      conf_thres: 0.1
-      nms_thres: 0.4
-      tilt_std_thres: 2.0
-      input_size: 416
 
 # 三级合规严重度映射（数据驱动，C2）：键=项目隐患键，值=safe/warning/critical
 # 实时态与历史分析据此将检测项归并为 合规/警告/不合规。可在不改动代码的前提下调整分级。
@@ -82,10 +68,8 @@ compliance:
     no_helmet: critical
     face_shield: safe
     extinguisher: safe
-    load_object_tilted: critical
     flammable: warning
     no_vest: warning
-    load_object: warning
     helmet: safe
     vest: safe
     person: safe

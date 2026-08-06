@@ -77,6 +77,23 @@ SPECS = [
         "prefix": "ext_",
         "class_map": {0: 2, 1: 2, 2: 2, 3: 2},
     },
+    # —— 人工纠偏样本（仅已确认 confirmed 的才进 data/feedback_training）——
+    # 接线闭环：改判→审核→build_feedback_dataset→此处并入 combined/train
+    # class_map identity：纠偏标注已是项目统一类别，无需重映射
+    {
+        "scene": "ppe",
+        "src": "feedback_training/yolo/ppe",
+        "src_root": str(ROOT / "data" / "feedback_training" / "yolo" / "ppe"),
+        "prefix": "fb_ppe_",
+        "class_map": {0: 0, 1: 1, 2: 2, 3: 3, 4: 4},
+    },
+    {
+        "scene": "fire",
+        "src": "feedback_training/yolo/fire",
+        "src_root": str(ROOT / "data" / "feedback_training" / "yolo" / "fire"),
+        "prefix": "fb_fire_",
+        "class_map": {0: 0, 1: 1, 2: 2},
+    },
 ]
 
 SCENE_NAMES = {
@@ -158,20 +175,26 @@ def _label_boxes(parts: list[str]) -> list[list[float]]:
 
 def _prepare_spec(spec: dict) -> dict:
     scene = spec["scene"]
-    src_root = RAW / spec["src"]
+    src_root = Path(spec["src_root"]) if spec.get("src_root") else RAW / spec["src"]
     prefix = spec["prefix"]
     class_map = spec["class_map"]
     stats: Counter = Counter()
 
     processed = 0
     for split in ("train", "valid", "test"):
+        # feedback 目录用 val 而非 valid，映射进来
+        alt_split = "valid" if split == "valid" else split
         image_dir = next(
             (p for p in (src_root / split / "images",
-                         src_root / "images" / split) if p.is_dir()),
+                         src_root / "images" / split,
+                         src_root / alt_split / "images",
+                         src_root / "images" / alt_split) if p.is_dir()),
             None)
         label_dir = next(
             (p for p in (src_root / split / "labels",
-                         src_root / "labels" / split) if p.is_dir()),
+                         src_root / "labels" / split,
+                         src_root / alt_split / "labels",
+                         src_root / "labels" / alt_split) if p.is_dir()),
             None)
         if image_dir is None or label_dir is None:
             continue

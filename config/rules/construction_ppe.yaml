@@ -15,18 +15,6 @@ matrix:
     risk: 一般
     reason: "作业人员未穿反光衣，现场可视性不足，须立即整改"
 
-  # 堆放物倾斜/不规范：坠落伤人或阻碍逃生
-  - detect: load_object_tilted
-    compliance: 任何
-    risk: 较大
-    reason: "检测到堆放物倾斜/不规范，存在坠落伤人与阻碍逃生风险，须立即整理加固"
-
-  # 堆放物（规范）：虽未判倾斜，仍提示关注
-  - detect: load_object
-    compliance: 任何
-    risk: 低
-    reason: "检测到堆放物，建议核查堆放稳定性与消防通道占用情况"
-
 # 误报过滤（施工场景暂无 spark 类，保留结构兼容）
 fp_filter:
   spark_conf_min: 0.55

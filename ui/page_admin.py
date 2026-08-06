@@ -18,6 +18,11 @@ from services.training_service import TrainingService
 from ui.correction_workbench import render_target_corrections
 
 
+def _len_cn(lst) -> str:
+    """中文友好的计数显示。"""
+    return str(len(lst))
+
+
 def _reload_running_engines() -> None:
     # 模型切换后热加载：让实时页(@st.cache_resource)与后台监控的引擎重建引擎
     # 列表，复用 _SESSIONS 会话缓存，无需重启进程即用上新 active 模型。
@@ -88,6 +93,12 @@ def render_admin() -> None:
     samples = ts.list_feedback_samples()
     st.metric("纠偏样本数", len(samples))
     if samples:
+        _fb_filter = st.selectbox(
+            "筛选审核状态", ["全部", "pending", "confirmed", "rejected"],
+            key="fb_status_filter")
+        _filtered = ([s for s in samples if s["status"] == _fb_filter]
+                     if _fb_filter != "全部" else samples)
+        st.caption(f"当前筛选：{_fb_filter}（{_len_cn(_filtered)} 条）")
         st.dataframe([{
             "时间": s["created_at"],
             "任务": s["task_id"],
@@ -96,45 +107,51 @@ def render_admin() -> None:
             "原因": s["reason"],
             "类型": s["feedback_type"],
             "状态": s["status"],
-        } for s in samples])
-        for sample in samples[:50]:
-            st.caption(
-                f"{sample['created_at']} ｜ {sample['task_id']} ｜ "
-                f"{sample['auto_risk_level'] or '—'} → "
-                f"{sample['corrected_risk_level']} ｜ {sample['reason']}"
-            )
-            status = st.selectbox(
-                "审核状态", ["pending", "confirmed", "rejected"],
-                index=["pending", "confirmed", "rejected"].index(sample["status"]),
-                key=f"feedback_status_{sample['id']}")
-            if st.button("提交审核", key=f"feedback_btn_{sample['id']}"):
-                ts.review_feedback_sample(
-                    sample["id"], status,
-                    user_id=st.session_state.get("user_id"))
-                st.success("反馈样本审核已更新")
-            with st.expander(f"可视化复核：{sample['id']}", key=f"fb_workbench_{sample['id']}"):
-                try:
-                    detections = json.loads(sample["detection_json"] or "[]")
-                except ValueError:
-                    detections = []
-                try:
-                    corrections = json.loads(sample["corrected_labels_json"] or "[]")
-                except ValueError:
-                    corrections = []
-                updated = render_target_corrections(
-                    sample["image_path"], detections, corrections,
-                    f"admin_fb_{sample['id']}")
-                if st.button("保存逐目标修正", key=f"fb_save_{sample['id']}"):
-                    ts.update_feedback_corrections(
-                        sample["id"], updated,
-                        user_id=st.session_state.get("user_id"))
-                    st.success("逐目标修正已保存")
+        } for s in _filtered], use_container_width=True)
         st.download_button(
-            "导出纠偏样本 CSV",
+            "导出纠偏样本 CSV（全部）",
             ts.feedback_csv(),
             file_name="feedback_samples.csv",
             mime="text/csv",
         )
+        if _filtered:
+            st.markdown(f"**逐条审核（{_len_cn(_filtered)} 条）**")
+            for sample in _filtered[:30]:
+                _label = (f"{sample['created_at'][:16]} ｜ "
+                          f"{sample['auto_risk_level'] or '—'} → "
+                          f"{sample['corrected_risk_level']} ｜ {sample['reason']}")
+                with st.expander(f"[{sample['status']}] {_label}", key=f"fb_row_{sample['id']}"):
+                    _col_a, _col_b = st.columns([2, 1])
+                    with _col_b:
+                        status = st.selectbox(
+                            "审核状态", ["pending", "confirmed", "rejected"],
+                            index=["pending", "confirmed", "rejected"].index(sample["status"]),
+                            key=f"feedback_status_{sample['id']}")
+                        if st.button("提交审核", key=f"feedback_btn_{sample['id']}"):
+                            ts.review_feedback_sample(
+                                sample["id"], status,
+                                user_id=st.session_state.get("user_id"))
+                            st.success("反馈样本审核已更新")
+                            st.rerun()
+                    with _col_a:
+                        try:
+                            detections = json.loads(sample["detection_json"] or "[]")
+                        except ValueError:
+                            detections = []
+                        try:
+                            corrections = json.loads(sample["corrected_labels_json"] or "[]")
+                        except ValueError:
+                            corrections = []
+                        updated = render_target_corrections(
+                            sample["image_path"], detections, corrections,
+                            f"admin_fb_{sample['id']}")
+                        if st.button("保存逐目标修正", key=f"fb_save_{sample['id']}"):
+                            ts.update_feedback_corrections(
+                                sample["id"], updated,
+                                user_id=st.session_state.get("user_id"))
+                            st.success("逐目标修正已保存")
+        else:
+            st.caption("该状态下暂无样本")
     else:
         st.caption("暂无人工改判记录")
 
@@ -142,29 +159,58 @@ def render_admin() -> None:
     st.subheader("告警生命周期")
     alarms = ts.list_alarm_events()
     if alarms:
-        for alarm in alarms:
-            st.caption(
-                f"{alarm['created_at']} ｜ {alarm['cls'] or '—'} ｜ "
-                f"{alarm['scene_id'] or '—'} ｜ conf {alarm['conf'] or '—'} ｜ "
-                f"来源 {alarm['source'] or 'camera'}"
-            )
-            _clause = alarm["clause"] if "clause" in alarm.keys() else None
-            if _clause:
-                st.caption(f"违反规范：{_clause}")
-            img_path = alarm["image_path"]
-            if img_path and os.path.exists(img_path):
-                st.image(img_path,
-                         caption=f"告警证据截图：{img_path}",
-                         use_column_width=True)
-            status = st.selectbox(
-                "状态", ["new", "confirmed", "false_alarm", "resolved"],
-                index=["new", "confirmed", "false_alarm", "resolved"].index(alarm["status"]),
-                key=f"alarm_status_{alarm['id']}")
-            if st.button("更新状态", key=f"alarm_btn_{alarm['id']}"):
-                ts.update_alarm_event(
-                    alarm["id"], status,
-                    user_id=st.session_state.get("user_id"))
-                st.success("告警状态已更新")
+        _c_filter, _c_img = st.columns([1, 1])
+        with _c_filter:
+            _alarm_filter = st.selectbox(
+                "筛选告警状态", ["全部", "new", "confirmed", "false_alarm", "resolved"],
+                key="alarm_status_filter")
+        with _c_img:
+            _alarm_img_only = st.toggle("仅看有截图", value=False, key="alarm_img_only")
+        _alarm_view = [a for a in alarms
+                       if (_alarm_filter == "全部" or a["status"] == _alarm_filter)
+                       and (not _alarm_img_only
+                            or (a["image_path"] and os.path.exists(a["image_path"])))]
+        st.caption(f"当前筛选：{_alarm_filter}{' · 仅截图' if _alarm_img_only else ''}"
+                   f"（{_len_cn(_alarm_view)} 条 / 共 {_len_cn(alarms)} 条）")
+        if _alarm_view:
+            for alarm in _alarm_view[:50]:
+                _tag = {"new": "🆕", "confirmed": "✅",
+                        "false_alarm": "❌", "resolved": "✔️"}.get(alarm["status"], "•")
+                _has_img = alarm["image_path"] and os.path.exists(alarm["image_path"])
+                _img_tag = "📷" if _has_img else "—"
+                _label = (f"{_tag} [{alarm['status']}] "
+                          f"{alarm['created_at'][:16]} ｜ {alarm['cls'] or '—'} ｜ "
+                          f"conf {alarm['conf'] or '—'} ｜ {_img_tag}")
+                with st.expander(_label, key=f"alarm_row_{alarm['id']}"):
+                    _col_info, _col_act = st.columns([3, 1])
+                    with _col_info:
+                        st.caption(
+                            f"场景：{alarm['scene_id'] or '—'} ｜ "
+                            f"来源：{alarm['source'] or 'camera'}")
+                        _clause = alarm["clause"] if "clause" in alarm.keys() else None
+                        if _clause:
+                            st.caption(f"违反规范：{_clause}")
+                        if _has_img:
+                            st.image(alarm["image_path"],
+                                     caption="告警证据截图",
+                                     use_container_width=True)
+                        else:
+                            st.caption("（无证据截图——自检/无帧告警）")
+                    with _col_act:
+                        status = st.selectbox(
+                            "状态", ["new", "confirmed", "false_alarm", "resolved"],
+                            index=["new", "confirmed", "false_alarm", "resolved"].index(alarm["status"]),
+                            key=f"alarm_status_{alarm['id']}")
+                        if st.button("更新状态", key=f"alarm_btn_{alarm['id']}"):
+                            ts.update_alarm_event(
+                                alarm["id"], status,
+                                user_id=st.session_state.get("user_id"))
+                            st.success("告警状态已更新")
+                            st.rerun()
+            if len(_alarm_view) > 50:
+                st.caption(f"仅显示前 50 条，共 {_len_cn(_alarm_view)} 条，请用筛选缩小范围")
+        else:
+            st.caption("该筛选条件下暂无告警")
     else:
         st.caption("暂无告警事件")
 
@@ -226,20 +272,28 @@ def render_admin() -> None:
                 eval_data = json.load(f)
             eval_rows = []
             for model_name, model_data in (eval_data.get("models") or {}).items():
-                for result in model_data.get("results") or []:
-                    threshold = result.get("conf_threshold")
-                    for cls in result.get("classes") or []:
-                        eval_rows.append({
-                            "模型": model_name,
-                            "置信度阈值": threshold,
-                            "类别": cls.get("label") or cls.get("class"),
-                            "TP": cls.get("tp", 0),
-                            "FP": cls.get("fp", 0),
-                            "FN": cls.get("fn", 0),
-                            "Precision": round(cls.get("precision", 0.0), 3),
-                            "Recall": round(cls.get("recall", 0.0), 3),
-                            "F1": round(cls.get("f1", 0.0), 3),
-                        })
+                # 兼容新旧结构：新 models[scene][version]={results}; 旧 models[scene]={results}
+                if model_data and isinstance(model_data.get("results"), list):
+                    versioned = {"?": model_data}
+                else:
+                    versioned = model_data or {}
+                for ver, ver_data in versioned.items():
+                    results = (ver_data.get("results") or []) if isinstance(ver_data, dict) else []
+                    for result in results:
+                        threshold = result.get("conf_threshold")
+                        for cls in result.get("classes") or []:
+                            eval_rows.append({
+                                "场景": model_name,
+                                "版本": ver,
+                                "置信度阈值": threshold,
+                                "类别": cls.get("label") or cls.get("class"),
+                                "TP": cls.get("tp", 0),
+                                "FP": cls.get("fp", 0),
+                                "FN": cls.get("fn", 0),
+                                "Precision": round(cls.get("precision", 0.0), 3),
+                                "Recall": round(cls.get("recall", 0.0), 3),
+                                "F1": round(cls.get("f1", 0.0), 3),
+                            })
             if eval_rows:
                 st.dataframe(eval_rows)
             else:

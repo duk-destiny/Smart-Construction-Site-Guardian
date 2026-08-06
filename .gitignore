@@ -1,6 +1,6 @@
 # ===== 运行时 / 预置资产（不入仓，赛前本地预置）=====
 data/raw/
-data/kb/chroma/
+# data/kb/chroma/  # 预置向量库随仓库提交，评委开箱即用 RAG
 data/kb/*.pdf
 data/uploads/
 data/exports/
@@ -50,6 +50,17 @@ yolov8s.pt
 streamlit.log
 streamlit.err
 
-data/alarms/   # 告警现场证据截图（运行时产生，不入仓）
+# 告警现场证据截图（运行时产生，不入仓）
+data/alarms/
 
 .pytest_tmp/
+# ===== 运行期临时文件（测试/调试输出，不入仓）=====
+data/*.out
+data/*.err
+data/ui_shots/
+data/e2e_result.json
+data/mock_capture.jsonl
+data/probe*.log
+data/eval_metrics.log
+data/streamlit*.out
+data/streamlit*.err

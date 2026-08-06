@@ -2,7 +2,7 @@
 
 DAG：`[视觉 ∥ 规范] → 融合 → 闭环`。
 - 视觉/规范 用 ThreadPoolExecutor 并行 submit，`future.result(timeout)` 精确超时
-  （视觉 3s / 规范 2s），超时转 degraded（SRS 3.2.4）；
+  （视觉 3s / 规范 4s），超时转 degraded（SRS 3.2.4）；
 - 顶层 try/except 兜底，任一 Agent 崩溃标红（status=failed）不退出进程；
 - 逐节点 progress_cb 推送进度供 UI 轮询。
 """
@@ -23,7 +23,7 @@ from core.video_utils import VideoUtils
 
 # 超时预算（秒，C3 主链路 ≤8s）
 _TIMEOUT_VISION = 3.0
-_TIMEOUT_RULE = 2.0
+_TIMEOUT_RULE = 4.0
 
 
 class Orchestrator:

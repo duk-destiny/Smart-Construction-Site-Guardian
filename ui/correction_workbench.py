@@ -50,7 +50,7 @@ def render_target_corrections(
         st.image(cv2.cvtColor(
             _annotate(frame, detections, corrections), cv2.COLOR_BGR2RGB),
             caption="蓝色=原始检测；绿色=人工修正；灰色=误报",
-            use_column_width=True)
+            use_container_width=True)
     else:
         st.caption("未找到原图，仅显示文本纠偏控件")
 

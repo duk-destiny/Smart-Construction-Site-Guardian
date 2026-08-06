@@ -23,7 +23,6 @@ _CN = {
     "spark": "火花（动火明火）", "smoke": "烟雾（火情）", "no_helmet": "未佩戴安全帽",
     "no_vest": "未穿反光衣", "face_shield": "防护面罩",
     "extinguisher": "灭火器", "flammable": "易燃物未清理",
-    "load_object": "堆放物", "load_object_tilted": "堆放物倾斜",
     "helmet": "佩戴安全帽", "vest": "穿着反光衣", "person": "人员",
 }
 
@@ -132,12 +131,7 @@ def render_history() -> None:
     # ═══════════════════════════════════════════
     by_date = _stats_by_date(start_s, end_s)
     if by_date:
-        st.subheader("每日合规率趋势")
-        rows = [{
-            "日期": r["day"],
-            "不合规": r["non_compliant"], "警告": r["warning"], "合规": r["compliant"],
-        } for r in by_date]
-        st.bar_chart(rows, x="日期")
+        # 指标卡先行渲染（快），3 个 bar_chart 收在 toggle 后按需渲染（默认关，跳过执行）
         total_frames = sum(r["non_compliant"] + r["warning"] + r["compliant"] for r in by_date)
         nc = sum(r["non_compliant"] for r in by_date)
         warn_total = sum(r["warning"] for r in by_date)
@@ -148,21 +142,28 @@ def render_history() -> None:
         m2.metric("不合规帧", nc)
         m3.metric("合规率", f"{rate:.1f}%")
 
-        # 合规级别分布（B4 柱状图）
-        st.subheader("合规级别分布")
-        st.bar_chart(
-            [{"合规级别": "不合规", "帧数": nc},
-             {"合规级别": "警告", "帧数": warn_total},
-             {"合规级别": "合规", "帧数": comp_total}],
-            x="合规级别", y="帧数")
+        show_charts = st.toggle("📈 显示图表分析", value=False)
+        if show_charts:
+            st.subheader("每日合规率趋势")
+            rows = [{
+                "日期": r["day"],
+                "不合规": r["non_compliant"], "警告": r["warning"], "合规": r["compliant"],
+            } for r in by_date]
+            st.bar_chart(rows, x="日期")
 
-    # ── 类别命中分布（B4 柱状图）──
-    brk = _severity_breakdown(start_s, end_s)
-    if brk:
-        st.subheader("隐患类别命中分布")
-        sev_rows = [{"类别": _CN.get(b["cls"], b["cls"]), "命中次数": b["cnt"]}
-                     for b in brk]
-        st.bar_chart(sev_rows, x="类别", y="命中次数")
+            st.subheader("合规级别分布")
+            st.bar_chart(
+                [{"合规级别": "不合规", "帧数": nc},
+                 {"合规级别": "警告", "帧数": warn_total},
+                 {"合规级别": "合规", "帧数": comp_total}],
+                x="合规级别", y="帧数")
+
+            brk = _severity_breakdown(start_s, end_s)
+            if brk:
+                st.subheader("隐患类别命中分布")
+                sev_rows = [{"类别": _CN.get(b["cls"], b["cls"]), "命中次数": b["cnt"]}
+                             for b in brk]
+                st.bar_chart(sev_rows, x="类别", y="命中次数")
 
     # ═══════════════════════════════════════════
     # 检测明细（B5）— 帧/目标级严重度

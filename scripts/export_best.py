@@ -79,7 +79,7 @@ def main() -> int:
             args.name: {
                 "name": args.name,
                 "version": args.version,
-                "path": str(dst),
+                "path": str(dst.relative_to(ROOT)).replace("\\", "/"),
                 "run_dir": str(run_dir),
                 **_best_metrics(run_dir),
             }

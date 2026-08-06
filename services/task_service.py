@@ -148,19 +148,24 @@ class TaskService:
         )
 
     def feedback_csv(self) -> str:
-        """导出纠偏样本为 CSV，供后续训练/评估使用。"""
+        """导出纠偏样本为 CSV，供后续训练/评估使用。
+
+        含 status 列：不筛即完整审计流水；筛 status=confirmed 即已审核训练子集。
+        """
         rows = self.feedback.list_all(limit=5000)
         buf = io.StringIO()
         writer = csv.writer(buf)
         writer.writerow([
             "created_at", "task_id", "user_id", "auto_risk_level",
             "corrected_risk_level", "reason", "feedback_type", "source_json",
+            "status",
         ])
         for r in rows:
             writer.writerow([
                 r["created_at"], r["task_id"], r["user_id"],
                 r["auto_risk_level"], r["corrected_risk_level"],
                 r["reason"], r["feedback_type"], r["source_json"],
+                r["status"],
             ])
         return buf.getvalue()
 

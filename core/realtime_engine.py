@@ -1,4 +1,4 @@
-"""实时轻链路检测引擎（A3）：复用现有 YOLO/PPE/堆放物检测头，对单帧做轻量研判。
+"""实时轻链路检测引擎（A3）：复用现有 YOLO/PPE 检测头，对单帧做轻量研判。
 
 与上传态的"多 Agent 重链路"不同，实时态只做 检测 → 三级合规，
 不调用 RAG / 不生成工单，以满足低延迟连续监测。
@@ -17,7 +17,6 @@ import numpy as np
 from core.compliance import evaluate
 from core.config import ConfigLoader
 from core.false_positive import filter_ppe_contradiction, filter_smoke_vest_conflict
-from core.load_object_detector import LoadObjectDetector
 from core.tracker import IoUTracker
 from core.yolo_adapter import COCO_CN
 from core.yolo_engine import WHITELIST_CN, YoloEngine
@@ -42,12 +41,7 @@ class RealtimeEngine:
     def __init__(self, scenes: Iterable[str] = ("construction_ppe", "hot_work")) -> None:
         self.cfg = ConfigLoader()
         self.engines: list[tuple[str, YoloEngine]] = []
-        self.lod: LoadObjectDetector | None = None
         self.tracker = IoUTracker()
-        # 堆放物(慢变量)检测降频：火花/烟雾等关键头仍每帧跑，LOD 按 lod_interval_sec 节流
-        self._last_lod_dets: list[dict] | None = None
-        self._last_lod_ts: float = 0.0
-        self.lod_interval_sec: float = float(self.cfg.get("infer.lod_interval_sec", 1.0) or 1.0)
         # 检测头并行：onnxruntime run() 释放 GIL，多头用线程池并行跑。为防多 session
         # 抢核，每引擎 intra_op 封顶 ≈ 物理核/引擎数 = logical//(2*引擎数)（HT 机）；
         # 单头则用满物理核(≈logical//2)。实测：线程过多反而更慢（小模型同步开销）。
@@ -75,29 +69,18 @@ class RealtimeEngine:
                     self.engines.append((sid, eng))
                 except Exception as e:  # noqa: BLE001 单头缺失优雅跳过
                     log.warning(f"跳过不可用模型 {path}: {e}")
-            # 堆放物倾斜检测（Detecting-danger 独门能力，按场景开关，仅接入一次）
-            lod_cfg = scene.get("load_object_detection", {}) or {}
-            if lod_cfg.get("enabled") and self.lod is None:
-                try:
-                    self.lod = LoadObjectDetector(lod_cfg)
-                except Exception as e:  # noqa: BLE001
-                    log.warning(f"堆放物检测不可用: {e}")
 
     @property
     def available(self) -> bool:
-        return bool(self.engines) or self.lod is not None
+        return bool(self.engines)
 
     def reload(self) -> None:
         # 模型切换后热重载：重读 config 并重建引擎（复用 _SESSIONS 会话缓存）。
         # 不重启进程即可让实时页/后台监控用上 DB active 指向的新模型；tracker 一并
         # 重置，避免跨模型 track_id 串扰。供 page_admin 切换按钮后调用。
         self.cfg = ConfigLoader()  # 丢弃旧 _cache，重读 config.yaml
-        self.lod_interval_sec = float(self.cfg.get("infer.lod_interval_sec", 1.0) or 1.0)
         self._intra_op_threads = _compute_intra_op(self.cfg, len(self._scenes))
         self.engines = []
-        self.lod = None
-        self._last_lod_dets = None
-        self._last_lod_ts = 0.0
         self.tracker = IoUTracker()
         self._build(list(self._scenes))
 
@@ -136,23 +119,6 @@ class RealtimeEngine:
                     log.warning(f"推理失败 {sid}: {e}")
                     continue
                 detections.extend(self._tag(dets, sid))
-        if self.lod is not None:
-            # 堆放物倾斜是慢变量：按 lod_interval_sec 节流，间隔内复用上次结果，
-            # 把慢头从"每帧求和"里摘出——关键头(火花/烟雾)仍每帧跑，保证即时告警。
-            now = time.monotonic()
-            if self._last_lod_dets is None or now - self._last_lod_ts >= self.lod_interval_sec:
-                try:
-                    self._last_lod_dets = self.lod.detect_and_assess_frame(frame)
-                    self._last_lod_ts = now
-                except Exception as e:  # noqa: BLE001
-                    log.warning(f"堆放物推断失败: {e}")
-                    if self._last_lod_dets is None:
-                        self._last_lod_dets = []
-            for d in (self._last_lod_dets or []):
-                d = dict(d)  # 浅拷贝，避免复用对象被跟踪/合规改写
-                d["scene"] = "construction_ppe"
-                d["violation_desc"] = WHITELIST_CN.get(d.get("cls"), d.get("cls"))
-                detections.append(d)
         return detections
 
     def analyze(self, frame: np.ndarray) -> dict:
