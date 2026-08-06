@@ -11,7 +11,7 @@ from agents.base import AgentBase, AgentMessage
 REVIEW_CONF_THRESHOLD = 0.55
 HIGH_RISK_CLASSES = {
     "spark", "smoke", "no_helmet", "no_vest",
-    "face_shield", "extinguisher", "load_object_tilted",
+    "face_shield", "extinguisher",
 }
 HIGH_RISK_LEVELS = {"较大", "重大"}
 

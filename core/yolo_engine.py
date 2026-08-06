@@ -19,11 +19,9 @@ import onnxruntime as ort
 #  - 动火/火情：spark=火花/动火明火；face_shield=防护面罩（已佩戴）；
 #    extinguisher=灭火器（已检测到）；flammable=易燃物未清理；smoke=烟雾（火情）
 #  - 施工 PPE（industrial-safety-vision 路线）：helmet/no_helmet、vest/no_vest、person
-#  - 堆放物（Detecting-danger 独门能力）：load_object、load_object_tilted
 WHITELIST = [
     "spark", "smoke", "face_shield", "extinguisher", "flammable",
     "helmet", "no_helmet", "vest", "no_vest", "person",
-    "load_object", "load_object_tilted",
 ]
 WHITELIST_CN = {
     "spark": "火花（动火明火）",
@@ -36,8 +34,6 @@ WHITELIST_CN = {
     "vest": "穿着反光衣",
     "no_vest": "未穿反光衣",
     "person": "人员",
-    "load_object": "堆放物",
-    "load_object_tilted": "堆放物倾斜/不规范（坠落风险）",
 }
 
 # 火情类（用于视觉 Agent 的"未检出火情目标"提示判定）

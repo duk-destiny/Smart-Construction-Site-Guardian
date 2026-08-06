@@ -17,12 +17,21 @@ def safe_page(label: str):
     def _deco(fn):
         @functools.wraps(fn)
         def _wrapper(*args, **kwargs):
+            import os
+            import time as _time
+            _timer = os.environ.get("HZ_PAGE_TIMER") == "1"
+            _t0 = _time.perf_counter() if _timer else 0.0
             try:
                 return fn(*args, **kwargs)
             except Exception as exc:  # noqa: BLE001 页面层兜底，不中断运行
                 import streamlit as st
                 st.error(f"{label}加载异常：{exc}")
                 st.caption("如反复出现请到「系统自检」页排查，或联系运维。")
+            finally:
+                if _timer:
+                    import streamlit as st
+                    _ms = (_time.perf_counter() - _t0) * 1000
+                    st.caption(f"⏱ {label} render: {_ms:.0f}ms")
 
         return _wrapper
 

@@ -32,7 +32,7 @@ DATA_MODELS = ROOT / "data" / "models"
 DATASET_DIR = ROOT / "data" / "raw" / "ppe_dataset"
 # 注意：用户名含单引号(k'k)，Ultralytics 读 .pt 绝对路径时会吞掉单引号导致找不到文件。
 # 因此训练产物(权重/导出)全部放到无特殊字符的路径 C:/ppe_runs，彻底规避该问题。
-RUN_DIR = Path("C:/ppe_runs/ppe")
+RUN_DIR = Path(os.environ.get("PPE_RUN_DIR", "C:/ppe_runs/ppe"))
 WEIGHTS_DIR = RUN_DIR / "weights"
 
 

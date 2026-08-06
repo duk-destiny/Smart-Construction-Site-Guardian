@@ -2,7 +2,6 @@
 
 仅本地推理、零外网（C1）；检测类别白名单由 YoloEngine 保证（C4）。
 支持按场景加载多个检测头（如 fire 头 + PPE 头），并可在场景配置中
-启用 Detecting-danger 独有的"堆放物倾斜检测"。
 """
 from __future__ import annotations
 
@@ -75,22 +74,6 @@ class VisionAgent(AgentBase):
                     detections.extend(eng.infer(p))
                 except Exception as e:  # noqa: BLE001
                     log.warning(f"推理失败 {p}: {e}")
-
-        # 堆放物倾斜检测（Detecting-danger 独门能力，按场景开关）
-        if self.scene_id:
-            try:
-                scene = cfg.get_scene(self.scene_id)
-                lod_cfg = scene.get("load_object_detection", {}) or {}
-                if lod_cfg.get("enabled"):
-                    from core.load_object_detector import LoadObjectDetector
-                    lod = LoadObjectDetector(lod_cfg)
-                    for p in paths:
-                        try:
-                            detections.extend(lod.detect_and_assess(p))
-                        except Exception as e:  # noqa: BLE001
-                            log.warning(f"堆放物检测失败 {p}: {e}")
-            except Exception as e:  # noqa: BLE001
-                log.warning(f"堆放物配置读取失败: {e}")
 
         # 映射可读描述：项目白名单优先，否则 COCO 中文释义，再否则原名
         for d in detections:

@@ -109,7 +109,7 @@ class NotificationService:
     def _markdown(self, alarm: dict) -> str:
         img = self._image_url(alarm.get("image_path"))
         lines = [
-            "### \u26a0\ufe0f 安全告警（海之子·动火安全智能体）",
+            "### \u26a0\ufe0f 安全告警（智护工地·施工安全智能体）",
             f"- 告警 ID：`{alarm.get('id', '')}`",
             f"- 隐患类别：{self._cls_cn(alarm.get('cls'))}（{alarm.get('cls', '')}）",
             f"- 置信度：{float(alarm.get('conf') or 0):.2f}",

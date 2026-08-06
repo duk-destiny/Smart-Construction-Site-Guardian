@@ -7,7 +7,7 @@
 import sys, os
 from pathlib import Path
 
-PROJECT = Path(r"C:\Users\k'k\Desktop\海之子\hzz-fire-safety")
+PROJECT = Path(__file__).resolve().parent.parent  # 仓库根（相对，便于他人复用）
 MODELS = PROJECT / "data" / "models"
 MODELS.mkdir(parents=True, exist_ok=True)
 

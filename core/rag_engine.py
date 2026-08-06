@@ -2,14 +2,17 @@
 
 职责：加载规范 PDF，用 bge 向量化后存入 Chroma，提供语义检索。
 
-线程安全说明（Windows）：
-onnxruntime/CUDA 后端无法在非主线程首次初始化。因此 BGE 模型与 Chroma 集合均做成
-进程级单例，并由 app 主线程在启动时调用 ``RagEngine.preload()`` 预热一次；此后告警
-守护线程复用同一模型对象做 encode，不再在非主线程新建 onnx 会话，规避线程崩溃。
+进程隔离说明（Windows）：
+torch（sentence_transformers/BGE）与 onnxruntime（YOLO 推理）在同一进程内多线程
+运行会触发原生段错误。因此 BGE 模型运行在独立子进程（core.bge_worker），主进程通过
+stdin/stdout JSON 行协议委托 encode，从根本上隔离 torch。Chroma 集合仍为进程级单例。
 """
 from __future__ import annotations
 
+import json
 import os
+import subprocess
+import sys
 import threading
 from pathlib import Path
 
@@ -30,6 +33,80 @@ _COLLECTION_LOCK = threading.Lock()
 _ENCODE_LOCK = threading.Lock()  # 序列化并发 encode，避免共享单例模型上的竞态
 
 
+class _BgeProxy:
+    """BGE 子进程代理：encode 委托给独立进程，隔离 torch 与主进程 onnxruntime。
+
+    通信协议见 core/bge_worker.py。单文本 -> 1D ndarray；列表 -> 2D ndarray，
+    完全兼容 sentence_transformers.SentenceTransformer.encode 的调用约定。
+    """
+
+    def __init__(self) -> None:
+        env = dict(os.environ)
+        env["CUDA_VISIBLE_DEVICES"] = ""
+        env["OMP_NUM_THREADS"] = "1"
+        env["TOKENIZERS_PARALLELISM"] = "false"
+        cwd = str(Path(__file__).resolve().parent.parent)
+        self._proc = subprocess.Popen(
+            [sys.executable, "-m", "core.bge_worker"],
+            stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.DEVNULL,
+            env=env,
+            cwd=cwd,
+            text=True,
+            encoding="utf-8",
+            bufsize=1,
+        )
+        self._lock = threading.Lock()
+        self._seq = 0
+        # 等待就绪信号（子进程加载 BGE 完成后首发）
+        ready = self._recv()
+        if not ready or not ready.get("ok"):
+            self._cleanup()
+            raise RuntimeError(f"BGE worker 启动失败: {ready}")
+
+    def _recv(self) -> dict | None:
+        line = self._proc.stdout.readline()
+        if not line:
+            return None
+        try:
+            return json.loads(line)
+        except Exception:
+            return None
+
+    def encode(self, text, normalize_embeddings: bool = True):
+        import numpy as np
+        single = isinstance(text, str)
+        texts = [text] if single else list(text)
+        with self._lock:
+            if self._proc.poll() is not None:
+                raise RuntimeError("BGE worker 已退出")
+            self._seq += 1
+            req = {"id": self._seq, "action": "encode",
+                   "texts": texts, "normalize": normalize_embeddings}
+            self._proc.stdin.write(json.dumps(req) + "\n")
+            self._proc.stdin.flush()
+            resp = self._recv()
+        if not resp or not resp.get("ok"):
+            raise RuntimeError(f"BGE encode 失败: {resp}")
+        arr = np.array(resp["embeddings"], dtype=np.float32)
+        return arr[0] if single else arr
+
+    @property
+    def alive(self) -> bool:
+        return self._proc.poll() is None
+
+    def _cleanup(self) -> None:
+        try:
+            self._proc.terminate()
+            self._proc.wait(timeout=5)
+        except Exception:
+            try:
+                self._proc.kill()
+            except Exception:
+                pass
+
+
 class RagEngine:
     """本地 RAG 引擎：BGE Embedding + ChromaDB 向量检索。"""
 
@@ -41,15 +118,14 @@ class RagEngine:
 
     @staticmethod
     def _load_model():
-        """懒加载 BGE 模型（进程级单例，所有线程/实例共享）。"""
+        """懒加载 BGE 子进程代理（进程级单例，所有线程/实例共享）。"""
         global _MODEL
         with _MODEL_LOCK:
-            if _MODEL is None:
+            if _MODEL is None or (_MODEL is not False and not _MODEL.alive):
                 try:
-                    from sentence_transformers import SentenceTransformer
-                    _MODEL = SentenceTransformer(_DEFAULT_BGE)
+                    _MODEL = _BgeProxy()
                 except Exception as e:
-                    log.warning(f"BGE 加载失败: {e}")
+                    log.warning(f"BGE 子进程启动失败: {e}")
                     _MODEL = False  # type: ignore[assignment]
         return _MODEL if _MODEL is not False else None
 
@@ -57,9 +133,9 @@ class RagEngine:
     def preload(cls, collection_name: str = "kb_hot_work",
                 chroma_dir: str = "data/kb/chroma",
                 bge_dir: str | None = None) -> object | None:
-        """主线程预热：加载 BGE 模型 + Chroma 集合，初始化 onnxruntime 后端。
+        """预热：启动 BGE 子进程 + 加载 Chroma 集合。
 
-        必须在主线程调用一次（app 启动期），之后守护线程复用单例模型即可正常 encode。
+        BGE 在独立子进程运行（隔离 torch），可在任意线程安全调用。
         """
         model = RagEngine._load_model()
         RagEngine._ensure_collection(collection_name, chroma_dir)
@@ -129,11 +205,14 @@ class RagEngine:
         metadatas: list[dict[str, str]] = []
         documents: list[str] = []
 
+        # 批量向量化：一次 IPC 编码全部条款，避免逐条往返
+        texts = [c["clause_text"] for c in all_clauses]
+        with _ENCODE_LOCK:
+            import numpy as _np
+            embs = _np.asarray(model.encode(texts, normalize_embeddings=True)).tolist()
         for i, c in enumerate(all_clauses):
-            with _ENCODE_LOCK:
-                emb = model.encode(c["clause_text"], normalize_embeddings=True).tolist()
             ids.append(f"clause_{i}")
-            embeddings.append(emb)
+            embeddings.append(embs[i])
             metadatas.append({"clause_no": c["clause_no"]})
             documents.append(c["clause_text"])
 

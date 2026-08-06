@@ -15,8 +15,12 @@ import shutil
 from ultralytics import YOLO
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-SRC = r"C:\Users\k'k\Desktop\海之子\YOLOv8-Fire-and-Smoke-Detection-main\runs\detect\train\weights\best.pt"
-TMP_PT = r"C:\Windows\Temp\_fire_best.pt"
+SRC = os.environ.get(
+    "FIRE_BEST_PT",
+    r"C:\Users\k'k\Desktop\海之子\YOLOv8-Fire-and-Smoke-Detection-main\runs\detect\train\weights\best.pt",
+)
+import tempfile
+TMP_PT = os.path.join(tempfile.gettempdir(), "_fire_best.pt")
 OUT_ONNX = os.path.join(ROOT, "data", "models", "yolov8_fire_smoke_v2.onnx")
 
 
