@@ -69,3 +69,8 @@ data/probe*.log
 data/eval_metrics.log
 data/streamlit*.out
 data/streamlit*.err
+
+# ===== 视频源 =====
+data/*.mp4
+data/*.avi
+data/*.mov
