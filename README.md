@@ -385,9 +385,9 @@ docker compose run --rm app python -m pytest tests -q --tb=short -p no:cacheprov
 ## 部署注意
 
 - `.gitignore` 已忽略：`data/raw/`、`data/combined/`、`data/eval/`、`data/feedback_training/`、`data/runs_combined/`、`data/kb/*.pdf`、`data/uploads/`、`data/exports/`、`data/app.db*`、`__pycache__/`、`*.pyc`、`.venv313/`、`plugins/`、官方 `yolov8n.pt`/`yolov8s.pt` 及 `data/models/BAAI--bge-small-zh-v1.5/`、`data/models/Qwen2.5-0.5B-Instruct/`。
-- **随仓库提交**：小体积推理权重（`.onnx`）、预置向量库 `data/kb/chroma/`（约 2MB，评委开箱即用 RAG）。
+- **需自行训练**：小模型推理权重（data/models/*.onnx，约 42MB/个）不随仓库提交，赛前打包另附。训练入口 scripts/train_combined.py（合并集训练）/ scripts/train_ppe_local.py + scripts/export_ppe_onnx.py（PPE 本地训练+导出），管理端复训按钮亦可。
 - **需另行获取**：BGE Embedding 模型（约 100MB，`python scripts/setup_models.py` 下载）；原始数据集（`data/raw/`，仅复现训练/评测需要）。
-- 首次启动自动建库 + 种子默认账号（`core/bootstrap.py`）；知识库向量已随仓库，但查询仍需 BGE 模型，故 `setup_models.py` 为必跑步骤。实时监测态不依赖知识库。
+- 首次启动自动建库 + 种子默认账号（`core/bootstrap.py`）；知识库向量库 data/kb/chroma/ 不进 git（赛前打包另附），查询仍需 BGE 模型，故 `setup_models.py` 为必跑步骤。实时监测态不依赖知识库。
 - LLM 润色走 ollama `qwen3:8b`（独立进程，异步润色不进主链路）；app 启动后台预热一次 + 每次 `keep_alive=30m` 常驻，规避 5.2GB 模型反复冷启；断网/不可用自动降级为模板工单。
 
 ## 技术栈
