@@ -57,6 +57,7 @@ def _alive(pid: int) -> bool:
 def _stop(pid: int, reason: str) -> None:
     _log(f"EARLY_STOP: {reason}")
     if _alive(pid):
+        # 安全审查（S8705）: pid 为 int 类型，列表参数无 shell=True，无注入风险。
         subprocess.run(
             ["taskkill", "/PID", str(pid), "/T", "/F"],
             capture_output=True, creationflags=subprocess.CREATE_NO_WINDOW)
@@ -64,6 +65,7 @@ def _stop(pid: int, reason: str) -> None:
         task = json.loads(TASK_FILE.read_text(encoding="utf-8"))
         task["phase"] = "early_stopped"
         task["message"] = reason
+        # 安全审查（S2083）: TASK_FILE 为常量路径，非用户可控。
         TASK_FILE.write_text(
             json.dumps(task, ensure_ascii=False, indent=2),
             encoding="utf-8")

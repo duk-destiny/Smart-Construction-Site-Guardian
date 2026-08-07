@@ -115,6 +115,7 @@ def _evaluate_at(spec: dict, model_path: str, conf: float,
     stats = collections.defaultdict(lambda: [0, 0, 0])  # tp, fp, fn
     images = sorted(glob.glob(os.path.join(spec["test_dir"], "images", "*")))
     if limit:
+        # 安全审查（S2245）: 可复现评测洗牌，非安全随机数场景。
         rng = random.Random(0)
         rng.shuffle(images)
         images = images[:limit]
@@ -244,7 +245,14 @@ def main() -> None:
         print("[warn] model_registry 为空或 app.db 不存在，无版本可评测")
         return
 
-    output_path = Path(args.output)
+    output_path = Path(args.output).resolve()
+    # 安全审查（S2083）: 校验输出路径在项目根目录下，防路径穿越。
+    _root = Path(__file__).resolve().parent.parent
+    try:
+        output_path.relative_to(_root)
+    except ValueError:
+        print(f"输出路径必须在项目根目录下: {output_path}", flush=True)
+        return
     # 读取并迁移旧结构，保留已有版本结果（merge）
     report: dict = {"iou_threshold": IOU_THRESHOLD, "models": {}}
     if output_path.exists():
