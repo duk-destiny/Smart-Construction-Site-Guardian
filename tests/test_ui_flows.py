@@ -40,6 +40,8 @@ def _collect_text(at) -> str:
                 parts.append(str(el))
     for btn in at.button:
         parts.append(btn.label)
+    for exp in at.expander:
+        parts.append(exp.label)
     return "\n".join(parts)
 
 
@@ -171,6 +173,15 @@ import sys
 sys.path.insert(0, {ROOT!r})
 os.chdir({ROOT!r})
 import ui.page_realtime as page
+
+class _FakeEngine:
+    available = True
+    def analyze(self, frame):
+        return [], dict(status="safe", level="info")
+    def draw(self, frame, dets):
+        return frame
+
+page._get_engine = lambda: _FakeEngine()
 page.render_realtime()
 """
     at = _run_script(tmp_path, source, session={"role": "safety"})
