@@ -2,6 +2,8 @@
 
 > 当前覆盖**动火作业**与**施工 PPE** 两个场景的本地化安全智能体：支持**上传研判**（多 Agent 重链路）与**实时摄像头监测**（轻链路）双模式，全程零外网依赖，可离线部署。
 
+[![Quality gate status](https://sonarcloud.io/api/project_badges/measure?project=duk-destiny_Smart-Construction-Site-Guardian&metric=alert_status&token=820ed34b7f80191064245ea5090a00e98eb45623)](https://sonarcloud.io/summary/new_code?id=duk-destiny_Smart-Construction-Site-Guardian)[![Maintainability Rating](https://sonarcloud.io/api/project_badges/measure?project=duk-destiny_Smart-Construction-Site-Guardian&metric=sqale_rating&token=820ed34b7f80191064245ea5090a00e98eb45623)](https://sonarcloud.io/summary/new_code?id=duk-destiny_Smart-Construction-Site-Guardian)[![Lines of Code](https://sonarcloud.io/api/project_badges/measure?project=duk-destiny_Smart-Construction-Site-Guardian&metric=ncloc&token=820ed34b7f80191064245ea5090a00e98eb45623)](https://sonarcloud.io/summary/new_code?id=duk-destiny_Smart-Construction-Site-Guardian)
+
 一套从「视觉感知 → 规范检索 → 风险定级 → 闭环处置 → 人工纠偏 → 复训回写」端到端打通的动火作业安全智能体，兼顾**研判深度**（多 Agent 协同、RAG 条款引用、证据链可追溯）与**告警时效**（实时链路首帧出警、规则驱动、无阻塞推理）。
 
 ## 核心特性
