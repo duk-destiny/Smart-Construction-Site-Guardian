@@ -45,9 +45,25 @@ def _collect_text(at) -> str:
     return "\n".join(parts)
 
 
+def _write_png(path) -> None:
+    """stdlib 1x1 PNG; CI 无 data/*.png 运行时截图资产，本地造确定性图。"""
+    import struct, zlib
+    raw = bytes([0, 255, 0, 0])  # filter byte 0 + RGB
+    comp = zlib.compress(raw)
+    def _chunk(typ, data):
+        c = typ + data
+        return struct.pack(">I", len(data)) + c + struct.pack(">I", zlib.crc32(c) & 0xffffffff)
+    ihdr = struct.pack(">IIBBBBB", 1, 1, 8, 2, 0, 0, 0)
+    sig = bytes([137, 80, 78, 71, 13, 10, 26, 10])
+    with open(path, "wb") as f:
+        f.write(sig + _chunk(b"IHDR", ihdr) + _chunk(b"IDAT", comp) + _chunk(b"IEND", b""))
+
+
 def test_admin_page_shows_alarm_source_image_and_push_section(tmp_path):
     """管理端渲染：告警显示来源与截图、外部推送配置/测试按钮/留痕列表。"""
     db_file = tmp_path / "hzz_ui.db"
+    evidence_png = tmp_path / "evidence.png"
+    _write_png(evidence_png)
     source = f"""
 import os
 import sys
@@ -77,7 +93,7 @@ conn = _conn()
 from dao.models import AlarmEventDAO, NotificationLogDAO
 aid = AlarmEventDAO(conn).insert(
     "s_ui", None, "hot_work", "spark", 0.91,
-    image_path="data/ui_login.png", source="rtsp://cam1")
+    image_path={str(evidence_png)!r}, source="rtsp://cam1")
 NotificationLogDAO(conn).insert(aid, "wecom", "sent", None)
 conn.close()
 
