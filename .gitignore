@@ -1,6 +1,6 @@
 # ===== 运行时 / 预置资产（不入仓，赛前本地预置）=====
 data/raw/
-# data/kb/chroma/  # 预置向量库随仓库提交，评委开箱即用 RAG
+data/kb/chroma/  # 向量库不进 git（赛前打包另附）
 data/kb/*.pdf
 data/uploads/
 data/exports/
@@ -24,10 +24,15 @@ plugins/
 docs/
 
 # ===== 模型权重 =====
-# 小模型（onnx/weights/cfg/names）随仓库提交，保证开箱即用
-# BAAI 嵌入大模型（数百 MB）忽略，赛前另行预置，详见 README
+# 所有 ONNX/PT 模型权重不进 git（赛前打包另附、开箱即用）
+data/models/*.onnx
+data/models/*.pt
+data/models/*.pth
+data/models/*.weights
+data/models/*.bin
+# BGE 嵌入模型（数百 MB）忽略，赛前另行预置
 data/models/BAAI--bge-small-zh-v1.5/
-# Qwen2.5-0.5B-Instruct HF 权重不接入（实测慢+与 onnxruntime 同进程冲突；LLM 走 ollama qwen3:8b）。已删，勿重新下载入库
+# Qwen2.5-0.5B-Instruct HF 权重不接入（LLM 走 ollama qwen3:8b）
 data/models/Qwen2.5-0.5B-Instruct/
 
 # ===== Python =====
