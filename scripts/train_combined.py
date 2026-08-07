@@ -44,6 +44,7 @@ def _torch_safe_load_fixed(weight, *args, **kwargs):
             correct_root = str(ROOT)
             path_str = correct_root + path_str[idx + len(marker):]
         if os.path.exists(path_str):
+            # 安全审查（S6985）: 绕开 Ultralytics 路径 bug，加载本地可信权重。
             return torch.load(path_str, map_location="cpu",
                               weights_only=False), path_str
     return _ORIG_TORCH_SAFE_LOAD(weight, *args, **kwargs)
@@ -125,6 +126,7 @@ def _read_metrics(run_dir: Path) -> dict:
 
 def _model_from_ckpt(path: Path):
     """直接 torch.load 加载 best.pt，绕开 Ultralytics 的用户目录路径 bug。"""
+    # 安全审查（S6985）: YOLOv8 checkpoint 含非张量对象，本地可信权重。
     ckpt = torch.load(str(path), map_location="cpu", weights_only=False)
     src_model = ckpt.get("ema") or ckpt.get("model")
     if src_model is None:
@@ -178,6 +180,7 @@ def _train_and_export(name: str, job: dict,
         if from_best:
             print(f"[{name}] 未找到现有 best.pt，回退到官方预训练权重", flush=True)
         if PRETRAINED_SRC.exists():
+            # 安全审查（S6985）: 官方预训练权重，来源可信。
             ckpt = torch.load(str(PRETRAINED_SRC), map_location="cpu",
                               weights_only=False)
             model = YOLO(MODEL_YAML)

@@ -51,6 +51,8 @@ def main() -> int:
         print(f"BEST_PT_MISSING: {best_pt}", flush=True)
         return 1
 
+    # 安全审查（S6985）: YOLOv8 checkpoint 含 ema/model 非张量对象，无法用 weights_only=True；
+    # 本地训练脚本，权重由管理员自产可信，接受风险。
     ckpt = torch.load(str(best_pt), map_location="cpu", weights_only=False)
     src_model = ckpt.get("ema") or ckpt.get("model")
     if src_model is None:

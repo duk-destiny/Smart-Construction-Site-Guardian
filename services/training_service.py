@@ -127,6 +127,7 @@ class TrainingService:
             except OSError:
                 pass
         if pid and self._alive(pid):
+            # 安全审查（S6350）: pid 为 int 类型，列表参数无 shell=True，无注入风险。
             subprocess.run(
                 ["taskkill", "/PID", str(pid), "/T", "/F"],
                 capture_output=True,
@@ -212,6 +213,7 @@ class TrainingService:
 
     def _write_task(self, task: dict) -> None:
         TASK_FILE.parent.mkdir(parents=True, exist_ok=True)
+        # 安全审查（S2083）: TASK_FILE 为常量路径，非用户可控。
         TASK_FILE.write_text(
             json.dumps(task, ensure_ascii=False, indent=2),
             encoding="utf-8")

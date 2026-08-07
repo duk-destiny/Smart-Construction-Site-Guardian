@@ -18,6 +18,8 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
 sys.path.insert(0, ROOT)
 
+import secrets
+
 import bcrypt
 
 from dao.db import get_conn, init_db
@@ -127,8 +129,11 @@ def main() -> None:
     tasks = TaskDAO(conn)
     wo = WorkOrderDAO(conn)
 
-    safety_id = users.insert("safety", bcrypt.hashpw(b"demo1234", bcrypt.gensalt()).decode(), "safety")
-    admin_id = users.insert("admin", bcrypt.hashpw(b"admin1234", bcrypt.gensalt()).decode(), "admin")
+    _safety_pass = os.getenv("DEMO_SAFETY_PASS") or secrets.token_urlsafe(12)
+    _admin_pass = os.getenv("DEMO_ADMIN_PASS") or secrets.token_urlsafe(12)
+    print(f"演示账号密码 → safety: {_safety_pass}  admin: {_admin_pass}")
+    safety_id = users.insert("safety", bcrypt.hashpw(_safety_pass.encode(), bcrypt.gensalt()).decode(), "safety")
+    admin_id = users.insert("admin", bcrypt.hashpw(_admin_pass.encode(), bcrypt.gensalt()).decode(), "admin")
 
     rows = []
     for i, item in enumerate(_SEED, 1):
