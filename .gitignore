@@ -74,3 +74,19 @@ data/streamlit*.err
 data/*.mp4
 data/*.avi
 data/*.mov
+# ===== 根目录临时测试/基准文件 =====
+/_bench_pages.py
+/_test_bge_thread.py
+/_run_app.cmd
+/run_app_background.cmd
+
+# ===== data 根目录散落文件 =====
+data/*.png
+data/*.txt
+data/*.pid
+data/*.jsonl
+data/*.out
+data/*.err
+data/*.log
+data/ui_server_run.*
+data/mock_webhook.*
