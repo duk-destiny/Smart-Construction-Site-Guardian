@@ -27,3 +27,13 @@ docs
 # 大模型经 volume 挂载，不烤进镜像
 data/models/BAAI--bge-small-zh-v1.5
 data/models/Qwen2.5-0.5B-Instruct
+# 测试截图/临时输出
+data/*.png
+data/*.txt
+data/*.pid
+data/*.jsonl
+data/ui_server_run.*
+data/mock_webhook.*
+# onnx 权重不烤进镜像（volume 挂载）
+data/models/*.onnx
+data/models/*.pt
