@@ -1,6 +1,7 @@
 # ===== 运行时 / 预置资产（不入仓，赛前本地预置）=====
 data/raw/
-data/kb/chroma/  # 向量库不进 git（赛前打包另附）
+# 向量库不进 git（赛前打包另附）
+data/kb/chroma/
 data/kb/*.pdf
 data/uploads/
 data/exports/
