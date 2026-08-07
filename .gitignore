@@ -91,3 +91,6 @@ data/*.err
 data/*.log
 data/ui_server_run.*
 data/mock_webhook.*
+
+# Config backup
+config/config.yaml.bak
