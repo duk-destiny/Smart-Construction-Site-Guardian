@@ -1,4 +1,4 @@
--- 海之子·动火安全智能体 数据库 Schema（SQLite 3, WAL）
+-- 智护工地 · 施工安全智能体 数据库 Schema（SQLite 3, WAL）
 -- 8 表 + 索引 + 审计仅追加触发器 + 3 视图
 -- 全部使用 IF NOT EXISTS，保证 init_db() 幂等可重复执行
 -- 类型约定：时间用 TEXT(ISO8601)，布尔用 INTEGER(0/1)；外键需 PRAGMA foreign_keys=ON
