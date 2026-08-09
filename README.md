@@ -4,7 +4,7 @@
 
 [![Quality gate status](https://sonarcloud.io/api/project_badges/measure?project=duk-destiny_Smart-Construction-Site-Guardian&metric=alert_status&token=820ed34b7f80191064245ea5090a00e98eb45623)](https://sonarcloud.io/summary/new_code?id=duk-destiny_Smart-Construction-Site-Guardian)[![Maintainability Rating](https://sonarcloud.io/api/project_badges/measure?project=duk-destiny_Smart-Construction-Site-Guardian&metric=sqale_rating&token=820ed34b7f80191064245ea5090a00e98eb45623)](https://sonarcloud.io/summary/new_code?id=duk-destiny_Smart-Construction-Site-Guardian)[![Lines of Code](https://sonarcloud.io/api/project_badges/measure?project=duk-destiny_Smart-Construction-Site-Guardian&metric=ncloc&token=820ed34b7f80191064245ea5090a00e98eb45623)](https://sonarcloud.io/summary/new_code?id=duk-destiny_Smart-Construction-Site-Guardian)
 
-一套从「视觉感知 → 规范检索 → 风险定级 → 闭环处置 → 人工纠偏 → 复训回写」端到端打通的动火作业安全智能体，兼顾**研判深度**（多 Agent 协同、RAG 条款引用、证据链可追溯）与**告警时效**（实时链路首帧出警、规则驱动、无阻塞推理）。
+一套从「视觉感知 → 规范检索 → 风险定级 → 闭环处置 → 人工纠偏 → 复训回写」端到端打通的施工安全智能体，兼顾**研判深度**（多 Agent 协同、RAG 条款引用、证据链可追溯）与**告警时效**（实时链路首帧出警、规则驱动、无阻塞推理）。
 
 ## 核心特性
 
@@ -117,7 +117,7 @@ flowchart LR
 ```
 hzz-fire-safety/
 ├── app.py                  # Streamlit 入口（st.navigation 多页路由 + 全局主题）
-├── run_tests.ps1           # 统一全量测试
+├── scripts/run_tests.py     # 统一全量测试
 ├── run_app.ps1             # 统一应用启动
 ├── Dockerfile / docker-compose.yml  # 容器化部署
 ├── .github/workflows/ci.yml         # 自动测试
@@ -251,7 +251,7 @@ docker compose run --rm app python -m pytest tests -q --tb=short -p no:cacheprov
 
 **Q8 整个项目为什么几乎每个选型都偏「轻量」？（Ollama / ONNX / BGE+Chroma / Streamlit / SQLite）**
 答：因为项目定位是「工地一线、断网可用、单机部署」的安全智能体，这个定位决定了每个组件都必须满足「装得少、跑得动、断网能活」，不是图省事，而是约束倒逼的择优：
-- **视觉推理用 ONNX Runtime 而非 PyTorch 直推**：部署免装 torch/ultralytics 重栈（2GB+），单库跨平台，`run()` 释放 GIL 利于 CPU 双头并行，实测 ~968ms 满足连续监测；`intra_op` 线程可控，实时引擎按 `cpu // 引擎数` 封顶 `intra_op_threads` 防抢核（`realtime_engine.py` 的 `_compute_intra_op()`），小模型线程过多反而更慢；
+- **视觉推理用 ONNX Runtime 而非 PyTorch 直推**：部署免装 torch/ultralytics 重栈（2GB+），单库跨平台，`run()` 释放 GIL 利于 CPU 双头并行，实测 ~211ms 满足连续监测；`intra_op` 线程可控，实时引擎按 `cpu // 引擎数` 封顶 `intra_op_threads` 防抢核（`realtime_engine.py` 的 `_compute_intra_op()`），小模型线程过多反而更慢；
 - **Embedding 用 BGE-small-zh（~100MB）而非 OpenAI/BGE-large**：100MB 模型 CPU 即推理，专为中文优化，与规范条款的中文语义匹配优于通用英文模型；OpenAI 要外网且数据出境，large 要 GPU，都违背工地离线硬约束；
 - **向量库用 ChromaDB（嵌入式）而非 FAISS/Milvus**：`PersistentClient` 自带落盘到 `data/kb/chroma/` 免运维，`get_or_create_collection` 开箱即用；FAISS 要自管索引元数据且无持久化，Milvus 要起独立服务，对单机演示是过度工程；
 - **前端用 Streamlit 单体而非 Flask+React/Gradio**：原生 `st.navigation` 多页路由 + 会话状态开箱即用，`st.camera_input`/`st.file_uploader`/`st.image`/`st.toast` 直接覆盖「拍照→检测→红框展示→告警弹窗」全链路，单容器部署无前端构建链；Gradio 缺摄像头轮询与会话级状态，React 要 webpack/node 工具链。代价是无精细 CSS 控制，但安全场景重在功能闭环而非像素级 UI；
@@ -341,16 +341,16 @@ docker compose run --rm app python -m pytest tests -q --tb=short -p no:cacheprov
 
 | 维度 | 指标 | 值 | 说明 |
 | --- | --- | ---: | --- |
-| 检测延迟 | 火情头单帧 | ~318 ms | YOLOv8s ONNX，CPU |
-| 检测延迟 | PPE 头单帧 | ~883 ms | YOLOv8 ONNX，CPU |
-| 检测延迟 | 双头并行 | ~968 ms | `ThreadPoolExecutor`，取最大而非求和 |
-| 检测延迟 | 双头串行 | ~1201 ms | 对比基线，并行省约 20% |
+| 检测延迟 | 火情头单帧 | ~436 ms | YOLOv8s ONNX，CPU |
+| 检测延迟 | PPE 头单帧 | ~422 ms | YOLOv8 ONNX，CPU |
+| 检测延迟 | 双头并行 | ~211 ms | ThreadPoolExecutor，取最大而非求和 |
+| 检测延迟 | 双头串行 | ~858 ms | 对比基线，并行省约 75% |
 | RAG | 知识库条目 | 22 块 | 动火作业规范切分 |
 | RAG | 召回率@5 | 1.0 | chunk 派生查询（上界） |
 | RAG | 平均查询延迟 | ~78 ms | BGE encode + Chroma cosine |
 | RAG | 领域查询 top1 | 0.54–0.84 | 「监火人」0.84 / 「可燃气体」0.54 |
 
-检测 mAP 见答辩材料与管理端「模型版本注册」（火情 v2 mAP50=0.898、PPE v3 mAP50=0.695，训练验证集）；独立测试集逐类 P/R/F1 见上表与管理端「模型评估摘要」。实时链路双头并行后单帧 ~0.97s，满足「采样节奏 ≠ 告警 SLA」下的连续监测；RAG 查询百毫秒级，不阻塞告警（条款异步回填）。
+检测 mAP 见答辩材料与管理端「模型版本注册」（火情 v2 mAP50=0.898、PPE v3 mAP50=0.695，训练验证集）；独立测试集逐类 P/R/F1 见上表与管理端「模型评估摘要」。实时链路双头并行后单帧 ~0.21s，满足「采样节奏 ≠ 告警 SLA」下的连续监测；RAG 查询百毫秒级，不阻塞告警（条款异步回填）。
 
 ## 后续优化计划
 
@@ -378,15 +378,14 @@ docker compose run --rm app python -m pytest tests -q --tb=short -p no:cacheprov
 - 扩展**格式归一化层**：`docx`/`doc`/`txt`/`md` 等非 PDF 文档统一转纯文本后入向量库，`import_pdf` 接口泛化为 `import_doc`；
 
 ### 其他
-- **命名收口**：项目定名「海之子 · 动火作业安全智能体」，施工 PPE 作为第二场景并存；随场景扩展可往「建筑施工安全」收敛，动火作为核心子场景；
+- **命名收口**：项目定名「智护工地 · 施工安全智能体」，覆盖动火作业与施工 PPE 双场景，架构支持按场景持续扩展。
 - **RTSP 采样与告警 SLA**：火情关键源 `monitor.interval_sec` 建议 ≤3s，必要时改连续抓帧入队模型，明确「采样节奏 ≠ 告警 SLA」。
 
-确认样本经 feedback 闭环周期性回写微调，提升长尾/夜间/逆光等场景召回。
 
 
 ## 部署注意
 
-- `.gitignore` 已忽略：`data/raw/`、`data/combined/`、`data/eval/`、`data/feedback_training/`、`data/runs_combined/`、`data/kb/*.pdf`、`data/uploads/`、`data/exports/`、`data/app.db*`、`__pycache__/`、`*.pyc`、`.venv313/`、`plugins/`、官方 `yolov8n.pt`/`yolov8s.pt` 及 `data/models/BAAI--bge-small-zh-v1.5/`、`data/models/Qwen2.5-0.5B-Instruct/`。
+- `.gitignore` 已忽略：`data/raw/`、`data/combined/`、`data/eval/`、`data/feedback_training/`、`data/runs_combined/`、`data/kb/*.pdf`、`data/uploads/`、`data/exports/`、`data/app.db*`、`__pycache__/`、`*.pyc`、`.venv313/`、`plugins/`、官方 `yolov8n.pt`/`yolov8s.pt` 及 `data/models/BAAI--bge-small-zh-v1.5/`。
 - **需自行训练**：小模型推理权重（data/models/*.onnx，约 42MB/个）不随仓库提交，赛前打包另附。训练入口 scripts/train_combined.py（合并集训练）/ scripts/train_ppe_local.py + scripts/export_ppe_onnx.py（PPE 本地训练+导出），管理端复训按钮亦可。
 - **需另行获取**：BGE Embedding 模型（约 100MB，`python scripts/setup_models.py` 下载）；原始数据集（`data/raw/`，仅复现训练/评测需要）。
 - 首次启动自动建库 + 种子默认账号（`core/bootstrap.py`）；知识库向量库 data/kb/chroma/ 不进 git（赛前打包另附），查询仍需 BGE 模型，故 `setup_models.py` 为必跑步骤。实时监测态不依赖知识库。
@@ -403,4 +402,4 @@ docker compose run --rm app python -m pytest tests -q --tb=short -p no:cacheprov
 
 ## 说明
 
-本项目面向教学/演示场景，识别能力以本地 ONNX 权重为准。PPE 头按 `construction-safety-gsnvb` / industrial-safety-vision 工程路线训练导出，类名须与 `config.yaml` 中 `class_map` 完全一致。`scripts/train_ppe_local.py` 与 `scripts/export_ppe_onnx.py` 为本地训练/导出入口。
+本项目面向教学/演示场景，识别能力以本地 ONNX 权重为准。PPE 头基于公开施工安全数据集训练导出，类名须与 `config.yaml` 中 `class_map` 完全一致。`scripts/train_ppe_local.py` 与 `scripts/export_ppe_onnx.py` 为本地训练/导出入口。
