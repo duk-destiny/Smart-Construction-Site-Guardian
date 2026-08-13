@@ -402,4 +402,8 @@ docker compose run --rm app python -m pytest tests -q --tb=short -p no:cacheprov
 
 ## 说明
 
-本项目面向教学/演示场景，识别能力以本地 ONNX 权重为准。PPE 头基于公开施工安全数据集训练导出，类名须与 `config.yaml` 中 `class_map` 完全一致。`scripts/train_ppe_local.py` 与 `scripts/export_ppe_onnx.py` 为本地训练/导出入口。
+本项目仅供教学与演示使用，识别效果以本地 ONNX 权重运行结果为准。PPE 检测模型基于公开施工安全数据集训练并导出，模型输出类别名称必须和配置文件 config.yaml 的 class_map 映射表完全匹配。
+scripts/infer_ppe.py：推理脚本
+eval.py：模型评估脚本
+scripts/infer_onnx.py：ONNX 模型导出推理脚本
+版权声明：未经作者许可，禁止商用；禁止未经授权直接将本项目（含模型、代码）用于竞赛参赛，违者必究。
