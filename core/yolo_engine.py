@@ -195,9 +195,9 @@ class YoloEngine:
                     continue  # 白名单外/忽略类（如 default）
                 cls = mapped
             else:
-                if cls_id >= len(WHITELIST):
-                    continue
-                cls = WHITELIST[cls_id]
+                # ? class_map ??????????????? ONNX ?????
+                # ??? WHITELIST ???????????? WHITELIST ?????
+                cls = raw_name
             cx, cy, w, h = (float(v) for v in boxes[i])
             candidates.append((i, conf, cls, [cx, cy, w, h]))
 
