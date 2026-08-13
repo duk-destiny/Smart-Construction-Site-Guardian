@@ -37,8 +37,9 @@ theme.apply_theme()
 def main() -> None:
     # 首次启动自举：建库 + 种子默认账号，保证 clone 后开箱即登录
     try:
-        from core.bootstrap import ensure_initialized
+        from core.bootstrap import ensure_initialized, ensure_models
         ensure_initialized()
+        ensure_models()
     except Exception:
         pass
 

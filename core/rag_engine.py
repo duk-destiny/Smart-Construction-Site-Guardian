@@ -220,6 +220,44 @@ class RagEngine:
             col.add(ids=ids, embeddings=embeddings, metadatas=metadatas, documents=documents)
         return len(all_clauses)
 
+    def add_clauses(self, pdf_paths: list[str]) -> int:
+        """增量导入：解析 PDF 并追加到现有集合（不擦除已有数据）。
+
+        与 build() 的区别：build 会 delete_collection 重建，
+        适合首次全量构建；add_clauses 仅追加，适合逐份增量导入。
+        """
+        model = self._load_model()
+        col = self._get_collection()
+        if model is None or col is None:
+            return 0
+
+        all_clauses: list[dict[str, str]] = []
+        for p in pdf_paths:
+            all_clauses.extend(PdfParser.parse(p))
+        if not all_clauses:
+            return 0
+
+        # 生成唯一 ID：用现有条目数做偏移，避免与已有 clause_N 冲突
+        existing = col.count()
+        ids = []
+        embeddings = []
+        metadatas = []
+        documents = []
+
+        texts = [c["clause_text"] for c in all_clauses]
+        with _ENCODE_LOCK:
+            import numpy as _np
+            embs = _np.asarray(model.encode(texts, normalize_embeddings=True)).tolist()
+        for i, c in enumerate(all_clauses):
+            ids.append(f"clause_{existing + i}")
+            embeddings.append(embs[i])
+            metadatas.append({"clause_no": c["clause_no"]})
+            documents.append(c["clause_text"])
+
+        if embeddings:
+            col.add(ids=ids, embeddings=embeddings, metadatas=metadatas, documents=documents)
+        return len(all_clauses)
+
     def query(self, text: str, top_k: int = 3) -> list[dict]:
         """语义检索，返回 top_k 条匹配条款。
 

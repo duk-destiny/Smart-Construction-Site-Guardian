@@ -4,6 +4,7 @@
 """
 from __future__ import annotations
 
+import os
 import sqlite3
 
 from core.pdf_parser import PdfParser
@@ -32,8 +33,10 @@ class KbAdmin:
 
         eng = RagEngine(bge_dir=self.bge_dir, chroma_dir=self.chroma_dir,
                         collection_name=self.collection)
-        count = eng.build([pdf_path])
-        KbDocDAO(self.conn).insert(pdf_path.split("/")[-1], count, imported_by)
+        count = eng.add_clauses([pdf_path])
+        if count == 0:
+            return {"ok": False, "error": "向量化入库失败"}
+        KbDocDAO(self.conn).insert(os.path.basename(pdf_path), count, imported_by)
         return {"ok": True, "chunks": count, "clauses": len(clauses)}
 
     def list_docs(self):
