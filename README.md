@@ -380,7 +380,7 @@ docker compose run --rm app python -m pytest tests -q --tb=short -p no:cacheprov
 
 ### 链路与工程闭环
 - **ONNX 推理量化（FP16→INT8 修正）**：针对**实时链路的识别推理**（非训练过程——训练用 FP32 原精度），导出 onnx 后对推理图做 **INT8 动态量化**（`onnxruntime.quantization.quantize_dynamic`），CPU 上 2-3x 加速、YOLOv8s 精度损失 <0.5%；
-- **BGE Embedding 转 ONNX 消除线程抢核**：当前 BGE（PyTorch/SentenceTransformer）与 YOLO ONNX Runtime 同进程共存，PyTorch 独立线程池与 ONNX OpenMP 抢核，实测 BGE 加载后 ONNX 单帧推理从 ~63ms 升至 ~460ms（7x 降速）；将 BGE-small-zh 导出为 ONNX 后两者共用同一 Runtime 线程池，可消除抢核、恢复全速推理。
+- **BGE Embedding 转 ONNX 精简架构**：当前 BGE（PyTorch/SentenceTransformer）已通过子进程隔离（`core/bge_worker.py` + `_BgeProxy`）规避了与主进程 ONNX Runtime 的 OpenMP 抢核；但仍需独立子进程 + stdin/stdout JSON 通信，存在 IPC 开销与冷启动延迟。将 BGE-small-zh 导出为 ONNX 后可并入主进程同一 Runtime 线程池，消除子进程与 IPC 开销、简化部署架构。
 - **上传研判异步化**：引入后台执行器 + 进度轮询，主线程提交即返回，进度从「事后轨迹」变为「真·实时」；
 
 ### RAG 知识库与文档解析
