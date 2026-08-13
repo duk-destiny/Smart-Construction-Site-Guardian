@@ -318,8 +318,7 @@ docker compose run --rm app python -m pytest tests -q --tb=short -p no:cacheprov
 | --- | --- | ---: | ---: | ---: | ---: |
 | v2（当前活跃） | 烟雾 | 0.35 | 0.91 | 0.91 | 0.91 |
 | v2（当前活跃） | 火花 | 0.35 | 0.82 | 0.77 | 0.79 |
-| v3（已删除） | 烟雾 | — | — | — | — |
-| v3（已删除） | 火花 | — | — | — | — |
+
 
 **PPE**（90 张测试图）：
 
@@ -335,16 +334,15 @@ docker compose run --rm app python -m pytest tests -q --tb=short -p no:cacheprov
 | v3（当前活跃） | 未穿反光衣 | 0.25 | 0.89 | 0.66 | 0.75 |
 | v3（当前活跃） | 穿着反光衣 | 0.25 | 0.91 | 0.78 | 0.84 |
 | v3（当前活跃） | 人员 | 0.25 | 0.90 | 0.47 | 0.62 |
-| v5（从头训，active=False） | 佩戴安全帽 | 0.25 | 0.82 | 0.76 | 0.79 |
-| v5（从头训，active=False） | 未戴安全帽 | 0.25 | 0.96 | 0.88 | 0.91 |
-| v5（从头训，active=False） | 未穿反光衣 | 0.25 | 0.32 | 0.72 | 0.44 |
-| v5（从头训，active=False） | 穿着反光衣 | 0.25 | 0.89 | 0.82 | 0.86 |
-| v5（从头训，active=False） | 人员 | 0.25 | 0.88 | 0.60 | 0.71 |
+| v5 | 佩戴安全帽 | 0.25 | 0.82 | 0.76 | 0.79 |
+| v5 | 未戴安全帽 | 0.25 | 0.96 | 0.88 | 0.91 |
+| v5 | 未穿反光衣 | 0.25 | 0.32 | 0.72 | 0.44 |
+| v5 | 穿着反光衣 | 0.25 | 0.89 | 0.82 | 0.86 |
+| v5 | 人员 | 0.25 | 0.88 | 0.60 | 0.71 |
 
 结论：
-- 火情 v2 在 0.30–0.35 阈值 F1 最佳（已在 config 落地）；v3 复训严重退化（独立测试集 TP=0，训练 mAP50 仅 0.11），已删除 v3 权重与注册行，仅保留 v2 活跃。
+- 火情 v2 在 0.30–0.35 阈值 F1 最佳（已在 config 落地）。
 - PPE v3 逐类全面优于 v2，尤其 `person` 召回 0.21→0.47、`佩戴安全帽` F1 0.82→0.87，已切换为活跃版本。
-- v5 从头训练（`yolov8s.pt` COCO 预训练）108 轮（`patience=15` 早停，best ep93）：先清除 `os_` 硬链接重复样本 21406 张（旧 v5 `person` R=0.037 的根因），再用 **BCE pos_weight 加权**（`helmet=1.0 / no_helmet=1.5 / no_vest=1.5 / person=2.0`，第 75 轮 `person` 动态降至 1.5 抑制误检）+ `copy_paste=0.1 / mixup=0.1 / close_mosaic=10`（末 10 轮关 mosaic+copy_paste+mixup 纯净微调）+ `cos_lr` 退火（`lr0=0.01→0.0001`、`warmup=3`）；训练验证集 mAP50=0.761（较 v3 0.695 +0.066、v4 0.704 +0.057），独立测试集 raw mAP50=0.696（90 张，conf 0.25），`person` R 0.47→0.60（过 v3 门）、`no_helmet` R 0.62→0.88、`vest` R 0.78→0.82；已注册 `active=False`（未切线上，留对比回滚窗口）。
 - 仍存短板：v5 已补 `person`/`no_helmet`/`vest` 召回，但 `no_vest` 精度仅 0.32（误检多）、`helmet` 召回 0.87→0.76 略降、`person` 召回仍偏低，是后续定位损失加权（`obj_pw`/锚框聚类）与数据补采的优先项。
 
 ## 端到端评测指标
@@ -362,13 +360,14 @@ docker compose run --rm app python -m pytest tests -q --tb=short -p no:cacheprov
 | RAG | 平均查询延迟 | ~78 ms | BGE encode + Chroma cosine |
 | RAG | 领域查询 top1 | 0.54–0.84 | 「监火人」0.84 / 「可燃气体」0.54 |
 
-检测 mAP 见答辩材料与管理端「模型版本注册」（火情 v2 mAP50=0.898、PPE v3 mAP50=0.695 / v4 mAP50=0.704 / v5 mAP50=0.761，训练验证集；v5 独立测试集 raw mAP50=0.696，火情 v3 已删除）；独立测试集逐类 P/R/F1 见上表与管理端「模型评估摘要」。实时链路双头并行后单帧 ~0.21s，满足「采样节奏 ≠ 告警 SLA」下的连续监测；RAG 查询百毫秒级，不阻塞告警（条款异步回填）。
+检测 mAP 见答辩材料与管理端「模型版本注册」（火情 v2 mAP50=0.898、PPE v3 mAP50=0.695 / v4 mAP50=0.704 / v5 mAP50=0.761，训练验证集；独立测试集逐类 P/R/F1 见上表与管理端「模型评估摘要」。实时链路双头并行后单帧 ~0.21s，满足「采样节奏 ≠ 告警 SLA」下的连续监测；RAG 查询百毫秒级，不阻塞告警（条款异步回填）。
 
 ## 后续优化计划
 
 > 由于本次开发周期有限，且硬件设备条件存在一定限制，项目完成度尚有提升空间，仍存在不少待改进的问题。基于现有成果，规划未来可开展的优化工作如下：
 
 ### 检测模型与 mAP
+- ppe v5 整体 mAP 略超 v4、person 大幅领先、安全关键类更强，综合是四个版本里最均衡的。已补 `person`/`no_helmet`/`vest` 召回，但 `no_vest` 精度仅 0.32（误检多）、`helmet` 召回 0.87→0.76 略降、`person` 召回仍偏低，是后续定位损失加权（`obj_pw`/锚框聚类）与数据补采的优先项。
 - 阈值与 NMS 调参空间尚存，`spark` 低置信光斑误报过滤阈值（`fp_filter.spark_conf_min`）可按现场继续收敛；
 - 人工纠偏确认样本经 feedback 闭环周期性回写微调，提升长尾/夜间/逆光等场景召回。
 
@@ -397,9 +396,9 @@ docker compose run --rm app python -m pytest tests -q --tb=short -p no:cacheprov
 ## 部署注意
 
 - `.gitignore` 已忽略：`data/raw/`、`data/combined/`、`data/eval/`、`data/feedback_training/`、`data/runs_combined/`、`data/kb/*.pdf`、`data/uploads/`、`data/exports/`、`data/app.db*`、`__pycache__/`、`*.pyc`、`.venv313/`、`plugins/`、官方 `yolov8n.pt`/`yolov8s.pt` 及 `data/models/BAAI--bge-small-zh-v1.5/`。
-- **需自行训练**：小模型推理权重（data/models/*.onnx，约 42MB/个）不随仓库提交，赛前打包另附。训练入口 scripts/train_combined.py（合并集训练）/ scripts/train_ppe_local.py + scripts/export_ppe_onnx.py（PPE 本地训练+导出），管理端复训按钮亦可。
+- **需自行训练**模型自行训练，训练入口 scripts/train_combined.py（合并集训练）/ scripts/train_ppe_local.py + scripts/export_ppe_onnx.py（PPE 本地训练+导出），管理端复训按钮亦可。
 - **需另行获取**：BGE Embedding 模型（约 100MB，`python scripts/setup_models.py` 下载）；原始数据集（`data/raw/`，仅复现训练/评测需要）。
-- 首次启动自动建库 + 种子默认账号（`core/bootstrap.py`）；知识库向量库 data/kb/chroma/ 不进 git（赛前打包另附），查询仍需 BGE 模型，故 `setup_models.py` 为必跑步骤。实时监测态不依赖知识库。
+- 首次启动自动建库 + 种子默认账号（`core/bootstrap.py`）；知识库向量库 data/kb/chroma/ 不进 git。查询仍需 BGE 模型，故 `setup_models.py` 为必跑步骤。实时监测态不依赖知识库。
 - LLM 润色走 ollama `qwen3:8b`（独立进程，异步润色不进主链路）；app 启动后台预热一次 + 每次 `keep_alive=30m` 常驻，规避 5.2GB 模型反复冷启；断网/不可用自动降级为模板工单。
 
 ## 技术栈
