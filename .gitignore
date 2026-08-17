@@ -94,3 +94,11 @@ data/mock_webhook.*
 
 # Config backup
 config/config.yaml.bak
+
+# 演示素材（视频/音频/截图/字幕/文案，不跟踪）
+介绍视频.mp4
+创意材料.html
+痛点调研.html
+data/视频讲解文案.md
+data/demo_video/
+data/subs_frames/

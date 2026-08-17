@@ -25,23 +25,25 @@ class ReviewAgent(AgentBase):
         risk_level = msg.payload.get("risk_level", "低")
         reasons: list[str] = []
 
-        if risk_level in HIGH_RISK_LEVELS:
-            for det in detections:
-                cls = det.get("cls")
-                conf = float(det.get("conf", 1.0) or 1.0)
-                if cls in HIGH_RISK_CLASSES and conf < REVIEW_CONF_THRESHOLD:
-                    reasons.append(
-                        f"{cls} 置信度 {conf:.2f} 低于 {REVIEW_CONF_THRESHOLD:.2f}，"
-                        "属高风险项，建议人工复核")
-            for item in compliance:
-                if item.get("needs_review"):
-                    reasons.append(
-                        f"规范条款未明确匹配：{item.get('label', '')}，建议人工补充依据")
+        # 高风险类别低置信度：无论风险等级都须复核
+        # （原逻辑仅在 risk_level 为较大/重大时才查，导致 PPE 类
+        #   不在 hot_work 矩阵、风险升不上去时复核被完全跳过）
+        for det in detections:
+            cls = det.get("cls")
+            conf = float(det.get("conf", 1.0) or 1.0)
+            if cls in HIGH_RISK_CLASSES and conf < REVIEW_CONF_THRESHOLD:
+                reasons.append(
+                    f"{cls} 置信度 {conf:.2f} 低于 {REVIEW_CONF_THRESHOLD:.2f}，"
+                    "属高风险项，建议人工复核")
+        for item in compliance:
+            if item.get("needs_review"):
+                reasons.append(
+                    f"规范条款未明确匹配：{item.get('label', '')}，建议人工补充依据")
 
         # 作业票不合规但影像未检出可直接定级的违规目标：
         # 证据不足，需人工复核（闭环 fusion「请人工复核」提示，SRS 3.2.3）
         permit_noncompliant = any(c.get("verdict") == "不合规" for c in compliance)
-        if permit_noncompliant and risk_level == "一般":
+        if permit_noncompliant and risk_level in ("一般", "低"):
             reasons.append("作业票不合规但影像未检出违规目标，证据不足，建议人工复核")
 
         msg.status = "success"

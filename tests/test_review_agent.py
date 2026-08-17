@@ -37,3 +37,29 @@ def test_rule_missing_clause_requires_review():
         "compliance": [{"label": "火花", "needs_review": True}],
     }))
     assert out.payload["needs_review"] is True
+
+
+def test_low_conf_high_risk_at_low_risk_level_requires_review():
+    """盲区回归：risk_level=低 时高风险低置信度也必须复核。
+
+    修复前 review_agent 仅在 risk_level 为较大/重大时才查高风险低置信度，
+    导致 PPE 类（no_helmet/no_vest）不在 hot_work 矩阵、风险升不上去时
+    复核被完全跳过，UI 显示"无需人工复核"。
+    """
+    out = ReviewAgent().run(_msg({
+        "risk_level": "低",
+        "detections": [{"cls": "no_helmet", "conf": 0.30}],
+        "compliance": [],
+    }))
+    assert out.payload["needs_review"] is True
+    assert out.payload["review_reasons"]
+
+
+def test_permit_noncompliant_at_low_risk_requires_review():
+    """盲区回归：risk_level=低 时作业票不合规也须复核。"""
+    out = ReviewAgent().run(_msg({
+        "risk_level": "低",
+        "detections": [],
+        "compliance": [{"verdict": "不合规", "label": "监火人"}],
+    }))
+    assert out.payload["needs_review"] is True
