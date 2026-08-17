@@ -5,7 +5,7 @@
   data/feedback_training/yolo/fire/
 
 用法：
-  venv313/Scripts/python.exe scripts/prepare_feedback_training.py
+  python scripts/prepare_feedback_training.py
 """
 from __future__ import annotations
 

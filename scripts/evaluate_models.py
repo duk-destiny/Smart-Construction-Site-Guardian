@@ -5,11 +5,11 @@
 
 用法：
   # 评测所有已注册版本（默认）
-  .venv313/Scripts/python.exe scripts/evaluate_models.py
+  python scripts/evaluate_models.py
   # 只评测指定版本
-  .venv313/Scripts/python.exe scripts/evaluate_models.py --version v3
+  python scripts/evaluate_models.py --version v3
   # 指定阈值
-  .venv313/Scripts/python.exe scripts/evaluate_models.py --thresholds 0.25 0.30 0.35 0.45
+  python scripts/evaluate_models.py --thresholds 0.25 0.30 0.35 0.45
 
 新增模型后的流程：
   1. 复训完自动 register 进 model_registry（训练集 mAP，已有逻辑）

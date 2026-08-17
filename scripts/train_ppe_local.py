@@ -1,7 +1,7 @@
 """本地 4070 训练 PPE 检测模型，导出 ONNX 到 data/models/ppe_yolov8_v2.onnx。
 
-用法（在 venv313 中，项目根目录下）：
-  venv313/Scripts/python.exe scripts/train_ppe_local.py
+用法（在虚拟环境中，项目根目录下）：
+  python scripts/train_ppe_local.py
 
 特性：
   - 自动修正 data.yaml 的 path（指向数据集绝对目录，避免 Ultralytics 解析到 cwd）

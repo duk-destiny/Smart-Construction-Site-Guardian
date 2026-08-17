@@ -102,3 +102,6 @@ config/config.yaml.bak
 data/视频讲解文案.md
 data/demo_video/
 data/subs_frames/
+
+# 交付压缩包不进 git
+*.zip
