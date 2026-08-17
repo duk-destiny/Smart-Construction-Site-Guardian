@@ -305,9 +305,9 @@ docker compose run --rm app python -m pytest tests -q --tb=short -p no:cacheprov
 
 ```bash
 # 评测所有已注册版本（默认）
-.\.venv313\Scripts\python.exe scripts/evaluate_models.py --thresholds 0.25 0.30 0.35 0.45
+python scripts/evaluate_models.py --thresholds 0.25 0.30 0.35 0.45
 # 只评测指定版本
-.\.venv313\Scripts\python.exe scripts/evaluate_models.py --version v3
+python scripts/evaluate_models.py --version v3
 ```
 
 模型路径从 `model_registry` 读取（不再硬编码），按「场景+版本」聚合 merge 写入（不覆盖已有版本）。新增模型后跑一次本脚本即可补入独立测试集评测，无需改代码。实测基线（最佳阈值，独立测试集）：
@@ -334,16 +334,16 @@ docker compose run --rm app python -m pytest tests -q --tb=short -p no:cacheprov
 | v3（当前活跃） | 未穿反光衣 | 0.25 | 0.89 | 0.66 | 0.75 |
 | v3（当前活跃） | 穿着反光衣 | 0.25 | 0.91 | 0.78 | 0.84 |
 | v3（当前活跃） | 人员 | 0.25 | 0.90 | 0.47 | 0.62 |
-| v5 | 佩戴安全帽 | 0.25 | 0.82 | 0.76 | 0.79 |
-| v5 | 未戴安全帽 | 0.25 | 0.96 | 0.88 | 0.91 |
-| v5 | 未穿反光衣 | 0.25 | 0.32 | 0.72 | 0.44 |
-| v5 | 穿着反光衣 | 0.25 | 0.89 | 0.82 | 0.86 |
-| v5 | 人员 | 0.25 | 0.88 | 0.60 | 0.71 |
+| v4 | 佩戴安全帽 | 0.25 | 0.87 | 0.84 | 0.86 |
+| v4 | 未戴安全帽 | 0.25 | 0.89 | 0.71 | 0.79 |
+| v4 | 未穿反光衣 | 0.25 | 0.80 | 0.72 | 0.76 |
+| v4 | 穿着反光衣 | 0.25 | 0.92 | 0.77 | 0.84 |
+| v4 | 人员 | 0.25 | 0.91 | 0.38 | 0.54 |
 
 结论：
 - 火情 v2 在 0.30–0.35 阈值 F1 最佳（已在 config 落地）。
 - PPE v3 逐类全面优于 v2，尤其 `person` 召回 0.21→0.47、`佩戴安全帽` F1 0.82→0.87，已切换为活跃版本。
-- 仍存短板：v5 已补 `person`/`no_helmet`/`vest` 召回，但 `no_vest` 精度仅 0.32（误检多）、`helmet` 召回 0.87→0.76 略降、`person` 召回仍偏低，是后续定位损失加权（`obj_pw`/锚框聚类）与数据补采的优先项。
+- v4 相比 v3 整体 mAP 略升（0.695→0.704），`no_helmet` 召回 0.62→0.71 提升明显，`helmet`/`vest` F1 基本持平；`person` 召回 0.47→0.38 略降且仍偏低，是后续定位损失加权（`obj_pw`/锚框聚类）与数据补采的优先项。
 
 ## 端到端评测指标
 
@@ -360,14 +360,14 @@ docker compose run --rm app python -m pytest tests -q --tb=short -p no:cacheprov
 | RAG | 平均查询延迟 | ~78 ms | BGE encode + Chroma cosine |
 | RAG | 领域查询 top1 | 0.54–0.84 | 「监火人」0.84 / 「可燃气体」0.54 |
 
-检测 mAP 见答辩材料与管理端「模型版本注册」（火情 v2 mAP50=0.898、PPE v3 mAP50=0.695 / v4 mAP50=0.704 / v5 mAP50=0.761，训练验证集；独立测试集逐类 P/R/F1 见上表与管理端「模型评估摘要」。实时链路双头并行后单帧 ~0.21s，满足「采样节奏 ≠ 告警 SLA」下的连续监测；RAG 查询百毫秒级，不阻塞告警（条款异步回填）。
+检测 mAP 见答辩材料与管理端「模型版本注册」（火情 v2 mAP50=0.898、PPE v3 mAP50=0.695 / v4 mAP50=0.704，训练验证集；独立测试集逐类 P/R/F1 见上表与管理端「模型评估摘要」。实时链路双头并行后单帧 ~0.21s，满足「采样节奏 ≠ 告警 SLA」下的连续监测；RAG 查询百毫秒级，不阻塞告警（条款异步回填）。
 
 ## 后续优化计划
 
 > 由于本次开发周期有限，且硬件设备条件存在一定限制，项目完成度尚有提升空间，仍存在不少待改进的问题。基于现有成果，规划未来可开展的优化工作如下：
 
 ### 检测模型与 mAP
-- ppe v5 整体 mAP 略超 v4、person 大幅领先、安全关键类更强，综合是四个版本里最均衡的。已补 `person`/`no_helmet`/`vest` 召回，但 `no_vest` 精度仅 0.32（误检多）、`helmet` 召回 0.87→0.76 略降、`person` 召回仍偏低，是后续定位损失加权（`obj_pw`/锚框聚类）与数据补采的优先项。
+- ppe v4 相比 v3 整体 mAP 略升、`no_helmet` 召回提升明显，但 `person` 召回仍偏低，是后续定位损失加权（`obj_pw`/锚框聚类）与数据补采的优先项。
 - 阈值与 NMS 调参空间尚存，`spark` 低置信光斑误报过滤阈值（`fp_filter.spark_conf_min`）可按现场继续收敛；
 - 人工纠偏确认样本经 feedback 闭环周期性回写微调，提升长尾/夜间/逆光等场景召回。
 
@@ -384,7 +384,7 @@ docker compose run --rm app python -m pytest tests -q --tb=short -p no:cacheprov
 - **上传研判异步化**：引入后台执行器 + 进度轮询，主线程提交即返回，进度从「事后轨迹」变为「真·实时」；
 
 ### RAG 知识库与文档解析
-- 当前 RAG 仅接受**文本型 PDF**（`core/pdf_parser.py` 经 PyMuPDF `get_text` 抽取，无 OCR），扫描件/图片型 PDF 抽出为空、无法入库；
+- 因大部分规范守则均为文本且多以pdf格式存储，所以当前 RAG 仅接受**文本型 PDF**（`core/pdf_parser.py` 经 PyMuPDF `get_text` 抽取，无 OCR），扫描件/图片型 PDF 抽出为空、无法入库；
 - 扩展加 **OCR 预处理层**（PaddleOCR 或 Tesseract）先对扫描件做文字识别，再走现有条款切分 + 向量入库流水线；
 - 扩展**格式归一化层**：`docx`/`doc`/`txt`/`md` 等非 PDF 文档统一转纯文本后入向量库，`import_pdf` 接口泛化为 `import_doc`；
 
@@ -397,7 +397,7 @@ docker compose run --rm app python -m pytest tests -q --tb=short -p no:cacheprov
 ## 部署注意
 
 - `.gitignore` 已忽略：`data/raw/`、`data/combined/`、`data/eval/`、`data/feedback_training/`、`data/runs_combined/`、`data/kb/*.pdf`、`data/uploads/`、`data/exports/`、`data/app.db*`、`__pycache__/`、`*.pyc`、`.venv313/`、`plugins/`、官方 `yolov8n.pt`/`yolov8s.pt` 及 `data/models/BAAI--bge-small-zh-v1.5/`。
-- **开箱即用**：小模型推理权重（data/models/*.onn），BGE Embedding 模型（约 100MB）随zip包打包，无需手动下载
+- **开箱即用**：小模型推理权重（data/models/*.onnx）随包打包；BGE Embedding 模型（约 100MB）不随包，新用户需运行 `setup_models.py` 手动下载（必跑步骤）
 - 首次启动自动建库 + 种子默认账号（`core/bootstrap.py`）；知识库向量库 data/kb/chroma/ 不进 git。查询仍需 BGE 模型，故 `setup_models.py` 为必跑步骤。实时监测态不依赖知识库。
 - LLM 润色走 ollama `qwen3:8b`（独立进程，异步润色不进主链路）；app 启动后台预热一次 + 每次 `keep_alive=30m` 常驻，规避 5.2GB 模型反复冷启；断网/不可用自动降级为模板工单。
 

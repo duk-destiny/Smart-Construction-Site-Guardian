@@ -51,13 +51,13 @@ SPECS = [
         "scene": "ppe",
         "src": "security",
         "prefix": "sec_",
-        "class_map": {2: 0, 3: 0, 4: 3, 5: 1, 6: 3},
+        "class_map": {1: 1},
     },
     {
         "scene": "ppe",
-        "src": "vest",
-        "prefix": "vestB_",
-        "class_map": {0: 4, 1: 2},
+        "src": "person",
+        "prefix": "person_",
+        "class_map": {0: 3},
     },
     {
         "scene": "fire",
