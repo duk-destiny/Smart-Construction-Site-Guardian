@@ -148,12 +148,20 @@ hzz-fire-safety/
 
 ## 快速开始
 
+> Windows 用户可直接运行 `./run_app.ps1`，脚本自动创建 `.venv313` 虚拟环境、安装依赖并启动应用；以下为手动步骤。
+
 ```bash
+# 0. 创建虚拟环境（推荐 Python 3.13）
+python -m venv .venv313
+
+# Windows 激活 / Linux·macOS 激活: source .venv313/bin/activate
+.venv313\Scripts\activate
+
 # 1. 安装依赖（离线优先，见 requirements.txt）
 pip install -r requirements.txt
 
-# 2. 下载 BGE 中文 Embedding 模型（仅首次，约 100MB，需联网；之后离线可用）
-python scripts/setup_models.py
+# 2.（可选）BGE 中文 Embedding 模型已随包提供（data/models/BAAI--bge-small-zh-v1.5/）
+# 仅当该目录缺失时才需联网下载：python scripts/setup_models.py
 
 # 3.（可选）本地 Ollama 拉取 qwen3:8b，用于工单文案润色；不装则自动降级为模板
 ollama pull qwen3:8b
@@ -396,9 +404,9 @@ python scripts/evaluate_models.py --version v3
 
 ## 部署注意
 
-- `.gitignore` 已忽略：`data/raw/`、`data/combined/`、`data/eval/`、`data/feedback_training/`、`data/runs_combined/`、`data/kb/*.pdf`、`data/uploads/`、`data/exports/`、`data/app.db*`、`__pycache__/`、`*.pyc`、`.venv313/`、`plugins/`、官方 `yolov8n.pt`/`yolov8s.pt` 及 `data/models/BAAI--bge-small-zh-v1.5/`。
-- **开箱即用**：小模型推理权重（data/models/*.onnx）随包打包；BGE Embedding 模型（约 100MB）不随包，新用户需运行 `setup_models.py` 手动下载（必跑步骤）
-- 首次启动自动建库 + 种子默认账号（`core/bootstrap.py`）；知识库向量库 data/kb/chroma/ 不进 git。查询仍需 BGE 模型，故 `setup_models.py` 为必跑步骤。实时监测态不依赖知识库。
+- **开箱即用**：小模型推理权重（data/models/*.onnx）+ BGE Embedding 模型（model.safetensors，约 91MB）均随包打包，开箱即用
+- **PPE 权重版本**：仅随包提供后续训练更强的 v3（活跃）/ v4（备用）；v2 因压缩包体积限制不放入，如需可由 scripts/export_ppe_onnx.py 重新导出；火情 v2 随包提供。
+- 首次启动自动建库 + 种子默认账号（`core/bootstrap.py`）；知识库向量库 data/kb/chroma/ 已随包提供。仅当 BGE 模型目录缺失时才需运行 `setup_models.py` 联网下载。实时监测态不依赖知识库。
 - LLM 润色走 ollama `qwen3:8b`（独立进程，异步润色不进主链路）；app 启动后台预热一次 + 每次 `keep_alive=30m` 常驻，规避 5.2GB 模型反复冷启；断网/不可用自动降级为模板工单。
 
 ## 技术栈

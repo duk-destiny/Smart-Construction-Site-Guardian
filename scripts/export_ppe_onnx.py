@@ -1,7 +1,7 @@
 """仅导出 ONNX：从 C:/ppe_runs/ppe/weights/best.pt 导出到 data/models/ppe_yolov8_v2.onnx。
 
-训练已完成，无需重新训练。在 venv313 中运行（项目根目录下）：
-  venv313/Scripts/python.exe scripts/export_ppe_onnx.py
+训练已完成，无需重新训练。在虚拟环境中 中运行（项目根目录下）：
+  python scripts/export_ppe_onnx.py
 """
 import os
 import shutil
