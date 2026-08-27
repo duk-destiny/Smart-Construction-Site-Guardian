@@ -202,7 +202,69 @@ def g_nav():
     on_agents = any("运行多Agent研判" in str(b.label) for b in at.button) or any("多Agent" in s.value for s in at.subheader)
     rec("页面切换:上传->研判", bool(on_agents), f"buttons={[b.label for b in at.button][:4]} subs={[s.value for s in at.subheader][:3]} err={errs(at)}")
 
-GROUPS = {"safe": g_safe, "realtime": g_realtime, "agents": g_agents, "diag": g_diag, "nav": g_nav}
+
+def g_orders():
+    """v0.2~v0.5 工单闭环/统一上报/对话查询 冒烟组（AppTest+服务级断言）。"""
+    conn, uid = seed_tester()
+    from services.task_service import TaskService
+    from services.dispatch_service import DispatchService
+    ts = TaskService(conn)
+    ds = DispatchService(conn)
+
+    # 1) 统一上报页渲染三 Tab
+    at = open_page("upload", uid, timeout=120)
+    tabs = [str(t.label) for t in at.tabs]
+    rec("统一上报三Tab渲染", len(tabs) == 3 and any("影像" in t for t in tabs),
+        f"tabs={tabs} err={errs(at)}")
+
+    # 2) 文字建单(source=text)→ 规则派发
+    tid = ts.create_text_hazard(uid, "E2E文字隐患:通道堆放杂物", "flammable",
+                                scene_id="hot_work", location="B区")
+    rec("文字建单source=text", ts.tasks.get(tid)["source"] == "text", f"task={tid}")
+    oid = ds.dispatch_order(tid, uid, scene_id="hot_work")
+    rec("规则派发到责任人", ds.orders.get(oid)["assignee_id"] is not None, f"order={oid}")
+
+    # 3) 报告页派发面板渲染（文字单同样需要轻量结果载荷）
+    _wo = ts.work_orders.get_by_task(tid)
+    _result = {"status": "success", "payload": {
+        "risk_level": _wo["risk_level"],
+        "vision": {"payload": {"detections": []}},
+        "work_order": {"risk_level": _wo["risk_level"],
+                       "hazard_desc": _wo["hazard_desc"],
+                       "clause": _wo["clause"],
+                       "requirement": _wo["requirement"]},
+        "worker_notice": _wo["worker_notice"]}}
+    at = open_page("report", uid, {"current_task_id": tid, "_result": _result},
+                   timeout=120)
+    has_panel = any("派发与整改闭环" in str(s.value) for s in at.subheader)
+    rec("报告页派发面板", has_panel, f"err={errs(at)}")
+
+    # 4) lisi 提交整改 → 管理端验收队列区块 → 销项
+    lisi_id = conn.execute(
+        "SELECT id FROM users WHERE username='lisi'").fetchone()[0]
+    ds.submit_rectification(oid, lisi_id, "E2E整改完成", [])
+    at = open_page("admin", uid, timeout=150)
+    rec("管理端验收队列区块",
+        any("工单验收队列" in str(s.value) for s in at.subheader), f"err={errs(at)}")
+    ds.review_order(oid, uid, True)
+    rec("验收销项closed", ds.orders.get(oid)["status"] == "closed", "")
+
+    # 5) 对话查询路由(只读,命中刚销项工单)
+    from services.intent_router import IntentRouter
+    r = IntentRouter(conn, use_llm=False).route(f"#{oid} 的进度")
+    rec("对话查询路由详情", r.action == "order_detail" and r.order_id == oid, str(r))
+
+    # 6) 周报生成落盘
+    import glob as _g
+    before = set(_g.glob("data/exports/*.pdf"))
+    from services.report_service import WeeklyReportService
+    res = WeeklyReportService(conn).generate(
+        "2026-01-01", "2030-12-31", user_id=uid)
+    rec("周报生成落盘", res["ok"] and set(_g.glob("data/exports/*.pdf")) - before,
+        res["data"]["file_path"])
+
+GROUPS = {"safe": g_safe, "realtime": g_realtime, "agents": g_agents,
+          "orders": g_orders, "diag": g_diag, "nav": g_nav}
 
 if __name__ == "__main__":
     ap = argparse.ArgumentParser(); ap.add_argument("--group", required=True); a = ap.parse_args()
