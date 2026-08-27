@@ -22,6 +22,8 @@ class TaskService:
 
     # 内存进度：task_id -> {agent: {status, cost_ms}}
     _progress: dict[str, dict] = {}
+    # 测试注入口：后台异步研判的 Orchestrator 类（None=真实实现）
+    _ORCH_FACTORY = None
 
     # 清空范围：仅业务数据；用户、审计日志、知识库与模型注册保留
     _CLEARABLE_TABLES = (
@@ -61,6 +63,54 @@ class TaskService:
                                 "running", source=source)
         TaskService._progress[tid] = {}
         return tid
+
+    # ---------- v0.6 上传链路异步化 ----------
+    _async_running: dict[str, bool] = {}
+    _async_results: dict[str, dict] = {}
+
+    def start_async_run(self, task_id: str, user_id: str | None,
+                        images: list[str], permit_info: dict,
+                        scene_id: str = "hot_work") -> bool:
+        """后台线程执行多 Agent 重链路，立即返回（进度经 update_progress 轮询）。
+
+        完成/失败结果写 `_async_results[task_id]`（含 payload 或 error），
+        页面 fragment 轮询到后展示。同一任务进行中重复启动返回 False。
+        """
+        self.permissions.require(user_id, "upload")
+        if TaskService._async_running.get(task_id):
+            return False
+        TaskService._async_running[task_id] = True
+        svc_ref = self
+
+        def _worker() -> None:
+            try:
+                from agents.orchestrator import Orchestrator
+                cls = TaskService._ORCH_FACTORY or Orchestrator
+                orch = cls(progress_cb=svc_ref.update_progress,
+                                    scene_id=scene_id,
+                                    work_order_dao=svc_ref.work_orders)
+                result = orch.execute(task_id, images=images,
+                                      permit_info=permit_info)
+                svc_ref.save_result(task_id, result.payload)
+                TaskService._async_results[task_id] = result.to_dict()
+                wo = result.payload.get("work_order") or {}
+                if getattr(orch, "action", None) is not None:
+                    orch.action.polish(task_id, wo.get("hazard_desc", ""),
+                                       wo.get("clause", ""),
+                                       wo.get("requirement", ""),
+                                       wo.get("deadline", ""))
+            except Exception as exc:  # noqa: BLE001 失败也要落可读结果
+                TaskService._async_results[task_id] = {
+                    "status": "failed", "error": f"{type(exc).__name__}: {exc}"}
+            finally:
+                TaskService._async_running.pop(task_id, None)
+
+        threading.Thread(target=_worker, daemon=True).start()
+        return True
+
+    def pop_async_result(self, task_id: str) -> dict | None:
+        """页面轮询：取走完成结果（取后即清，避免驻留）。"""
+        return TaskService._async_results.pop(task_id, None)
 
     def create_text_hazard(self, user_id: str | None, description: str,
                            hazard_key: str, scene_id: str = "hot_work",

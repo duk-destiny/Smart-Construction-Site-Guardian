@@ -46,12 +46,46 @@ def render_agents() -> None:
     init_db(conn)
     ts = TaskService(conn)
 
-    if st.button("▶ 运行多Agent研判", type="primary") or st.session_state.get("_ran"):
+    # —— v0.6 异步通路：后台线程跑重链路，fragment 每 2s 轮询进度 ——
+    _ba, _bs = st.columns(2)
+    if _ba.button("🚀 后台研判（不阻塞页面）", use_container_width=True):
+        if not st.session_state.get("_ran_async"):
+            started = ts.start_async_run(
+                task_id, st.session_state.get("user_id"),
+                images, permit_info, scene_id=st.session_state.get("scene", "hot_work"))
+            AuditService(conn).append(st.session_state.get("user_id"),
+                                      "execute_async", {"task_id": task_id,
+                                                        "started": started})
+        st.session_state["_ran_async"] = True
+        st.rerun()
+    _sync_clicked = _bs.button("▶ 同步研判（兼容模式）", type="primary",
+                               use_container_width=True)
+    if _sync_clicked:
+        st.session_state["_sync_ran"] = True
+
+    @st.fragment(run_every="2s")
+    def _poll_async() -> None:
+        if st.session_state.get("_result"):
+            return
+        done = ts.pop_async_result(task_id)
+        if done:
+            st.session_state["_result"] = done
+            st.session_state["_ran"] = True
+            st.rerun(scope="app")
+        prog = ts.get_progress(task_id)
+        if prog or st.session_state.get("_ran_async"):
+            st.caption("⏳ 后台研判进行中…（完成后自动刷新结果）")
+
+    if st.session_state.get("_ran_async") and not st.session_state.get("_result"):
+        _poll_async()
+
+    if st.button("▶ 运行多Agent研判", type="primary") or st.session_state.get("_sync_ran"):
         scene_id = st.session_state.get("scene", "hot_work")
         orch = Orchestrator(progress_cb=ts.update_progress, scene_id=scene_id,
                             work_order_dao=ts.work_orders)
         result = orch.execute(task_id, images=images, permit_info=permit_info)
         st.session_state["_ran"] = True
+        st.session_state.pop("_ran_async", None)
         st.session_state["_result"] = result.to_dict()
         # 持久化研判结果到数据库（幂等，已有则跳过）
         ts.save_result(task_id, result.payload)
