@@ -148,24 +148,91 @@ def _tab2_text_voice(svc: TaskService) -> None:
 
 
 def _tab3_lookup() -> None:
-    st.caption("只读查询：按工单号快速定位。读写硬隔离——本入口不做任何写操作"
-               "（见方案文档 5.2）。")
+    """只读对话式查询（P3，v0.5）：规则优先 → LLM 兜底 → 人工点选。"""
+    st.caption("只读查询：支持「#w_xxx 进度」「3号工单怎么样了」「近7天逾期」"
+               "「本周统计」等说法；不提供任何写操作（读写硬隔离）。")
     conn = get_conn()
     init_db(conn)
-    rows = get_conn().execute(
-        "SELECT w.id, w.risk_level, w.status, t.source "
-        "FROM work_orders w LEFT JOIN tasks t ON t.id=w.task_id "
-        "ORDER BY w.created_at DESC LIMIT 200").fetchall()
-    if not rows:
-        st.info("暂无工单记录")
+    from services.intent_router import IntentRouter
+    router = IntentRouter(conn)
+
+    text = st.text_input("问一句", "", key="lk_q",
+                         placeholder="如：最近有没有逾期的？w_123 的进度？")
+    if not text.strip():
+        res = router.list_view()
+        if res:
+            st.caption("最新待办工单（输入问题可精确查询）")
+            for r in res:
+                st.markdown(f"- `{r['id']}`　{r['risk_level']}｜{r['status']}"
+                            f"｜责任人 {r['assignee_name'] or '—'}")
+        else:
+            st.info("暂无工单记录")
         return
-    q = st.text_input("筛选：工单号片段或状态关键词", "", key="lk_q").strip().lower()
-    shown = [r for r in rows if not q or q in r["id"].lower()
-             or q in (r["status"] or "").lower()]
-    st.caption(f"共 {len(shown)} 条（最近优先）")
-    for r in shown[:30]:
+
+    route = router.route(text)
+    from services.dispatch_service import _now_str
+    if route.tier == "llm":
+        st.caption(f"🤖 已理解（本地模型）")
+
+    if route.action == "order_detail" and route.order_id:
+        card = router.detail_view(route.order_id)
+        if card is None:
+            st.error(f"未找到工单 {route.order_id}")
+            return
+        c1, c2, c3 = st.columns(3)
+        c1.metric("状态", {"open": "🔨 待整改", "rejected": "↩️ 已驳回",
+                           "submitted": "⏳ 待验收",
+                           "closed": "✅ 已销项"}.get(card["status"],
+                                                      card["status"]))
+        c2.metric("责任人", card["assignee_name"] or "未派发")
+        c3.metric("截止", (card["deadline"] or "—")[:19])
+        st.write(f"**隐患描述**：{card['hazard_desc']}")
+        st.write(f"**整改要求**：{card['requirement']}")
+        return
+
+    if route.action in ("order_detail", "confirm_list") and route.candidates:
+        pick = st.radio("匹配到多张，请选择", route.candidates,
+                        format_func=lambda i: f"`{i}`",
+                        key="lk_pick")
+        card = router.detail_view(pick)
+        if card:
+            st.write(f"**状态**：{card['status']}　|　"
+                     f"**责任人**：{card['assignee_name'] or '—'}　|　"
+                     f"**截止**：{(card['deadline'] or '—')[:19]}")
+            st.write(f"**隐患描述**：{card['hazard_desc']}")
+        return
+
+    if route.action == "overdue_stats":
+        rows = router.overdue_rows(_now_str())
+        st.metric("存量逾期未整改", len(rows))
+        for r in rows[:20]:
+            st.markdown(f"- `{r['id']}`　{r['risk_level']}｜截止 "
+                        f"{(r['deadline'] or '—')[:19]}｜"
+                        f"{r['assignee_name'] or '未派发'}｜{(r['hazard_desc'] or '')[:24]}")
+        return
+
+    if route.action == "weekly_stats":
+        from services.report_service import WeeklyReportService
+        from datetime import date, timedelta
+        end = date.today().isoformat()
+        start = (date.today() - timedelta(days=route.days - 1)).isoformat()
+        s = WeeklyReportService(conn).gather(start, end)
+        m1c, m2c, m3c, m4c = st.columns(4)
+        m1c.metric("检测帧", s["frames"])
+        m2c.metric("不合规帧", s["bad"])
+        m3c.metric("新增工单", s["orders_total"])
+        m4c.metric("存量逾期", s["overdue_open_now"])
+        for line in s["conclusions"][:3]:
+            st.markdown(f"- {line}")
+        return
+
+    # unknown / human：兜底展示最近列表 + 提示
+    if route.hint:
+        st.info(route.hint)
+    res = router.list_view()
+    for r in res[:10]:
         st.markdown(f"- `{r['id']}`　{r['risk_level']}｜{r['status']}"
-                    f"｜来源 {r['source'] or 'upload'}")
+                    f"｜责任人 {r['assignee_name'] or '—'}")
 
 
 @safe_page("统一上报")
