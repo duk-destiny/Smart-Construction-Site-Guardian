@@ -11,6 +11,9 @@
 - **工单闭环（v0.2 新增）**：派发到人（responsible 角色 + config 规则映射，时限按风险等级查表）
   → 整改提交（说明+现场照片）→ 验收销项/驳回重改 → 逾期巡检催办越级
   （演示用管理端按钮+时间游标，生产由 cron 驱动 `scripts/overdue_scan.py`），五类动作全落审计。
+- **风险周报（v0.3 新增）**：检测×告警×工单三源确定性聚合（含按责任人派发/销项/
+  在办/**逾期率**画像），规则化结论 + fpdf2 中文 PDF；管理端在线预览下载，
+  cron 可驱动 `scripts/weekly_report.py` 周期归档。
 - **双模式**：上传研判走多 Agent 重链路（深度推理、可读工单），实时监测走轻链路（低延迟、连续预警）。
 - **多场景检测**：当前覆盖动火作业（火花/烟雾/灭火器）+ 施工 PPE（安全帽/反光衣/人员）两个场景，检测头按场景配置可扩展。
 - **三级合规**：红（不合规/即时高危）/黄（警告）/绿（合规），分级规则数据驱动，可不改代码调整。
@@ -137,7 +140,7 @@ hzz-fire-safety/
 │   ├── llm_engine.py       # 本地 Ollama LLM（可选，自动降级）
 │   ├── config.py / pdf_parser.py / video_utils.py / video_source.py / yolo_adapter.py
 ├── agents/                 # 多 Agent 编排（视觉/规范/融合/复核/处置/编排器）
-├── services/               # 认证/审计/任务/权限/模型/监控/通知/导出/训练/知识库
+├── services/               # 认证/审计/任务/权限/模型/监控/通知/导出/训练/知识库/派发验收(dispatch_service)/报告(report_service)
 ├── dao/                    # SQLite 持久化（models.py + schema.sql）
 ├── ui/                     # 页面（login/upload/realtime/agents/report/my_orders/history/admin/diag/theme）
 ├── scripts/                # 数据准备、训练、评测、纠偏、模型注册/切换脚本
