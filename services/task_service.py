@@ -62,6 +62,53 @@ class TaskService:
         TaskService._progress[tid] = {}
         return tid
 
+    def create_text_hazard(self, user_id: str | None, description: str,
+                           hazard_key: str, scene_id: str = "hot_work",
+                           location: str | None = None) -> str:
+        """文字线索直接建单（v0.4 P2-v0）：跳过视觉链路，按 severity 查级落库。
+
+        白名单约束：hazard_key 必须命中 compliance.severity 且非 safe（安全正向
+        信号不是隐患）——禁止用户/上层输入编造分类键。定级是纯规则查表。
+        """
+        self.permissions.require(user_id, "upload")
+        from core.compliance import SEVERITY
+        sev = SEVERITY.get(hazard_key)
+        if sev is None:
+            raise ValueError(f"未知隐患类别 {hazard_key}（须为既有隐患键白名单成员）")
+        if sev == "safe":
+            raise ValueError(f"{hazard_key} 为正向安全信号，不构成隐患上报项")
+        risk_level = {"critical": "较大", "warning": "一般"}[sev]
+
+        desc = description.strip()
+        if not desc:
+            raise ValueError("请填写隐患描述")
+        if location and location.strip():
+            desc = f"[{location.strip()}] {desc}"
+
+        permit_info = {"scene": scene_id, "area": (location or "").strip(),
+                       "report_type": "text"}
+        tid = self.tasks.insert(user_id, json.dumps(permit_info, ensure_ascii=False),
+                                "completed", source="text")
+        # 复用处置 Agent 的等级话术模板，保持工单文案口径一致
+        from agents.action_agent import ActionAgent
+        agent = ActionAgent()
+        notice_template = agent._template(desc, "", risk_level)
+        requirement_line = next(
+            (line for line in notice_template.splitlines()
+             if line.startswith("整改要求")), "整改要求：限期整改。")
+        self.risks.insert(tid, risk_level,
+                          json.dumps([desc], ensure_ascii=False), "[]")
+        self.work_orders.insert(
+            task_id=tid, hazard_desc=desc, clause="文字上报无规范条款引用",
+            requirement=requirement_line.replace("整改要求：", ""),
+            risk_level=risk_level, worker_notice=notice_template)
+        from dao.models import AuditDAO
+        AuditDAO(self.conn).insert(
+            user_id, "text_report",
+            json.dumps({"task_id": tid, "cls": hazard_key, "scene": scene_id},
+                       ensure_ascii=False))
+        return tid
+
     def clear_all_data(self, user_id: str | None, confirmation: str) -> dict:
         """清空全部业务数据；保留账号、审计日志、知识库与模型注册。"""
         self.permissions.require(user_id, "clear_data")
