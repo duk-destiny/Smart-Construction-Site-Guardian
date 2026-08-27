@@ -105,3 +105,14 @@ dispatch:
       assignee: lisi
     - scene: construction_ppe
       assignee: lisi
+
+# ================= 语音转写（v0.4 可选增强 · 静默策略）=================
+# OpenAI 兼容 /audio/transcriptions 端点。enabled=false 或字段不全时，
+# 上报页语音入口完全不渲染（静默，无任何提示噪音）。不做本地 whisper/文件上传。
+# 本地离线能力不受影响：文字表单路径零 LLM 依赖。
+asr:
+  enabled: false
+  api_base: ""        # 例 https://api.openai.com/v1
+  api_key: ""
+  model: "whisper-1"
+  timeout_sec: 30
