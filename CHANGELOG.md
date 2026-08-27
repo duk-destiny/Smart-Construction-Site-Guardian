@@ -6,6 +6,37 @@
 
 ---
 
+## [v0.6] — 2026-08-27
+
+### 新增：二期四项（路线图首批兑现）
+
+- **AI 提取预填 + 云 key 双 Provider**（`services/enhance_service.py`）：
+  自由文本 → {hazard_key, scene_id, description, location} 四字段草稿；
+  provider=auto 时**云端(OpenAI 兼容 /chat/completions，用户自配 key)失败自动落
+  本地 Ollama**，均败退手填表单；`hazard_key`/`scene_id` 越白名单整包弃收
+  （与 P2/P3 同构的注入面清零）；输出仅作预填草稿，人工确认后才建单。
+  UI：Tab②「⚡ AI 提取预填」按钮按可用性渲染（⛅云端/📦本地 标注）。
+- **催办 webhook 化**：`NotificationService.push_overdue` 复用告警通道
+  （wecom/dingtalk/generic + 重试 + notification_logs 软引用留痕
+  `wo_<order_id>`），`scan_overdue` 双档推送——责任人催办 + 逾期满 24h 越级
+  管理层；notify 未启用时自动 skipped（审计流水不受影响）。
+- **上传链路异步化**：`TaskService.start_async_run` 后台线程执行重链路
+  （含工单落库与异步润色桥），页面 `st.fragment(run_every=2s)` 轮询进度、
+  完成自动刷新结果——点击即响应，进度实时可见；同步按钮保留为兼容模式。
+- **YOLO INT8 推理量化**：`scripts/quantize_models.py` 动态量化 +
+  自动注册（version=`vN-int8`，active=0 不顶替线上）；实测 fire_v2
+  42MB→~11MB；上线前经 `evaluate_models.py` 逐类复核。
+- **真机验收基建**：`scripts/browser_acceptance.py`（Playwright 八步故事线
+  全绿+九截图，data/e2e_screens/）；e2e_apptest 新增 `orders` 组（8 断言）并
+  **修复陈年断供**——`_page_runner.py` 曾被误删导致整组基建失效，已从历史恢复；
+- **启动预热落地**（方案 5.1 约束①）：检测头模块级单例+锁取代
+  `st.cache_resource`（预热线程失效坑），登录后 0 号预热任务构建双场景头，
+  完成/失败均打启动日志。
+- **产品毛刺**：管理端验收队列首张默认展开（expander 状态 rerun 不保持的
+  体验修复）；侧边栏入口更名「统一上报」与页内标题一致。
+- 测试新增 23 例（enhance 6 / overdue-notify 3 / async 3 / quantize 2 /
+  browser-acceptance 为脚本非用例）。全量 **179 passed**。
+
 ## [v0.5] — 2026-08-27
 
 ### 新增：对话式查进度（P3 只读路由，闭环叙事最后一块）
