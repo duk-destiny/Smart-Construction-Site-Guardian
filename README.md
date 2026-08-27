@@ -8,6 +8,9 @@
 
 ## 核心特性
 
+- **工单闭环（v0.2 新增）**：派发到人（responsible 角色 + config 规则映射，时限按风险等级查表）
+  → 整改提交（说明+现场照片）→ 验收销项/驳回重改 → 逾期巡检催办越级
+  （演示用管理端按钮+时间游标，生产由 cron 驱动 `scripts/overdue_scan.py`），五类动作全落审计。
 - **双模式**：上传研判走多 Agent 重链路（深度推理、可读工单），实时监测走轻链路（低延迟、连续预警）。
 - **多场景检测**：当前覆盖动火作业（火花/烟雾/灭火器）+ 施工 PPE（安全帽/反光衣/人员）两个场景，检测头按场景配置可扩展。
 - **三级合规**：红（不合规/即时高危）/黄（警告）/绿（合规），分级规则数据驱动，可不改代码调整。
@@ -136,7 +139,7 @@ hzz-fire-safety/
 ├── agents/                 # 多 Agent 编排（视觉/规范/融合/复核/处置/编排器）
 ├── services/               # 认证/审计/任务/权限/模型/监控/通知/导出/训练/知识库
 ├── dao/                    # SQLite 持久化（models.py + schema.sql）
-├── ui/                     # 页面（login/upload/realtime/agents/report/history/admin/diag/theme）
+├── ui/                     # 页面（login/upload/realtime/agents/report/my_orders/history/admin/diag/theme）
 ├── scripts/                # 数据准备、训练、评测、纠偏、模型注册/切换脚本
 ├── docs/                  # 阶段规格与答辩材料（可选阅读）
 ├── data/
@@ -180,13 +183,16 @@ python scripts/e2e_apptest.py --group diag       # 系统自检
 python scripts/e2e_apptest.py --group nav        # 页面切换
 ```
 
-首次启动自动建表并写入两个默认账号（`core/bootstrap.py`，幂等）：
+首次启动自动建库并**按用户逐个补种**默认账号（`core/bootstrap.py`，幂等；
+v0.2 升级的老演示库也会自动补齐责任人而不动既有密码）：
 - 管理员 `admin` / `admin123`（全权限，含管理端 + 系统自检）
-- 安全员 `safety` / `demo1234`（上传/研判/改判，不可进管理端）
+- 安全员 `safety` / `demo1234`（上传/研判/改判/派发，不可进管理端）
+- 整改责任人 `lisi` / `demo1234`（responsible：仅「我的整改单」，提交整改申请验收）
 
 权限分层由 `services/permission_service.py` 强制校验。
 
-页面导航（`st.navigation` 侧边栏）：上传与作业票 📤 → 多 Agent 研判 🤖 → 工单/改判/导出 📋 → 实时摄像头监测 📷 → 检测历史与分析 📊 → 管理端 ⚙️ → 系统自检 🩺。
+页面导航（`st.navigation` 侧边栏，按角色注入）：上传与作业票 📤 → 多 Agent 研判 🤖 → 工单/改判/导出 📋（含派发面板）→ 实时摄像头监测 📷 → 检测历史与分析 📊 → 管理端 ⚙️（含验收队列/逾期巡检）→ 系统自检 🩺；
+`responsible` 责任人账号仅见 **我的整改单 🧰**。
 
 实时摄像头页面使用 `st.camera_input` 零依赖轮询方案：点击捕获帧即检测并展示，开启「连续监控」后自动刷新等待下一帧；**声音警报仅在实时监测态、且不合规时触发**。页面同时支持多路 RTSP / 本地视频源按帧抓取。
 
