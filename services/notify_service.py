@@ -253,3 +253,49 @@ class NotificationService:
                 raise urllib.error.HTTPError(
                     self.webhook_url(), resp.status, "push failed",
                     resp.headers, resp)
+    # ---------- v0.6 催办 webhook 化（工单闭环）----------
+    def push_overdue(self, order_id: str, assignee: str | None, hazard: str,
+                     deadline: str | None, overdue_hours: float,
+                     escalate: bool = False) -> dict:
+        """逾期工单催办推送（复用告警通道与重试/留痕管线）。
+
+        alarm_id 使用软引用 `wo_<order_id>`（notification_logs.alarm_id 为
+        软引用字段，无对应告警事件亦可留痕）。escalate=True 时文案升级为
+        越级提醒（收件语义为管理层）。
+        """
+        title = "🚨 逾期工单越级升级" if escalate else "⏰ 工单整改催办"
+        sample = {
+            "id": f"wo_{order_id}",
+            "cls": title,
+            "conf": None,
+            "scene_id": "工单闭环",
+            "source": "逾期巡检",
+            "created_at": time.strftime("%Y-%m-%d %H:%M:%S"),
+            "image_path": None,
+        }
+        # build_payload 会把 sample 字段拼成通道文案；这里把工单上下文
+        # 塞进 cls/conf 的展示位之外，另起一行正文由 webhook 侧解析。
+        # 为不侵入 build_payload，直接在其文案后追加正文——通过覆写 sample 的
+        # worker 提示位（payload 兼容键）实现。
+        sample["scene_id"] = (
+            f"工单 {order_id}｜责任人 {assignee or '未派发'}｜"
+            f"逾期 {overdue_hours:.0f}h（截止 {deadline or '—'}）")
+        sample["source"] = (hazard or "")[:60]
+
+        conn = self._get_conn()
+        init_db(conn)
+        logs = NotificationLogDAO(conn)
+        log_channel = self._log_channel()
+        demo = self._demo_mode()
+        if not demo and (not self.enabled() or not self.webhook_url()):
+            logs.insert(sample["id"], log_channel, "skipped",
+                        "推送未启用或未配置 webhook_url")
+            return {"ok": False, "status": "skipped"}
+        try:
+            self._post(self.build_payload(sample))
+            logs.insert(sample["id"], log_channel, "sent", None)
+            return {"ok": True, "status": "sent"}
+        except Exception as exc:  # noqa: BLE001
+            err = str(exc)[:200]
+            logs.insert(sample["id"], log_channel, "failed", err)
+            return {"ok": False, "status": "failed", "error": err}

@@ -169,15 +169,21 @@ class DispatchService:
 
     # ---------- 逾期巡检 ----------
     def scan_overdue(self, as_of: str | None = None,
-                     escalate_after_hours: float = 24.0) -> dict:
-        """扫描逾期未销项工单，写催办/越级审计流水，返回汇总计数。
+                     escalate_after_hours: float = 24.0,
+                     notifier=None) -> dict:
+        """扫描逾期未销项工单：审计流水 + webhook 催办推送（可注入便于测试）。
 
-        纯时间参数驱动：`as_of` 即演示"时间游标"，传入未来时刻即可在不等待的
-        前提下完整演练催办→升级故事线；生产由 cron 传实时时刻驱动。
+        每单两档推送：责任人催办；逾期满 escalate_after_hours 追加越级升级
+        （收件语义为管理层）。notify 未启用时推送自动 skipped（留痕），
+        审计流水不受影响。`notifier` 供测试注入 fake。
         """
+        if notifier is None:
+            from services.notify_service import NotificationService
+            notifier = NotificationService()
         now = as_of or _now_str()
         rows = self.orders.list_overdue(now)
         notified = escalated = 0
+        push_sent = push_skipped = push_failed = 0
         for row in rows:
             overdue_h = max(0.0, _hours_between(now, row["deadline"] or now))
             base = {
@@ -187,10 +193,24 @@ class DispatchService:
             }
             self.audit.insert(None, "overdue_notify", json.dumps(base, ensure_ascii=False))
             notified += 1
+            res = notifier.push_overdue(
+                row["id"], base["assignee_id"], row["hazard_desc"],
+                row["deadline"], overdue_h, escalate=False)
+            push_sent += res.get("status") == "sent"
+            push_skipped += res.get("status") == "skipped"
+            push_failed += res.get("status") == "failed"
             if overdue_h >= escalate_after_hours:
                 esc = dict(base, level="admin")
                 self.audit.insert(None, "overdue_escalate",
                                   json.dumps(esc, ensure_ascii=False))
                 escalated += 1
+                res2 = notifier.push_overdue(
+                    row["id"], base["assignee_id"], row["hazard_desc"],
+                    row["deadline"], overdue_h, escalate=True)
+                push_sent += res2.get("status") == "sent"
+                push_skipped += res2.get("status") == "skipped"
+                push_failed += res2.get("status") == "failed"
         return {"as_of": now, "overdue": len(rows),
-                "notified": notified, "escalated": escalated}
+                "notified": notified, "escalated": escalated,
+                "push_sent": push_sent, "push_skipped": push_skipped,
+                "push_failed": push_failed}
