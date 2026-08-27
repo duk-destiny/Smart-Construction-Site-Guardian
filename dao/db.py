@@ -32,6 +32,23 @@ _MIGRATIONS: dict[str, list[tuple[str, str]]] = {
         ("reviewed_by", "TEXT"),
         ("reviewed_at", "TEXT"),
     ],
+    # v0.2 工单闭环：派发/整改/验收生命周期字段
+    "work_orders": [
+        ("assignee_id", "TEXT REFERENCES users(id)"),
+        ("status", "TEXT NOT NULL DEFAULT 'open'"),
+        ("dispatched_at", "TEXT"),
+        ("deadline", "TEXT"),
+        ("submitted_note", "TEXT"),
+        ("submitted_imgs", "TEXT"),
+        ("approved_by", "TEXT"),
+        ("approved_at", "TEXT"),
+        ("closed_at", "TEXT"),
+        ("review_reason", "TEXT"),
+    ],
+    # v0.2 任务来源标记（camera/upload/text），供台账区分感知与人工上报
+    "tasks": [
+        ("source", "TEXT NOT NULL DEFAULT 'upload'"),
+    ],
 }
 
 def get_conn(db_path: str = DEFAULT_DB_PATH) -> sqlite3.Connection:
@@ -65,6 +82,55 @@ def _db_file_key(conn: sqlite3.Connection) -> str | None:
     return None
 
 
+def _migrate_user_role_check(conn: sqlite3.Connection) -> bool:
+    """老库 users.role 的 CHECK 约束缺少 'responsible' 角色时做一次受控表重建。
+
+    SQLite 无法 ALTER 修改 CHECK 约束；标准十二步简化为本库场景：
+    users 行数极小、任务侧 FK 按表名引用，临时关闭外键完成
+    建新表→拷贝→换名 即可，数据无损。返回是否执行了重建。
+    """
+    row = conn.execute(
+        "SELECT sql FROM sqlite_master WHERE type='table' AND name='users'"
+    ).fetchone()
+    if row is None or not row["sql"]:
+        return False
+    if "responsible" in (row["sql"] or ""):
+        return False  # 新建库由 schema.sql 直接带全量角色，无需迁移
+
+    # 关闭外键必须在事务外才生效（python sqlite3 隐式事务防护）
+    conn.commit()
+    conn.execute("PRAGMA foreign_keys=OFF")
+    # 暂存并摘除引用 users 的视图/触发器（DROP 后 RENAME 才能通过依赖校验）
+    deps = conn.execute(
+        "SELECT type, name, sql FROM sqlite_master "
+        "WHERE type IN ('view','trigger') AND sql LIKE '%users%' "
+        "AND name NOT LIKE 'sqlite_%'"
+    ).fetchall()
+    for dep in deps:
+        conn.execute(f"DROP {dep['type'].upper()} IF EXISTS \"{dep['name']}\"")
+    conn.execute("""
+        CREATE TABLE users_new (
+            id         TEXT PRIMARY KEY,
+            username   TEXT NOT NULL UNIQUE,
+            pwd_hash   TEXT NOT NULL,
+            role       TEXT NOT NULL CHECK(role IN ('safety','admin','responsible')),
+            created_at TEXT NOT NULL
+        )
+    """)
+    conn.execute(
+        "INSERT INTO users_new(id,username,pwd_hash,role,created_at) "
+        "SELECT id,username,pwd_hash,role,created_at FROM users"
+    )
+    conn.execute("DROP TABLE users")
+    conn.execute("ALTER TABLE users_new RENAME TO users")
+    for dep in deps:
+        if dep["sql"]:
+            conn.execute(dep["sql"])
+    conn.commit()
+    conn.execute("PRAGMA foreign_keys=ON")
+    return True
+
+
 def init_db(conn: sqlite3.Connection) -> None:
     """执行 schema.sql（建表/索引/触发器/视图）+ 增量迁移列。
 
@@ -82,6 +148,7 @@ def init_db(conn: sqlite3.Connection) -> None:
             return
         with open(_SCHEMA_PATH, encoding="utf-8") as f:
             conn.executescript(f.read())
+        _migrate_user_role_check(conn)
         for table, columns in _MIGRATIONS.items():
             existing = {
                 row["name"]

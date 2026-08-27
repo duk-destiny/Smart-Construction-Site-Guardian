@@ -3,21 +3,22 @@
 -- 全部使用 IF NOT EXISTS，保证 init_db() 幂等可重复执行
 -- 类型约定：时间用 TEXT(ISO8601)，布尔用 INTEGER(0/1)；外键需 PRAGMA foreign_keys=ON
 
--- 用户表
+-- 用户表（v0.2 起支持第三角色 responsible=整改责任人）
 CREATE TABLE IF NOT EXISTS users (
     id         TEXT PRIMARY KEY,
     username   TEXT NOT NULL UNIQUE,
     pwd_hash   TEXT NOT NULL,
-    role       TEXT NOT NULL CHECK(role IN ('safety','admin')),
+    role       TEXT NOT NULL CHECK(role IN ('safety','admin','responsible')),
     created_at TEXT NOT NULL
 );
 
--- 任务表（一次检测任务）
+-- 任务表（一次检测任务；source 标记输入来源 camera/upload/text）
 CREATE TABLE IF NOT EXISTS tasks (
     id          TEXT PRIMARY KEY,
     user_id     TEXT NOT NULL REFERENCES users(id),
     permit_json TEXT NOT NULL,
     status      TEXT NOT NULL DEFAULT 'pending',
+    source      TEXT NOT NULL DEFAULT 'upload',
     created_at  TEXT NOT NULL
 );
 
@@ -53,7 +54,10 @@ CREATE TABLE IF NOT EXISTS risks (
     override_reason  TEXT
 );
 
--- 整改工单 + 工人提示
+-- 整改工单 + 工人提示 + 派发/整改/验收生命周期（v0.2 工单闭环）
+-- status 流转：open(待整改) → submitted(待验收) → closed(已销项)；
+-- 验收驳回回到 open 并留 review_reason，同单可多轮整改；
+-- 「逾期」为派生状态（deadline < now 且未 closed），不入库避免状态机膨胀。
 CREATE TABLE IF NOT EXISTS work_orders (
     id             TEXT PRIMARY KEY,
     task_id        TEXT NOT NULL REFERENCES tasks(id),
@@ -62,6 +66,16 @@ CREATE TABLE IF NOT EXISTS work_orders (
     requirement    TEXT,
     risk_level     TEXT NOT NULL,
     worker_notice  TEXT,
+    assignee_id    TEXT REFERENCES users(id),
+    status         TEXT NOT NULL DEFAULT 'open',
+    dispatched_at  TEXT,
+    deadline       TEXT,
+    submitted_note TEXT,
+    submitted_imgs TEXT,
+    approved_by    TEXT,
+    approved_at    TEXT,
+    closed_at      TEXT,
+    review_reason  TEXT,
     created_at     TEXT NOT NULL
 );
 

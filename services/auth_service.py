@@ -27,10 +27,12 @@ def _detail_json(detail: dict) -> str:
 class AuthService:
     """登录与权限服务。"""
 
-    # RBAC 矩阵（LLD §2.2.1）：safety 受限，admin 全通
+    # RBAC 矩阵（LLD §2.2.1）：safety 受限；admin 全通；
+    # responsible（v0.2 整改责任人）仅可查看与提交整改，不进管理端
     _ROLE_ACTIONS: dict[str, set[str]] = {
         "admin": {"upload", "view", "export", "import_pdf", "view_all_logs", "override", "clear_data"},
         "safety": {"upload", "view", "export", "override"},
+        "responsible": {"view", "rectify"},
     }
 
     def __init__(self, conn: sqlite3.Connection) -> None:
