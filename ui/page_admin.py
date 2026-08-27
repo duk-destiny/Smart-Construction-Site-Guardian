@@ -210,6 +210,22 @@ def render_admin() -> None:
                                 user_id=st.session_state.get("user_id"))
                             st.success("告警状态已更新")
                             st.rerun()
+                        # v0.7 告警→工单桥：轻链路产物一键进派发闭环
+                        if alarm["status"] in ("new", "confirmed"):
+                            if st.button("📮 转为整改工单",
+                                         key=f"alarm_to_wo_{alarm['id']}",
+                                         use_container_width=True):
+                                try:
+                                    from services.dispatch_service import                                         DispatchService
+                                    _ds = DispatchService(get_conn())
+                                    _oid = _ds.convert_alarm_to_order(
+                                        alarm["id"],
+                                        st.session_state.get("user_id"))
+                                    st.success(
+                                        f"已生成工单 {_oid}，"
+                                        "请到「工单/改判/导出」页派发")
+                                except (PermissionError, ValueError) as e:
+                                    st.error(str(e))
             if len(_alarm_view) > 50:
                 st.caption(f"仅显示前 50 条，共 {_len_cn(_alarm_view)} 条，请用筛选缩小范围")
         else:

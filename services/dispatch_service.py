@@ -50,6 +50,8 @@ class DispatchService:
     def __init__(self, conn: sqlite3.Connection, rules: list[dict] | None = None) -> None:
         self.conn = conn
         self.users = UserDAO(conn)
+        from dao.models import RiskDAO
+        self.risks = RiskDAO(conn)
         self.orders = WorkOrderDAO(conn)
         self.audit = AuditDAO(conn)
         self.permissions = PermissionService(conn)
@@ -125,6 +127,67 @@ class DispatchService:
             "assignee": username, "deadline": deadline,
         }, ensure_ascii=False))
         return order["id"]
+
+    # ---------- 告警→工单桥（轻链路产物进派发闭环）----------
+    def convert_alarm_to_order(self, alarm_id: str,
+                               actor_user_id: str | None) -> str:
+        """把实时高危告警转为整改工单（读写隔离：仅显式按钮触发）。
+
+        task.source='camera'；风险等级按 severity 查表映射
+        （critical→较大 / warning→一般，保守不入"重大"——该档留给人工改判）；
+        告警状态同步置 confirmed 并在审计中互相引用。
+        """
+        from core.compliance import SEVERITY
+        from core.yolo_engine import WHITELIST_CN
+        from dao.models import AlarmEventDAO, TaskDAO
+
+        self.permissions.require(actor_user_id, "override")
+        conn = self.conn
+        alarm = AlarmEventDAO(conn).get_by_id(alarm_id)
+        if alarm is None:
+            raise ValueError("告警不存在")
+        if alarm["status"] not in ("new", "confirmed"):
+            raise ValueError(f"告警状态为 {alarm['status']}，不可转为工单")
+        # 幂等守卫以审计流水为准：实时告警 task_id 恒为 None,
+        # 不可篡改的 audit_logs 是唯一可信的"已转换"凭证（audit 仅追加）
+        dup = conn.execute(
+            "SELECT 1 FROM audit_logs WHERE action='alarm_to_order' "
+            "AND detail_json LIKE ? LIMIT 1", (f'%{alarm_id}%',)).fetchone()
+        if dup:
+            raise ValueError("该告警已转为工单，请勿重复转换")
+
+        cls = alarm["cls"]
+        sev = SEVERITY.get(cls or "", "warning")
+        risk_level = {"critical": "较大", "warning": "一般"}.get(sev, "一般")
+        desc_cn = WHITELIST_CN.get(cls or "", cls or "未知隐患")
+        location = f"（来源 {alarm['source'] or 'rtsp'}）"
+        desc = f"[实时告警] {desc_cn} {location}".strip()
+
+        tid = TaskDAO(conn).insert(
+            actor_user_id,
+            json.dumps({"scene": alarm["scene_id"],
+                        "report_type": "alarm", "alarm_id": alarm_id},
+                       ensure_ascii=False),
+            "completed", source="camera")
+        from agents.action_agent import ActionAgent
+        notice_template = ActionAgent()._template(desc, alarm["clause"] or "",
+                                                 risk_level)
+        requirement_line = next(
+            (line for line in notice_template.splitlines()
+             if line.startswith("整改要求")),
+            "整改要求：限期整改。").replace("整改要求：", "")
+        self.risks.insert(tid, risk_level, json.dumps([desc], ensure_ascii=False),
+                          "[]")
+        order_id = self.orders.insert(
+            task_id=tid, hazard_desc=desc, clause=alarm["clause"] or "",
+            requirement=requirement_line, risk_level=risk_level,
+            worker_notice=notice_template)
+        AlarmEventDAO(conn).update_status(alarm_id, "confirmed", actor_user_id)
+        self.audit.insert(actor_user_id, "alarm_to_order", json.dumps({
+            "alarm_id": alarm_id, "task_id": tid, "order_id": order_id,
+            "cls": cls, "risk_level": risk_level,
+        }, ensure_ascii=False))
+        return order_id
 
     # ---------- 整改提交 ----------
     def submit_rectification(self, order_id: str, user_id: str | None,
