@@ -1,0 +1,247 @@
+{
+ "suite": "hazard_extraction",
+ "version": 1,
+ "note": "EnhanceEngine 提取命中率评测集;expected.location 非 null 时按子串包含判定",
+ "cases": [
+  {
+   "text": "3号楼西侧电焊机火花四溅,旁边没人看护",
+   "expected": {
+    "hazard_key": "spark",
+    "scene_id": "hot_work",
+    "location": "3号楼西侧"
+   }
+  },
+  {
+   "text": "切割钢管火花掉落到脚手架下面了",
+   "expected": {
+    "hazard_key": "spark",
+    "scene_id": "hot_work",
+    "location": "脚手架下"
+   }
+  },
+  {
+   "text": "动火点火花乱飘,附近的防护网都快烤焦了",
+   "expected": {
+    "hazard_key": "spark",
+    "scene_id": "hot_work",
+    "location": null
+   }
+  },
+  {
+   "text": "气割作业火星子溅得到处都是",
+   "expected": {
+    "hazard_key": "spark",
+    "scene_id": "hot_work",
+    "location": null
+   }
+  },
+  {
+   "text": "屋面防水打磨有火花,下面还有人在干活",
+   "expected": {
+    "hazard_key": "spark",
+    "scene_id": "construction_ppe",
+    "location": "屋面"
+   }
+  },
+  {
+   "text": "车间里砂轮打磨迸火星",
+   "expected": {
+    "hazard_key": "spark",
+    "scene_id": "hot_work",
+    "location": "车间"
+   }
+  },
+  {
+   "text": "材料棚那边冒烟了,味道挺呛",
+   "expected": {
+    "hazard_key": "smoke",
+    "scene_id": "hot_work",
+    "location": "材料棚"
+   }
+  },
+  {
+   "text": "地下室有烟雾飘上来,不知道哪烧的",
+   "expected": {
+    "hazard_key": "smoke",
+    "scene_id": "hot_work",
+    "location": "地下室"
+   }
+  },
+  {
+   "text": "配电箱附近有焦糊味还冒着烟",
+   "expected": {
+    "hazard_key": "smoke",
+    "scene_id": "hot_work",
+    "location": "配电箱旁"
+   }
+  },
+  {
+   "text": "仓库角落一直冒白烟",
+   "expected": {
+    "hazard_key": "smoke",
+    "scene_id": "hot_work",
+    "location": "仓库角落"
+   }
+  },
+  {
+   "text": "生活区垃圾桶起烟了没人管",
+   "expected": {
+    "hazard_key": "smoke",
+    "scene_id": "construction_ppe",
+    "location": "生活区"
+   }
+  },
+  {
+   "text": "焊接完的构件还在冒烟就直接堆一起了",
+   "expected": {
+    "hazard_key": "smoke",
+    "scene_id": "hot_work",
+    "location": null
+   }
+  },
+  {
+   "text": "绑钢筋的好几个都没戴安全帽",
+   "expected": {
+    "hazard_key": "no_helmet",
+    "scene_id": "construction_ppe",
+    "location": "绑筋区"
+   }
+  },
+  {
+   "text": "塔吊下面有个光头在指挥",
+   "expected": {
+    "hazard_key": "no_helmet",
+    "scene_id": "construction_ppe",
+    "location": "塔吊下"
+   }
+  },
+  {
+   "text": "进去砖渣区的工人帽子都没戴",
+   "expected": {
+    "hazard_key": "no_helmet",
+    "scene_id": "construction_ppe",
+    "location": "砖渣区"
+   }
+  },
+  {
+   "text": "外架上有两个人光着脑袋作业",
+   "expected": {
+    "hazard_key": "no_helmet",
+    "scene_id": "construction_ppe",
+    "location": "外架"
+   }
+  },
+  {
+   "text": "参观的没戴帽就往基坑边走",
+   "expected": {
+    "hazard_key": "no_helmet",
+    "scene_id": "construction_ppe",
+    "location": "基坑边"
+   }
+  },
+  {
+   "text": "门卫说 small 包工头从来不戴帽进场",
+   "expected": {
+    "hazard_key": "no_helmet",
+    "scene_id": "construction_ppe",
+    "location": "大门"
+   }
+  },
+  {
+   "text": "开挖掘机的师傅没穿反光衣就下车走动了",
+   "expected": {
+    "hazard_key": "no_vest",
+    "scene_id": "construction_ppe",
+    "location": null
+   }
+  },
+  {
+   "text": "夜班工人黑衣服到处跑,车辆根本看不见他",
+   "expected": {
+    "hazard_key": "no_vest",
+    "scene_id": "construction_ppe",
+    "location": "夜班区"
+   }
+  },
+  {
+   "text": "新来的两个小工都没穿马甲",
+   "expected": {
+    "hazard_key": "no_vest",
+    "scene_id": "construction_ppe",
+    "location": null
+   }
+  },
+  {
+   "text": "测量队穿便装在场内跑尺",
+   "expected": {
+    "hazard_key": "no_vest",
+    "scene_id": "construction_ppe",
+    "location": "测量段"
+   }
+  },
+  {
+   "text": "司机卸货不穿反光衣,后面还不停其他车",
+   "expected": {
+    "hazard_key": "no_vest",
+    "scene_id": "construction_ppe",
+    "location": "卸货区"
+   }
+  },
+  {
+   "text": "巡查发现多个人员未穿反光衣",
+   "expected": {
+    "hazard_key": "no_vest",
+    "scene_id": "construction_ppe",
+    "location": null
+   }
+  },
+  {
+   "text": "电焊机旁边堆了两捆纸箱和泡沫板",
+   "expected": {
+    "hazard_key": "flammable",
+    "scene_id": "hot_work",
+    "location": "电焊机旁"
+   }
+  },
+  {
+   "text": "氧气瓶边上放着一桶稀释剂",
+   "expected": {
+    "hazard_key": "flammable",
+    "scene_id": "hot_work",
+    "location": "氧气瓶区"
+   }
+  },
+  {
+   "text": "动火区域有废弃模板和木方没清走",
+   "expected": {
+    "hazard_key": "flammable",
+    "scene_id": "hot_work",
+    "location": "动火区"
+   }
+  },
+  {
+   "text": "油漆桶随意丢在楼梯间",
+   "expected": {
+    "hazard_key": "flammable",
+    "scene_id": "construction_ppe",
+    "location": "楼梯间"
+   }
+  },
+  {
+   "text": "保温棉碎料堆在电缆桥架下面",
+   "expected": {
+    "hazard_key": "flammable",
+    "scene_id": "hot_work",
+    "location": "桥架下"
+   }
+  },
+  {
+   "text": "生活区私存汽油桶两个",
+   "expected": {
+    "hazard_key": "flammable",
+    "scene_id": "construction_ppe",
+    "location": "生活区"
+   }
+  }
+ ]
+}
