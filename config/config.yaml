@@ -116,3 +116,15 @@ asr:
   api_key: ""
   model: "whisper-1"
   timeout_sec: 30
+
+# ================= AI 提取预填（v0.6 二期a · 双 Provider 降级链）=================
+# 自由文本 → 四字段草稿预填（hazard_key/scene/description/location）。
+# provider=auto：云(需 cloud.api_key)失败自动落本地 Ollama；均败退手填表单。
+# 输出仅作预填草稿，人工确认后才建单；hazard_key 越白名单即弃。
+enhance:
+  provider: auto
+  cloud:
+    api_base: ""        # OpenAI 兼容端点,如 https://api.openai.com/v1
+    api_key: ""
+    model: "gpt-4o-mini"
+    timeout_sec: 20

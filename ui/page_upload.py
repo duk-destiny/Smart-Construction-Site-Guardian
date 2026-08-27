@@ -93,6 +93,30 @@ def _tab2_text_voice(svc: TaskService) -> None:
                             index=0, key="t2_scene")
     options = _hazard_options()
 
+    # —— AI 提取预填（v0.6）：双 Provider 均未配置时整块静默；输出仅草稿 ——
+    from services.enhance_service import EnhanceEngine
+    _enh = EnhanceEngine()
+    _prov = _enh.available()
+    if _prov:
+        _tag = "⛅ 云端" if _prov == "cloud" else "📦 本地"
+        if st.button(f"⚡ AI 提取预填（{_tag}）", key="btn_ai_extract",
+                     help="把自然语言拆成类别/位置等字段填入下方，"
+                           "提交前请人工确认；结果不影响定级。"):
+            if not st.session_state.get("t2_desc_raw"):
+                st.warning("请先在下方输入隐患描述，再点 AI 提取")
+            else:
+                out = _enh.extract_hazard(st.session_state["t2_desc_raw"])
+                if out:
+                    st.session_state["t2_desc"] = out["description"]
+                    st.session_state["t2_hazard"] = out["hazard_key"]
+                    st.session_state["t2_area"] = out["location"] or ""
+                    st.session_state["t2_scene"] = out["scene_id"]
+                    st.success(f"AI 预填完成（{_tag}），请人工确认后提交")
+                    st.rerun()
+                else:
+                    st.warning(f"AI 提取暂不可用：{_enh.last_error or '未知原因'}，"
+                               "请手动填写。")
+
     # —— 语音入口：未配置 asr.* 时整块不渲染（静默，用户约定）——
     asr = AsrEngine()
     if asr.available():
@@ -112,6 +136,7 @@ def _tab2_text_voice(svc: TaskService) -> None:
                     st.warning(f"转写暂不可用：{asr.last_error or '未知原因'}，"
                                "可直接手填。")
 
+    st.session_state["t2_desc_raw"] = st.session_state.get("t2_desc", "")
     desc = st.text_area(
         "隐患描述", height=90, key="t2_desc",
         placeholder="例：3号楼西侧电焊机旁堆着纸箱没人清理，也没有监火人")
