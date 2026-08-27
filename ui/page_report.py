@@ -7,16 +7,98 @@ import streamlit as st
 from ui.page_helpers import safe_page
 
 from dao.db import get_conn, init_db
-from dao.models import WorkOrderDAO, RiskDAO
+from dao.models import UserDAO, WorkOrderDAO, RiskDAO
 from core.compliance import evaluate
 from core.yolo_engine import WHITELIST
 from services.audit_service import AuditService
+from services.dispatch_service import DispatchService, RISK_DEADLINE_HOURS
 from services.export_service import ExportService
+from services.permission_service import PermissionError as ServicePermissionError
 from services.task_service import TaskService
 from ui.components import compliance_banner
 from ui.correction_workbench import render_target_corrections
 
 RISK_EMOJI = {"重大": "🔴", "较大": "🟠", "一般": "🟡", "低": "🟢"}
+_WO_STATUS_TAG = {
+    "open": "🔨 待整改",
+    "rejected": "↩️ 已驳回",
+    "submitted": "⏳ 待验收",
+    "closed": "✅ 已销项",
+}
+_SOURCE_LABEL = {
+    "camera": "📷 实时摄像头",
+    "upload": "📤 图片上传",
+    "text": "📝 文字上报",
+}
+
+
+def _render_dispatch_panel(task_id: str, risk_level: str | None) -> None:
+    """派发与整改闭环面板：状态一览 + 责任人指派（规则预选）。"""
+    conn = get_conn()
+    init_db(conn)
+    svc = DispatchService(conn)
+    wo = svc.orders.get_by_task(task_id)
+
+    st.subheader("📮 派发与整改闭环")
+    if wo is None:
+        st.caption("本任务尚未生成工单")
+        return
+
+    assignee_name = None
+    if wo["assignee_id"]:
+        user_row = UserDAO(conn).get_by_id(wo["assignee_id"])
+        assignee_name = user_row["username"] if user_row else str(wo["assignee_id"])
+
+    c1, c2, c3 = st.columns(3)
+    c1.metric("闭环状态", _WO_STATUS_TAG.get(wo["status"], wo["status"]))
+    c2.metric("责任人", assignee_name or "未派发")
+    c3.metric("截止", (wo["deadline"] or "—")[:19])
+    if wo["status"] == "rejected":
+        st.error(f"❌ 验收驳回原因:{wo['review_reason'] or '未填写'}——请改派或通知责任人重新提交。")
+    elif wo["status"] == "closed":
+        st.success(f"已销项 ✅ 验收人:{wo['approved_by'] or '—'}")
+
+    # 写操作仅安全员/管理员可用；responsible 在"我的整改单"页提交材料（读写隔离）
+    role = st.session_state.get("role")
+    uid = st.session_state.get("user_id")
+    if role not in ("safety", "admin"):
+        st.caption(f"当前角色为 {role or '访客'}：可查看流转状态，派发需安全员/管理员操作。")
+        return
+    if wo["status"] in ("submitted", "closed"):
+        st.caption("工单在验收流程中（submitted/closed），不可改派。")
+        return
+
+    users_rows = UserDAO(conn).list_by_role("responsible")
+    names = [u["username"] for u in users_rows]
+    if not names:
+        st.warning("系统中暂无 responsible 责任人账号（演示账号 lisi / demo1234）；"
+                   "v0.2 启动时会自动补种，也可先到管理端重建数据库后再试。")
+        return
+
+    scene = st.session_state.get("scene", "hot_work")
+    suggestion = svc.resolve_assignee(scene_id=scene)
+    idx = names.index(suggestion) if suggestion in names else 0
+    tag_text = "改派" if assignee_name else "派发"
+    ca, cb, cc = st.columns([2, 1.2, 1])
+    chosen = ca.selectbox(
+        "整改责任人", names, index=idx,
+        help=f"默认按 dispatch.rules 对场景「{scene}」的命中建议{suggestion or ''}")
+    hours = cb.number_input(
+        "整改时限（小时）", min_value=0.5, max_value=720.0,
+        value=float(RISK_DEADLINE_HOURS.get(risk_level or "", 24)), step=1.0)
+    if cc.button(f"{tag_text} 工单", type="primary",
+                 key=f"dispatch_{task_id}", use_container_width=True):
+        try:
+            svc.dispatch_order(task_id, uid, assignee_username=chosen,
+                               deadline_hours=float(hours), scene_id=scene)
+        except ServicePermissionError as e:
+            st.error(f"权限不足：{e}")
+        except ValueError as e:
+            st.error(str(e))
+        else:
+            AuditService(conn).append(uid, "dispatch_ui", {"task_id": task_id})
+            st.success(f"已{tag_text}给 {chosen}，截止 {hours:.0f} 小时后")
+            st.rerun()
 
 
 def _show_work_order(payload: dict, task_id: str) -> None:
@@ -39,6 +121,9 @@ def _show_work_order(payload: dict, task_id: str) -> None:
     if wo.get("review_required"):
         st.warning("该工单需要人工复核：" + "；".join(wo.get("review_reasons") or []))
     st.info(f"💬 工人白话提示：{payload.get('worker_notice','')}")
+
+    st.divider()
+    _render_dispatch_panel(task_id, payload.get("risk_level"))
 
     with st.expander("Agent 证据链"):
         conn = get_conn()
@@ -175,7 +260,13 @@ def _render_history_list() -> None:
         label = f"{emoji} [{level}]{override_tag}  {ts}  —  {desc}"
 
         with st.expander(label):
+            source_label = _SOURCE_LABEL.get(row["source"], "📤 图片上传")
+            status_tag = _WO_STATUS_TAG.get(row["status"], "—")
             st.write(f"**任务编号**：{row['task_id']}")
+            st.write(f"**输入来源**：{source_label}　|　**闭环状态**：{status_tag}")
+            if row["deadline"]:
+                st.write(f"**整改截止**：{row['deadline'][:19]}"
+                         f"　|　**责任人ID**：{row['assignee_id'] or '未派发'}")
             st.write(f"**时间**：{ts}")
             st.write(f"**隐患描述**：{row['hazard_desc']}")
             st.write(f"**违反规范**：{row['clause']}")

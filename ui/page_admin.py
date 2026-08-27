@@ -8,7 +8,9 @@ import streamlit as st
 from ui.page_helpers import safe_page
 
 from dao.db import get_conn, init_db
+from dao.models import UserDAO
 from services.audit_service import AuditService
+from services.dispatch_service import DispatchService
 from services.kb_admin import KbAdmin
 from services.model_service import ModelService
 from services.permission_service import PermissionError
@@ -213,6 +215,67 @@ def render_admin() -> None:
             st.caption("该筛选条件下暂无告警")
     else:
         st.caption("暂无告警事件")
+
+    st.divider()
+    st.subheader("工单验收队列")
+    wo_conn = get_conn()
+    init_db(wo_conn)
+    _dispatch = DispatchService(wo_conn)
+    _pending = _dispatch.orders.list_by_status("submitted")
+    if not _pending:
+        st.caption("暂无待验收工单（责任人提交整改后出现在这里）")
+    for _idx, _o in enumerate(_pending):
+        _desc = (_o["hazard_desc"] or "")[:30]
+        with st.expander(f"[待验收] {_o['risk_level']} ｜ {_desc}", key=f"wo_{_o['id']}"):
+            st.write(f"**工单号**：{_o['id']}　|　**任务号**：{_o['task_id']}")
+            st.write(f"**截止**：{(_o['deadline'] or '—')[:19]}　|　"
+                     f"**责任人**：{UserDAO(wo_conn).get_by_id(_o['assignee_id'])['username'] if _o['assignee_id'] else '—'}")
+            st.write(f"**隐患描述**：{_o['hazard_desc']}")
+            st.write(f"**整改要求**：{_o['requirement']}")
+            st.write(f"**整改说明**：{_o['submitted_note'] or '—'}")
+            try:
+                _imgs = json.loads(_o["submitted_imgs"] or "[]")
+            except ValueError:
+                _imgs = []
+            for _p in _imgs:
+                if os.path.exists(_p):
+                    st.image(_p, caption=os.path.basename(_p), width=320)
+            _rc1, _rc2 = st.columns([2, 3])
+            if _rc1.button("✅ 通过并销项", key=f"wo_pass_{_o['id']}",
+                           use_container_width=True):
+                try:
+                    _dispatch.review_order(_o["id"], st.session_state.get("user_id"),
+                                           approve=True)
+                    st.success("已通过并关闭工单")
+                    st.rerun()
+                except (PermissionError, ValueError) as e:
+                    st.error(str(e))
+            _reject_reason = _rc2.text_input("驳回原因（必填）", key=f"wo_rj_{_o['id']}")
+            if _rc2.button("↩️ 驳回重改", key=f"wo_reject_{_o['id']}"):
+                try:
+                    _dispatch.review_order(_o["id"], st.session_state.get("user_id"),
+                                           approve=False, reason=_reject_reason)
+                    st.warning("已驳回，退回责任人整改")
+                    st.rerun()
+                except (PermissionError, ValueError) as e:
+                    st.error(str(e))
+
+    st.divider()
+    st.subheader("逾期巡检（演示 · 时间游标）")
+    _hours_ahead = st.number_input(
+        "模拟当前时间往后推（小时）", min_value=0.0, max_value=24 * 30.0,
+        value=0.0, step=1.0, key="overdue_offset_hours",
+        help="演示催办故事线用：调大即模拟时间流逝，无需真实等待。"
+             "生产部署由系统 cron 调度 scripts/overdue_scan.py 驱动同一扫描函数。")
+    if st.button("🔍 扫描逾期并催办", key="btn_overdue_scan"):
+        from services.dispatch_service import _now_str
+        res = _dispatch.scan_overdue(as_of=_now_str(float(_hours_ahead)))
+        m1c, m2c, m3c = st.columns(3)
+        m1c.metric("逾期工单", res["overdue"])
+        m2c.metric("催办记录", res["notified"])
+        m3c.metric("越级升级", res["escalated"])
+        st.caption(f"巡检时刻(as_of):{res['as_of']}；结果均写入 audit_logs"
+                   f"(overdue_notify / overdue_escalate)。")
 
     st.divider()
     st.subheader("外部推送")

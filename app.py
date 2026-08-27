@@ -20,6 +20,7 @@ import ui.page_agents as page_agents
 import ui.page_admin as page_admin
 import ui.page_history as page_history
 import ui.page_login as page_login
+import ui.page_my_orders as page_my_orders
 import ui.page_realtime as page_realtime
 import ui.page_report as page_report
 import ui.page_upload as page_upload
@@ -88,13 +89,20 @@ def main() -> None:
     # _nav_page：从 page_upload / page_agents 写入，驱动 st.navigation 显示目标页
     target_page = st.session_state.pop("_nav_page", None)
 
-    page_map = {
-        "upload": st.Page(page_upload.render_upload, title="上传与作业票", icon="📤"),
-        "realtime": st.Page(page_realtime.render_realtime, title="实时摄像头监测", icon="📷"),
-        "agents": st.Page(page_agents.render_agents, title="多Agent研判", icon="🤖"),
-        "report": st.Page(page_report.render_report, title="工单/改判/导出", icon="📋"),
-        "history": st.Page(page_history.render_history, title="检测历史与分析", icon="📊"),
-    }
+    if role == "responsible":
+        # v0.2 整改责任人：仅开放"我的整改单"，不接触研判/上传/管理端
+        page_map = {
+            "my_orders": st.Page(page_my_orders.render_my_orders,
+                                 title="我的整改单", icon="🧰"),
+        }
+    else:
+        page_map = {
+            "upload": st.Page(page_upload.render_upload, title="上传与作业票", icon="📤"),
+            "realtime": st.Page(page_realtime.render_realtime, title="实时摄像头监测", icon="📷"),
+            "agents": st.Page(page_agents.render_agents, title="多Agent研判", icon="🤖"),
+            "report": st.Page(page_report.render_report, title="工单/改判/导出", icon="📋"),
+            "history": st.Page(page_history.render_history, title="检测历史与分析", icon="📊"),
+        }
     pages: list[st.Page] = list(page_map.values())
     if role == "admin":
         page_map["admin"] = st.Page(page_admin.render_admin, title="管理端", icon="⚙️")
