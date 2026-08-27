@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import json
 import os
+from datetime import datetime, timedelta
 
 import streamlit as st
 from ui.page_helpers import safe_page
@@ -325,6 +326,52 @@ def render_admin() -> None:
         } for r in logs])
     else:
         st.caption("暂无推送记录")
+
+    st.divider()
+    st.subheader("风险周报（v0.3）")
+    from services.report_service import WeeklyReportService
+    _rep_conn = get_conn()
+    init_db(_rep_conn)
+    _today = st.session_state.get("_report_today") or datetime.now().date()
+    _rc_s, _rc_e, _rc_g = st.columns([2, 2, 1.4])
+    _r_start = _rc_s.date_input("起始日期", value=_today - timedelta(days=6),
+                                key="wr_start")
+    _r_end = _rc_e.date_input("结束日期", value=_today, key="wr_end")
+    if _rc_g.button("📊 生成周报", key="btn_weekly_report", use_container_width=True):
+        try:
+            _res = WeeklyReportService(_rep_conn).generate(
+                _r_start.isoformat(), _r_end.isoformat(),
+                user_id=st.session_state.get("user_id"))
+        except PermissionError as e:
+            st.error(f"权限不足：{e}")
+        else:
+            st.session_state["_weekly_report"] = _res["data"]
+    _wr = st.session_state.get("_weekly_report")
+    if _wr:
+        s = _wr["stats"]
+        m1c, m2c, m3c, m4c = st.columns(4)
+        m1c.metric("检测帧", s["frames"])
+        m2c.metric("不合规帧", s["bad"])
+        m3c.metric("新增工单", s["orders_total"])
+        m4c.metric("存量逾期", s["overdue_open_now"])
+        for line in s["conclusions"]:
+            st.markdown(f"- {line}")
+        pa = s["per_assignee"]
+        if pa:
+            with st.expander("责任人整改进度"):
+                st.dataframe([{
+                    "责任人": a["name"], "派发": a["assigned"],
+                    "销项": a["closed_n"], "在办": a["active_n"],
+                    "逾期": a["overdue_n"],
+                    "逾期率": f"{a['overdue_rate']*100:.0f}%",
+                } for a in pa])
+        pdf_path = _wr["file_path"]
+        if os.path.exists(pdf_path):
+            with open(pdf_path, "rb") as fh:
+                st.download_button("⬇️ 下载周报 PDF", fh,
+                                   file_name=os.path.basename(pdf_path),
+                                   mime="application/pdf",
+                                   key="dl_weekly_report")
 
     st.divider()
     st.subheader("模型评估摘要")
