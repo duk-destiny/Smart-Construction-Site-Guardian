@@ -1,6 +1,14 @@
 """可复现的本地模型评测：在测试集上计算每个隐患类别的 Precision/Recall/F1。
 
-评测口径：独立测试集逐类 P/R/F1（与 model_registry 的训练验证集 mAP 互补）。
+评测口径（双轨）：
+- **线上一致阈值（role=configured，正式口径）**：与 config.yaml 场景
+  `conf_thres` 完全一致的单一阈值下的逐类指标——这是部署时真实生效的判定点，
+  作为对外引用/汇报的基准；
+- **阈值扫描（role=sweep，仅供参考）**：在同一独立测试集上扫多个阈值取最优——
+  属于「同集选优」，数字系统性偏乐观，只用于观察指标的阈值敏感性、
+  不作为效果承诺。
+
+评测口径补充：独立测试集逐类 P/R/F1（与 model_registry 的训练验证集 mAP 互补）。
 模型路径从 DB model_registry 读取（不再硬编码），按版本聚合写入 JSON。
 
 用法：
@@ -8,7 +16,7 @@
   python scripts/evaluate_models.py
   # 只评测指定版本
   python scripts/evaluate_models.py --version v3
-  # 指定阈值
+  # 指定阈值（线上一致阈值始终会自动并入扫描清单并单独标注）
   python scripts/evaluate_models.py --thresholds 0.25 0.30 0.35 0.45
 
 新增模型后的流程：
@@ -17,7 +25,7 @@
   3. 结果 merge 进 model_eval.json（不覆盖已有版本），UI 自动展示
 
 输出：
-  - 终端 Markdown 表格
+  - 终端 Markdown 表格（先打印线上一致阈值的正式口径，再打印扫描参考）
   - data/eval/model_eval.json（供 README / 答辩材料引用，按 scene+version 聚合）
 """
 from __future__ import annotations
@@ -227,6 +235,25 @@ def _migrate_old(report: dict) -> dict:
     return report
 
 
+def _configured_thresholds() -> dict[str, float]:
+    """从 config.yaml 场景配置读取线上推理阈值（scenes.*.conf_thres）。
+
+    使评测正式口径与部署判定点一致；config 不可读时退回已知默认值。
+    """
+    defaults = {"fire": 0.35, "ppe": 0.25}
+    try:
+        from core.config import ConfigLoader
+        scenes = ConfigLoader().load().get("scenes") or {}
+        mapping = {"fire": "hot_work", "ppe": "construction_ppe"}
+        out: dict[str, float] = {}
+        for key, scene_name in mapping.items():
+            value = (scenes.get(scene_name) or {}).get("conf_thres")
+            out[key] = float(value) if value is not None else defaults[key]
+        return out
+    except Exception:  # noqa: BLE001 配置缺失不阻断评测，退回默认
+        return dict(defaults)
+
+
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--thresholds", nargs="+", type=float,
@@ -253,8 +280,15 @@ def main() -> None:
     except ValueError:
         print(f"输出路径必须在项目根目录下: {output_path}", flush=True)
         return
+    cfg_thresholds = _configured_thresholds()
     # 读取并迁移旧结构，保留已有版本结果（merge）
-    report: dict = {"iou_threshold": IOU_THRESHOLD, "models": {}}
+    report: dict = {
+        "iou_threshold": IOU_THRESHOLD,
+        "threshold_policy": (
+            "role=configured 为线上一致阈值（config.yaml scenes.*.conf_thres），"
+            "正式汇报口径；role=sweep 为同一测试集阈值扫描，同集选优偏乐观，仅参考"),
+        "models": {},
+    }
     if output_path.exists():
         try:
             report = json.loads(output_path.read_text(encoding="utf-8"))
@@ -287,25 +321,39 @@ def main() -> None:
                 print(f"[skip] {scene}/{ver} 模型文件不存在: {model_path}")
                 continue
             print(f"\n## {scene} / {ver}  ({model_path})")
-            results = [
-                _evaluate_at(spec, model_path, conf, args.limit)
-                for conf in args.thresholds
-            ]
+            cfg_th = cfg_thresholds.get(scene)
+            threshold_list = list(args.thresholds)
+            if cfg_th is not None and all(
+                    abs(c - cfg_th) > 1e-6 for c in threshold_list):
+                # 线上一致阈值未在扫描清单中：自动并入，保证正式口径必有结果
+                threshold_list.insert(0, cfg_th)
+            results = []
+            for conf in threshold_list:
+                result = _evaluate_at(spec, model_path, conf, args.limit)
+                result["role"] = (
+                    "configured"
+                    if cfg_th is not None and abs(conf - cfg_th) < 1e-6
+                    else "sweep")
+                results.append(result)
             report["models"][scene][ver] = {
                 "model": model_path,
                 "test_dir": spec["test_dir"],
+                "configured_conf": cfg_th,
                 "results": results,
             }
             eval_count += 1
             print("| 类别 | TP | FP | FN | Precision | Recall | F1 |")
             print("|---|---:|---:|---:|---:|---:|---:|")
-            for result in results:
-                for row in result["classes"]:
-                    print(
-                        f"| {row['label']} (conf {result['conf_threshold']:.2f}) "
-                        f"| {row['tp']} | {row['fp']} | {row['fn']} "
-                        f"| {row['precision']:.2f} | {row['recall']:.2f} | {row['f1']:.2f} |"
-                    )
+            for role in ("configured", "sweep"):
+                for result in [r for r in results if r["role"] == role]:
+                    tag = ("线上一致阈值" if role == "configured" else "扫描参考") \
+                        + f"（conf {result['conf_threshold']:.2f}）"
+                    for row in result["classes"]:
+                        print(
+                            f"| {row['label']} @ {tag} "
+                            f"| {row['tp']} | {row['fp']} | {row['fn']} "
+                            f"| {row['precision']:.2f} | {row['recall']:.2f} | {row['f1']:.2f} |"
+                        )
 
     if eval_count == 0:
         print("[done] 未评测任何版本")

@@ -244,7 +244,8 @@ docker compose run --rm app python -m pytest tests -q --tb=short -p no:cacheprov
 - 安全系统铁律：定级、是否复核这类硬决策用规则；LLM 只做不影响判定的软任务（文案润色，见 Q4）。两个 Agent 全程无 `llm_engine` import。
 
 **Q4 那 LLM 到底用在哪？为什么只用在这一处？**
-答：**只用在处置 Agent 的「工人提示文案润色」**（`agents/action_agent.py` 的 `polish()`），且是工单落库后异步后台线程，不进 ≤8s 主链路。理由：把规范条款 + 整改要求翻译成一线工人听得懂的大白话是生成式任务，规则写死会僵；但润色结果不影响 `risk_level`/是否告警，`llm_engine.polish()` 返回 `None` 即自动降级为模板，主链路零影响。现状（已在「后续优化计划」标注）：`orchestrator` 当前未注入 `work_order_dao`，`polish()` 早返回，LLM 处于「接线待通」状态，主链路跑模板，后续可以通过广播、报告等形式落实对工人的提示。
+答：**只用在处置 Agent 的「工人提示文案润色」**（`agents/action_agent.py` 的 `polish()`），且是工单落库后异步后台线程，不进 ≤8s 主链路。理由：把规范条款 + 整改要求翻译成一线工人听得懂的大白话是生成式任务，规则写死会僵；但润色结果不影响 `risk_level`/是否告警，`llm_engine.polish()` 返回 `None` 即自动降级为模板，主链路零影响。
+当前接线状态（与代码一致）：`ui/page_agents.py` 构造编排器时已注入 `work_order_dao`，并在研判结果与工单落库后触发 `orch.action.polish(...)`；Ollama 可用则后台润色并回填 `work_orders.worker_notice`，不可用/超时则工单保留模板文案，两条路径都不影响主链路时延。后续可继续把润色后的提示通过广播、报告等形式下发给工人。
 
 **Q5 视觉与规范为什么要并行 + 两阶段 RAG？**
 答：并行是为了压总时延，两阶段是为了省一次向量库往返。
@@ -310,6 +311,8 @@ docker compose run --rm app python -m pytest tests -q --tb=short -p no:cacheprov
 
 - **训练验证集 mAP**（整体）：复训时从 `results.csv` best epoch 写入 `model_registry`，管理端「模型版本注册」区展示，口径偏乐观，用于版本粗筛；
 - **独立测试集 P/R/F1**（逐类）：`evaluate_models.py` 在测试集上逐图推理，写入 `data/eval/model_eval.json`，管理端「模型评估摘要」表展示，暴露单类弱点、是优化方向的依据。
+  - 正式口径为**线上一致阈值**（`role=configured`，与 `config.yaml` 场景 `conf_thres` 完全一致的单一阈值）——部署判定点是什么就报什么；
+  - 阈值扫描结果标注 `role=sweep`，属于同一测试集上的「同集选优」，数字系统性偏乐观，仅用于观察阈值敏感性，不作为效果承诺。下表的最佳阈值列即扫描参考口径。
 
 ```bash
 # 评测所有已注册版本（默认）

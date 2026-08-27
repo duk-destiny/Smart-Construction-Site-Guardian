@@ -1,11 +1,14 @@
 """数据库连接与初始化：WAL 模式 + 外键开启 + 执行 schema。
 
 统一经本模块获取连接，保证 journal_mode=WAL、foreign_keys=ON（DB 文档 §1/§7）。
+init_db 按库文件路径记忆化（进程内只对同一物理库执行一次全量 schema 脚本），
+实时链路每帧调用 get_conn+init_db 时不重复解析执行整份 schema.sql。
 """
 from __future__ import annotations
 
 import os
 import sqlite3
+import threading
 from pathlib import Path
 
 DEFAULT_DB_PATH = str(Path(__file__).resolve().parent.parent / "data" / "app.db")
@@ -45,18 +48,49 @@ def get_conn(db_path: str = DEFAULT_DB_PATH) -> sqlite3.Connection:
     return conn
 
 
+_SCHEMA_PATH = os.path.join(os.path.dirname(__file__), "schema.sql")
+# 已执行过 schema 的物理库 → 执行时的 schema.sql mtime；mtime 变化则重跑
+_SCHEMA_DONE: dict[str, float] = {}
+_SCHEMA_LOCK = threading.Lock()
+
+
+def _db_file_key(conn: sqlite3.Connection) -> str | None:
+    """取 main 库的文件路径作为记忆化键；无路径（:memory: 等）返回 None。"""
+    try:
+        for _seq, _name, file_path in conn.execute("PRAGMA database_list"):
+            if file_path:
+                return os.path.normpath(os.path.abspath(file_path))
+    except Exception:  # noqa: BLE001 无法取路径时退回"每次全量执行"
+        return None
+    return None
+
+
 def init_db(conn: sqlite3.Connection) -> None:
-    """执行 schema.sql（建表/索引/触发器/视图）。"""
-    schema_path = os.path.join(os.path.dirname(__file__), "schema.sql")
-    with open(schema_path, encoding="utf-8") as f:
-        conn.executescript(f.read())
-    for table, columns in _MIGRATIONS.items():
-        existing = {
-            row["name"]
-            for row in conn.execute(f"PRAGMA table_info({table})")
-        }
-        for column, ddl in columns:
-            if column not in existing:
-                conn.execute(
-                    f"ALTER TABLE {table} ADD COLUMN {column} {ddl}")
-    conn.commit()
+    """执行 schema.sql（建表/索引/触发器/视图）+ 增量迁移列。
+
+    同一进程内对同一物理库只全量执行一次（以库文件路径 + schema.sql mtime
+    记忆化）；重复调用为 O(1) 返回，供实时帧持久化等高频路径安全复用。
+    注意：若外部在进程运行期间删表，需重启进程（或换新连接文件名）才会重建。
+    """
+    key = _db_file_key(conn)
+    try:
+        schema_mtime = os.path.getmtime(_SCHEMA_PATH)
+    except OSError:
+        schema_mtime = 0.0
+    with _SCHEMA_LOCK:
+        if key is not None and _SCHEMA_DONE.get(key) == schema_mtime:
+            return
+        with open(_SCHEMA_PATH, encoding="utf-8") as f:
+            conn.executescript(f.read())
+        for table, columns in _MIGRATIONS.items():
+            existing = {
+                row["name"]
+                for row in conn.execute(f"PRAGMA table_info({table})")
+            }
+            for column, ddl in columns:
+                if column not in existing:
+                    conn.execute(
+                        f"ALTER TABLE {table} ADD COLUMN {column} {ddl}")
+        conn.commit()
+        if key is not None:
+            _SCHEMA_DONE[key] = schema_mtime

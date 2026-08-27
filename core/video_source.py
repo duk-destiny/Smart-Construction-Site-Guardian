@@ -3,10 +3,15 @@
 与上传研判的视频抽帧不同，这里面向实时监测页的多摄像头按帧抓取，
 每次读取一帧并交给 RealtimeEngine 做轻量检测。
 "demo://" 为纯 numpy 合成帧源，零依赖、确定性，用于无真实视频源时的接入自检。
+
+grab_all 分两阶段：阶段一并行抓帧（纯 IO/重连，无共享状态），
+阶段二主线程串行分析——RealtimeEngine 的 IoUTracker 跨源共享，
+并行分析会产生竞态，故只并行 IO 不并行推理。
 """
 from __future__ import annotations
 
 import threading
+from concurrent.futures import ThreadPoolExecutor
 from typing import Callable, Iterable
 
 import cv2
@@ -84,21 +89,52 @@ class VideoSource:
 class MultiSourceMonitor:
     """按索引抓取多路视频源，供实时页批量展示。"""
 
-    def __init__(self, sources: Iterable[str]) -> None:
+    def __init__(self, sources: Iterable[str], keep_open: bool = False) -> None:
         self.sources = [VideoSource(s) for s in sources if s and s.strip()]
+        # True：实例级保持长连接（后台轮询复用）；False：每次 grab_all 后释放
+        self.keep_open = bool(keep_open)
 
     def grab_all(
         self,
         analyze: Callable[[np.ndarray], tuple[list[dict], dict]],
         draw: Callable[[np.ndarray, dict], np.ndarray] | None = None,
+        max_workers: int = 4,
+        keep_open: bool = False,
     ) -> list[dict]:
-        """依次读取每路源并返回结果列表。"""
+        """依次读取每路源并返回结果列表。
+
+        阶段一并行抓帧（纯 IO，各源独立 VideoSource 无共享状态），
+        阶段二主线程串行 analyze/draw（引擎与 tracker 非线程安全，不并行推理）。
+        keep_open=False（默认）在结束后释放全部连接——手动单次抓取用；
+        实例构造时传 keep_open=True（或本次调用传 True）则保持长连接，
+        供后台轮询复用，避免每轮重新 RTSP 握手。
+        """
+        if not self.sources:
+            return []
+
+        # ── 阶段一：并行抓帧（仅 IO/重连，可安全并发）──
+        reads: list[tuple[int, bool, np.ndarray | None]] = []
+
+        def _read(idx: int) -> tuple[int, bool, np.ndarray | None]:
+            ok, frame = self.sources[idx].read()
+            return idx, ok, frame
+
+        workers = max(1, min(max_workers, len(self.sources)))
+        with ThreadPoolExecutor(max_workers=workers) as ex:
+            futures = [ex.submit(_read, i) for i in range(len(self.sources))]
+            try:
+                for f in futures:
+                    reads.append(f.result())
+            finally:
+                for f in futures:
+                    f.cancel()
+
+        # ── 阶段二：串行分析，保持结果顺序与来源索引一致 ──
         results: list[dict] = []
-        for idx, source in enumerate(self.sources):
-            ok, frame = source.read()
+        for idx, ok, frame in sorted(reads):
             entry: dict = {
                 "index": idx,
-                "source": source.source,
+                "source": self.sources[idx].source,
                 "ok": ok,
             }
             if ok and frame is not None:
@@ -108,7 +144,15 @@ class MultiSourceMonitor:
                 if draw is not None:
                     entry["annotated"] = draw(frame, comp)
             results.append(entry)
+
+        if not (keep_open or self.keep_open):
+            self.release_all()
         return results
+
+    def release_all(self) -> None:
+        """释放全部底层 cv2 连接（RTSP 断开 / 文件句柄关闭）。"""
+        for source in self.sources:
+            source.release()
 
 
 def check_source(source: str, timeout: float = 5.0) -> dict:

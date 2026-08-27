@@ -1,13 +1,27 @@
 """认证与权限服务（M01）：登录校验、RBAC 权限、密码哈希。
 
 职责：bcrypt 校验密码 → 写登录审计（仅 INSERT）；按 role 查 RBAC 矩阵。
+审计 detail 一律经 json.dumps 构造（禁止 f-string 拼接，防审计记录注入）；
+登录失败按用户名做进程内滑动窗口限速，达上限临时锁定，缓解暴力破解。
 """
 from __future__ import annotations
 
 import bcrypt
+import json
 import sqlite3
+import time
 
 from dao.models import UserDAO, AuditDAO
+
+# 登录失败限速：同一用户名在滑动窗口内失败达上限即临时锁定（仅内存态）
+_FAIL_WINDOW_SEC = 300.0
+_FAIL_LIMIT = 10
+_FAILS: dict[str, list[float]] = {}
+
+
+def _detail_json(detail: dict) -> str:
+    """审计 detail 统一经 json 序列化，含引号/特殊字符的输入不会破坏 JSON。"""
+    return json.dumps(detail, ensure_ascii=False)
 
 
 class AuthService:
@@ -29,10 +43,25 @@ class AuthService:
         return bcrypt.hashpw(pwd.encode("utf-8"), bcrypt.gensalt()).decode("utf-8")
 
     def login(self, username: str, password: str) -> dict:
-        """登录：成功返回 {ok, role, user_id} 并写审计；失败返回 {ok:False} 并写审计。"""
+        """登录：成功返回 {ok, role, user_id} 并写审计；失败返回 {ok:False} 并写审计。
+
+        同一用户名在 _FAIL_WINDOW_SEC 内连续失败 _FAIL_LIMIT 次后临时锁定：
+        直接拒绝并写 login_fail 审计（不查库），登录成功清零计数。
+        """
+        now = time.monotonic()
+        fails = [t for t in _FAILS.get(username, []) if now - t < _FAIL_WINDOW_SEC]
+        _FAILS[username] = fails
+        if len(fails) >= _FAIL_LIMIT:
+            self.audit.insert(None, "login_fail", _detail_json({
+                "username": username, "detail": "失败次数过多，临时锁定"}))
+            return {"ok": False,
+                    "error": f"登录失败次数过多，请约{int(_FAIL_WINDOW_SEC // 60)}分钟后再试"}
+
         row = self.users.get_by_name(username)
         if row is None:
-            self.audit.insert(None, "login_fail", f'{{"username":"{username}"}}')
+            fails.append(now)
+            self.audit.insert(None, "login_fail",
+                              _detail_json({"username": username}))
             return {"ok": False, "error": "用户不存在"}
         user_id = row["id"]
         stored_hash = row["pwd_hash"].encode("utf-8") if isinstance(row["pwd_hash"], str) else row["pwd_hash"]
@@ -41,9 +70,12 @@ class AuthService:
         except (ValueError, TypeError):
             ok = False
         if ok:
+            _FAILS.pop(username, None)
             self.audit.insert(user_id, "login", '{"detail":"登录成功"}')
             return {"ok": True, "role": row["role"], "user_id": user_id}
-        self.audit.insert(user_id, "login_fail", '{"detail":"密码错误"}')
+        fails.append(now)
+        self.audit.insert(user_id, "login_fail",
+                          _detail_json({"detail": "密码错误"}))
         return {"ok": False, "error": "密码错误"}
 
     def check_permission(self, user_id: str, action: str) -> bool:

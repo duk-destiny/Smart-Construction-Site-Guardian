@@ -285,6 +285,8 @@ def render_admin() -> None:
                             eval_rows.append({
                                 "场景": model_name,
                                 "版本": ver,
+                                "口径": ("线上一致" if result.get("role") == "configured"
+                                         else "扫描参考"),
                                 "置信度阈值": threshold,
                                 "类别": cls.get("label") or cls.get("class"),
                                 "TP": cls.get("tp", 0),

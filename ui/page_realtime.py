@@ -51,6 +51,7 @@ def _get_engine() -> RealtimeEngine:
 
 
 def _persist(session_id: str, frame_status: str, dets: list[dict]) -> None:
+    conn = None
     try:
         conn = get_conn()
         init_db(conn)
@@ -66,6 +67,13 @@ def _persist(session_id: str, frame_status: str, dets: list[dict]) -> None:
         dao.bulk_insert(session_id, frame_status, rows, mode="realtime")
     except Exception as e:  # noqa: BLE001 历史写入失败不应中断监测
         log.warning(f"历史持久化失败: {e}")
+    finally:
+        # 每帧一连接，必须显式关闭，长跑不泄漏句柄
+        if conn is not None:
+            try:
+                conn.close()
+            except Exception:  # noqa: BLE001
+                pass
 
 
 def _sev_of(cls: str | None) -> str:
@@ -105,29 +113,39 @@ def render_realtime() -> None:
             else:
                 results = MultiSourceMonitor(sources).grab_all(engine.analyze, engine.draw)
                 st.session_state["_rtsp_results"] = results
-                for r in results:
-                    if not r.get("ok"):
-                        continue
-                    comp_r = r["compliance"]
-                    dets_r = r["detections"] or []
-                    _persist(st.session_state["_realtime_session"],
-                             comp_r["status"], dets_r)
-                    if comp_r.get("level") == "critical" and dets_r:
-                        crit = [d for d in dets_r if _sev_of(d.get("cls")) == "critical"] or [dets_r[0]]
-                        for d in crit[:1]:
-                            try:
-                                conn = get_conn()
-                                init_db(conn)
-                                TaskService(conn).raise_alarm(
-                                    session_id=st.session_state.get("_realtime_session"),
-                                    scene_id=d.get("scene"),
-                                    cls=d.get("cls"),
-                                    conf=d.get("conf"),
-                                    source=r.get("source"),
-                                    annotated_bgr=r.get("annotated"),
-                                )
-                            except Exception:
-                                pass
+                alarm_conn = None
+                try:
+                    for r in results:
+                        if not r.get("ok"):
+                            continue
+                        comp_r = r["compliance"]
+                        dets_r = r["detections"] or []
+                        _persist(st.session_state["_realtime_session"],
+                                 comp_r["status"], dets_r)
+                        if comp_r.get("level") == "critical" and dets_r:
+                            crit = [d for d in dets_r if _sev_of(d.get("cls")) == "critical"] or [dets_r[0]]
+                            for d in crit[:1]:
+                                try:
+                                    if alarm_conn is None:
+                                        # 本轮抓取共用一条连接，避免逐告警反复建连
+                                        alarm_conn = get_conn()
+                                        init_db(alarm_conn)
+                                    TaskService(alarm_conn).raise_alarm(
+                                        session_id=st.session_state.get("_realtime_session"),
+                                        scene_id=d.get("scene"),
+                                        cls=d.get("cls"),
+                                        conf=d.get("conf"),
+                                        source=r.get("source"),
+                                        annotated_bgr=r.get("annotated"),
+                                    )
+                                except Exception:
+                                    pass
+                finally:
+                    if alarm_conn is not None:
+                        try:
+                            alarm_conn.close()
+                        except Exception:  # noqa: BLE001
+                            pass
                 st.success(f"已抓取 {sum(1 for r in results if r.get('ok'))} 路源")
     with st.expander("后台自动轮询监控"):
         import services.monitor_service as mon_svc
@@ -207,6 +225,7 @@ def render_realtime() -> None:
     # 告警生命周期：高危帧创建告警事件 → 证据截图留存 → 异步外部推送
     if comp["level"] == "critical" and dets:
         crit = [d for d in dets if _sev_of(d.get("cls")) == "critical"] or [dets[0]]
+        conn = None
         try:
             conn = get_conn()
             init_db(conn)
@@ -221,6 +240,12 @@ def render_realtime() -> None:
                 )
         except Exception:
             pass
+        finally:
+            if conn is not None:
+                try:
+                    conn.close()
+                except Exception:  # noqa: BLE001
+                    pass
 
     # 不合规：声音警报（A2）+ Toast（B2）
     now = time.time()
