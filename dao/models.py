@@ -34,6 +34,15 @@ class UserDAO:
         return self.conn.execute(
             "SELECT * FROM users WHERE username=?", (username,)).fetchone()
 
+    def list_by_role(self, role: str) -> list:
+        """按角色列出用户（v0.2 派发下拉：responsible 候选人）。"""
+        return self.conn.execute(
+            "SELECT * FROM users WHERE role=? ORDER BY username", (role,)).fetchall()
+
+    def get_by_id(self, user_id: str):
+        return self.conn.execute(
+            "SELECT * FROM users WHERE id=?", (user_id,)).fetchone()
+
 
 class TaskDAO:
     """任务创建与查询。"""
@@ -41,12 +50,13 @@ class TaskDAO:
     def __init__(self, conn: sqlite3.Connection) -> None:
         self.conn = conn
 
-    def insert(self, user_id: str, permit_json: str, status: str = "pending") -> str:
+    def insert(self, user_id: str, permit_json: str, status: str = "pending",
+               source: str = "upload") -> str:
         tid = _new_id("t")
         self.conn.execute(
-            "INSERT INTO tasks(id,user_id,permit_json,status,created_at) "
-            "VALUES(?,?,?,?,datetime('now'))",
-            (tid, user_id, permit_json, status))
+            "INSERT INTO tasks(id,user_id,permit_json,status,source,created_at) "
+            "VALUES(?,?,?,?,?,datetime('now'))",
+            (tid, user_id, permit_json, status, source))
         self.conn.commit()
         return tid
 
@@ -146,12 +156,14 @@ class WorkOrderDAO:
             "SELECT * FROM work_orders WHERE task_id=?", (task_id,)).fetchone()
 
     def list_all_with_risk(self):
-        """历史研判列表：工单 + 风险等级 + 改判信息，按时间倒序。"""
+        """历史研判列表：工单 + 风险等级 + 改判信息 + 任务来源，按时间倒序。"""
         return self.conn.execute("""
             SELECT w.*, r.risk_level AS auto_level,
-                   r.override_level, r.override_reason
+                   r.override_level, r.override_reason,
+                   t.source AS source
             FROM work_orders w
             LEFT JOIN risks r ON r.task_id = w.task_id
+            LEFT JOIN tasks t ON t.id = w.task_id
             ORDER BY w.created_at DESC
         """).fetchall()
 
@@ -161,6 +173,70 @@ class WorkOrderDAO:
             "UPDATE work_orders SET worker_notice=? WHERE task_id=?",
             (worker_notice, task_id))
         self.conn.commit()
+
+    # ---------- v0.2 工单闭环：派发 → 整改 → 验收 ----------
+    # status 流转：open → submitted → closed；rejected 退回 open 可再提交。
+    # 「逾期」为派生状态（deadline < now 且 status='open'），不入库。
+
+    def get(self, order_id: str):
+        return self.conn.execute(
+            "SELECT * FROM work_orders WHERE id=?", (order_id,)).fetchone()
+
+    def set_dispatch(self, order_id: str, assignee_id: str | None,
+                     deadline: str | None, dispatched_at: str) -> None:
+        """派发：落责任人、截止时间与派发时间戳，状态置回 open。"""
+        self.conn.execute(
+            "UPDATE work_orders SET assignee_id=?, deadline=?, "
+            "dispatched_at=?, status='open' WHERE id=?",
+            (assignee_id, deadline, dispatched_at, order_id))
+        self.conn.commit()
+
+    def set_submitted(self, order_id: str, note: str, imgs_json: str | None) -> None:
+        """责任人提交整改说明/照片，进入待验收。"""
+        self.conn.execute(
+            "UPDATE work_orders SET submitted_note=?, submitted_imgs=?, "
+            "status='submitted' WHERE id=?",
+            (note, imgs_json, order_id))
+        self.conn.commit()
+
+    def set_reviewed(self, order_id: str, approved: bool, reviewer_id: str,
+                     reason: str = "") -> None:
+        """验收：通过→closed（留验收人与时间）；驳回→退回 open 留驳回原因可再改。"""
+        if approved:
+            self.conn.execute(
+                "UPDATE work_orders SET status='closed', approved_by=?, "
+                "approved_at=datetime('now'), closed_at=datetime('now') WHERE id=?",
+                (reviewer_id, order_id))
+        else:
+            self.conn.execute(
+                "UPDATE work_orders SET status='open', review_reason=?, "
+                "approved_by=NULL, approved_at=NULL, closed_at=NULL WHERE id=?",
+                (reason, order_id))
+        self.conn.commit()
+
+    def list_by_assignee(self, assignee_id: str,
+                         statuses: tuple[str, ...] = ("open", "rejected", "submitted")) -> list:
+        """责任人的工单视图（默认排除已闭环）。"""
+        placeholders = ",".join("?" for _ in statuses)
+        return self.conn.execute(
+            f"SELECT * FROM work_orders WHERE assignee_id=? AND status IN ({placeholders}) "
+            "ORDER BY created_at DESC",
+            (assignee_id, *statuses)).fetchall()
+
+    def list_by_status(self, status: str, limit: int = 200) -> list:
+        return self.conn.execute(
+            "SELECT * FROM work_orders WHERE status=? ORDER BY created_at DESC LIMIT ?",
+            (status, limit)).fetchall()
+
+    def list_overdue(self, as_of: str,
+                     statuses: tuple[str, ...] = ("open",)) -> list:
+        """逾期未销项工单（deadline 非空且早于 as_of）。"""
+        placeholders = ",".join("?" for _ in statuses)
+        return self.conn.execute(
+            f"SELECT * FROM work_orders WHERE deadline IS NOT NULL "
+            f"AND deadline < ? AND status IN ({placeholders}) "
+            "ORDER BY deadline ASC",
+            (as_of, *statuses)).fetchall()
 
 
 class AuditDAO:

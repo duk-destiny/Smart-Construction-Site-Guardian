@@ -50,10 +50,15 @@ class TaskService:
         self.notifications = NotificationLogDAO(conn)
         self.permissions = PermissionService(conn)
 
-    def create_task(self, user_id: str, files: list[str], permit_info: dict) -> str:
-        """创建任务，返回 task_id；写审计由调用方负责。"""
+    def create_task(self, user_id: str, files: list[str], permit_info: dict,
+                    source: str = "upload") -> str:
+        """创建任务，返回 task_id；写审计由调用方负责。
+
+        source 标记输入来源（camera/upload/text），台账据此区分机器感知与人工上报。
+        """
         self.permissions.require(user_id, "upload")
-        tid = self.tasks.insert(user_id, json.dumps(permit_info, ensure_ascii=False), "running")
+        tid = self.tasks.insert(user_id, json.dumps(permit_info, ensure_ascii=False),
+                                "running", source=source)
         TaskService._progress[tid] = {}
         return tid
 

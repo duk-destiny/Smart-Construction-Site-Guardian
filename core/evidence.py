@@ -33,3 +33,27 @@ def save_alarm_evidence(session_id: str | None, cls: str | None,
         return rel
     except Exception:  # noqa: BLE001 证据留存失败不应中断告警
         return None
+
+
+RECTIFICATION_DIR = os.path.join("data", "rectifications")
+
+
+def save_rectification_photo(order_id: str, filename: str, blob: bytes) -> str | None:
+    """保存整改现场照片，返回相对路径；失败返回 None（不阻断提交流程）。
+
+    文件落 data/rectifications/<order_id>/，数据库仅存相对路径。
+    """
+    try:
+        if not blob:
+            return None
+        safe_order = re.sub(r"[^\w\-.]+", "_", str(order_id or "wo"))[:24]
+        safe_name = re.sub(r"[^\w\-.]+", "_", os.path.basename(filename or "img.jpg"))
+        dir_ = os.path.join(RECTIFICATION_DIR, safe_order)
+        os.makedirs(dir_, exist_ok=True)
+        ts = datetime.now().strftime("%Y%m%d_%H%M%S_%f")[:-3]
+        rel = os.path.join(dir_, f"{ts}_{safe_name}")
+        with open(rel, "wb") as f:
+            f.write(blob)
+        return rel
+    except Exception:  # noqa: BLE001 照片留存失败不应中断整改提交
+        return None
