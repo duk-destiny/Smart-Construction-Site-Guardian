@@ -93,6 +93,45 @@ class LlmEngine:
         except Exception:
             return None
 
+    def ask_json(self, instruction: str) -> dict | None:
+        """受约束 JSON 分类调用（P3 意图第 2 层兜底专用，非判定路径）。
+
+        与 polish 同管线（/api/chat），系统提示要求仅输出 JSON；
+        解析失败/超时/未启用一律返回 None——由上层规则与人工确认兜底。
+        """
+        if not self._enabled:
+            return None
+        body = {
+            "model": self.model,
+            "stream": False,
+            "messages": [
+                {"role": "system",
+                 "content": "你是文本意图解析器。只输出一个 JSON 对象，"
+                            "字段和取值严格按用户给定的白名单，"
+                            "不确定就用 null，禁止输出解释或多余字符。"},
+                {"role": "user", "content": instruction},
+            ],
+            "options": {"num_predict": max(self._num_predict, 96),
+                        "temperature": self._temperature},
+            "keep_alive": self._keep_alive,
+        }
+        if self._think is not None:
+            body["think"] = False
+        try:
+            req = urllib.request.Request(
+                f"{self.base_url}/api/chat", data=json.dumps(body).encode("utf-8"),
+                headers={"Content-Type": "application/json"}, method="POST")
+            with urllib.request.urlopen(req, timeout=self.timeout) as resp:
+                data = json.loads(resp.read().decode("utf-8"))
+            raw = (data.get("message") or {}).get("content", "").strip()
+            start, end = raw.find("{"), raw.rfind("}")
+            if start == -1 or end <= start:
+                return None
+            obj = json.loads(raw[start:end + 1])
+            return obj if isinstance(obj, dict) else None
+        except Exception:  # noqa: BLE001 分类失败静默交还规则层
+            return None
+
     def warmup(self) -> None:
         """后台预热：触发 ollama 加载模型并 keep_alive 常驻；进程内只跑一次，失败静默。
 
