@@ -94,3 +94,14 @@ monitor:
   interval_sec: 3            # 轮询采样节奏（秒）；告警 SLA = 下一采样 ≤ 此值，火情关键源建议 ≤3s（注：采样节奏非推理延迟，亚秒级响应走实时摄像头连续路径）
   cooldown_sec: 60           # 同源同类告警冷却（秒）
   sources: []                # 每项一个 RTSP/本地视频源，如 ["rtsp://user:pass@host:554/stream"]；也可用 "demo://" 作为无需真实视频源的示例源（见 core/video_source.py）
+
+# ================= 工单派发规则（v0.2 工单闭环）=================
+# 数据驱动、自上而下首中即用；assignee 填用户名（须为 responsible 角色）。
+# scene/zone 均可省略视为通配；无命中时派发面板转手动下拉选择。
+# 责任人默认整改时限按风险等级查表：重大1h / 较大2h / 一般24h / 低168h，可派发时覆盖。
+dispatch:
+  rules:
+    - scene: hot_work
+      assignee: lisi
+    - scene: construction_ppe
+      assignee: lisi
