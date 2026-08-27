@@ -64,6 +64,13 @@ def main() -> None:
         def _background_prewarm():
             # BGE/torch 已隔离到独立子进程（core.bge_worker），主进程零 torch，
             # 从根本上消除 torch+onnxruntime 同进程原生段错误。
+            # 0) YOLO 双场景检测头预热（v0.6）：首请求不再付首次建会话的 1-3s，
+            #    预热失败由首请求按需重试（_get_engine 模块级单例兜底）
+            try:
+                from ui.page_realtime import _prewarm_engine
+                _prewarm_engine()
+            except Exception:
+                pass
             # 1) RTSP 后台监控：幂等，未启用则秒返回
             try:
                 from services import monitor_service
@@ -97,7 +104,7 @@ def main() -> None:
         }
     else:
         page_map = {
-            "upload": st.Page(page_upload.render_upload, title="上传与作业票", icon="📤"),
+            "upload": st.Page(page_upload.render_upload, title="统一上报", icon="📤"),
             "realtime": st.Page(page_realtime.render_realtime, title="实时摄像头监测", icon="📷"),
             "agents": st.Page(page_agents.render_agents, title="多Agent研判", icon="🤖"),
             "report": st.Page(page_report.render_report, title="工单/改判/导出", icon="📋"),

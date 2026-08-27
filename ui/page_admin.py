@@ -227,7 +227,7 @@ def render_admin() -> None:
         st.caption("暂无待验收工单（责任人提交整改后出现在这里）")
     for _idx, _o in enumerate(_pending):
         _desc = (_o["hazard_desc"] or "")[:30]
-        with st.expander(f"[待验收] {_o['risk_level']} ｜ {_desc}", key=f"wo_{_o['id']}"):
+        with st.expander(f"[待验收] {_o['risk_level']} ｜ {_desc}", key=f"wo_{_o['id']}", expanded=(_idx == 0)):
             st.write(f"**工单号**：{_o['id']}　|　**任务号**：{_o['task_id']}")
             st.write(f"**截止**：{(_o['deadline'] or '—')[:19]}　|　"
                      f"**责任人**：{UserDAO(wo_conn).get_by_id(_o['assignee_id'])['username'] if _o['assignee_id'] else '—'}")

@@ -45,9 +45,38 @@ def _alarm_html() -> str:
             f'<a href="data:audio/wav;base64,{b64}" download="alarm.wav">下载警报音</a></audio>')
 
 
-@st.cache_resource
+# v0.6 预热改造：模块级单例 + 锁，取代 st.cache_resource——后者在预热线程
+# （非 Streamlit 脚本线程）中调用会绕过缓存，导致预热白做、首请求重复建引擎。
+# 预热线程（app._background_prewarm）与页面经同一入口共享实例；
+# admin 换模型后 page_admin._reload_running_engines 继续经本入口调 reload()。
+_ENGINE_LOCK = __import__("threading").Lock()
+_ENGINE: RealtimeEngine | None = None
+
+
 def _get_engine() -> RealtimeEngine:
-    return RealtimeEngine()
+    global _ENGINE
+    if _ENGINE is None:
+        with _ENGINE_LOCK:
+            if _ENGINE is None:  # 双重检查：并发首访只建一次
+                _ENGINE = RealtimeEngine()
+    return _ENGINE
+
+
+def _prewarm_engine() -> None:
+    """启动期预热入口：构建双场景检测头（ONNX 会话进程级缓存复用）。
+
+    由 app.py 预热守护线程调用；完成/失败都打一条日志，供启动排查与
+    答辩展示"模型前置预热、消除首请求卡顿"的启动日志证据。
+    """
+    global _ENGINE
+    try:
+        eng = _get_engine()
+        n = len(eng.engines)
+        log.info(f"[prewarm] YOLO 双场景检测头预热完成：{n} 个检测头已就绪"
+                 if n else "[prewarm] 预热完成但未加载到任何检测头（检查权重路径）")
+    except Exception as exc:  # noqa: BLE001 预热失败不影响页面按需重试
+        _ENGINE = None
+        log.warning(f"[prewarm] YOLO 预热失败（将由首请求重试）: {exc}")
 
 
 def _persist(session_id: str, frame_status: str, dets: list[dict]) -> None:
