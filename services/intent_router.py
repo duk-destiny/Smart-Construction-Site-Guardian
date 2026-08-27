@@ -18,17 +18,25 @@ from dataclasses import dataclass, field
 from dao.models import UserDAO, WorkOrderDAO
 
 # 状态词 → 库内枚举
-_STATUS_WORDS = {
-    "整改中": "open", "待整改": "open", "未处理": "open",
-    "待验收": "submitted", "验收中": "submitted",
-    "已销项": "closed", "已闭环": "closed", "已关闭": "closed", "已完成": "closed",
-}
+# 正则化状态词表( 在中文边界不可靠,改包含式正则);未/没 系优先于 已 系
+_STATUS_RES: list[tuple[str, str]] = [
+    (r"未闭环|没闭环|还没.{0,3}闭环|未销项|没销项", "open"),
+    (r"整改中|待整改|未处理|在办", "open"),
+    (r"待验收|验收中", "submitted"),
+    (r"已?销项|已?经?闭环|已?关闭|已完成", "closed"),
+]
 # 时间窗：'近N天'/'最近N天'/'上周'→7；默认 7
-_DAYS_RE = re.compile(r"(?:近|最近|过去)\s*(\d{1,3})\s*天|上一?周")
+_DAYS_RE = re.compile(
+    r"(?:近|最近|过去|前)\s*(\d{1,3})\s*天"
+    r"|(?:近|过去|上|前)\s*([一两二三四五六七八九十]|\d{1,2})\s*周")
+_CN_NUM = {"一": 1, "两": 2, "二": 2, "三": 3, "四": 4, "五": 5,
+           "六": 6, "七": 7, "八": 8, "九": 9, "十": 10}
 # 工单号：显式哈希形式 #w_xxx / w_xxx / w-xxx；或口语序数「N 号工单 / #N」
 _HASH_ID_RE = re.compile(r"(?:#|(?<![A-Za-z0-9]))w[_\-]?([A-Za-z0-9]{4,16})\b")
-_NUM_ID_RE = re.compile(r"#(\d{1,6})\b|\b(\d{1,6})\s*号(?:工单|的单|那单)")
-_DAYS_RE = re.compile(r"(?:近|最近|过去)\s*(\d{1,3})\s*天|上一?周")
+_NUM_ID_RE = re.compile(
+    r"(?<![0-9.])(\d{1,6})\s*号(?![0-9楼]|层|栋|单元|室|\-)"
+    r"|(?:第)(\d{1,6})\s*[张条]"
+    r"|#(\d{1,6})\s*号?工单")
 _QUERY_HINT_RE = re.compile(r"查|进度|状态|多少|几[张单条]|统计|周报")
 
 
@@ -71,13 +79,20 @@ class IntentRouter:
             g = next((g for g in m.groups() if g), None)
             if g and int(g) not in nums:
                 nums.append(int(g))
-        status = [v for k, v in _STATUS_WORDS.items() if k in (text or "")]
+        status = next((v for pat, v in _STATUS_RES
+                       if re.search(pat, text or "")), None)
         m_days = _DAYS_RE.search(text or "")
-        days = int(m_days.group(1)) if m_days and m_days.group(1) else \
-            (7 if (m_days or re.search(r"本周|这一周|近一周", text)) else 7)
+        days = 7
+        if m_days:
+            if m_days.group(1):
+                days = int(m_days.group(1))
+            else:
+                wk = m_days.group(2)
+                days = 7 * (_CN_NUM.get(wk, 1) if not wk.isdigit()
+                            else int(wk))
         return {"hash_ids": list(dict.fromkeys(hash_ids))[:5],
                 "nums": nums[:5],
-                "status": status[0] if status else None,
+                "status": status,
                 "days": max(1, min(days, 365)),
                 "query_hint": bool(_QUERY_HINT_RE.search(text or ""))}
 

@@ -130,7 +130,9 @@ def main() -> None:
             if c2.button("🚪 退出", use_container_width=True, key="_logout_top"):
                 for k in ("role", "user_id", "username", "current_task_id",
                           "permit_info", "_result", "_ran", "_rt_last",
-                          "_rt_frames", "_rt_violations", "_realtime_session"):
+                          "_rt_frames", "_rt_violations", "_realtime_session",
+                          "_ran_async", "_sync_ran", "t2_desc", "t2_desc_raw",
+                          "t2_hazard", "t2_area", "t2_scene"):
                     st.session_state.pop(k, None)
                 st.rerun()
 

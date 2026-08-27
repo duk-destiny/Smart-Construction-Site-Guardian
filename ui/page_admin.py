@@ -216,7 +216,6 @@ def render_admin() -> None:
                                          key=f"alarm_to_wo_{alarm['id']}",
                                          use_container_width=True):
                                 try:
-                                    from services.dispatch_service import                                         DispatchService
                                     _ds = DispatchService(get_conn())
                                     _oid = _ds.convert_alarm_to_order(
                                         alarm["id"],

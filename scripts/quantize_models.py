@@ -28,14 +28,28 @@ from dao.db import get_conn, init_db                     # noqa: E402
 
 
 def quantize_one(src: Path, out_dir: Path | None = None) -> Path:
-    """量化单个 ONNX，返回输出路径；已存在则直接复用（幂等）。"""
+    """量化单个 ONNX，返回输出路径；已存在则直接复用（幂等）。
+
+    在系统临时目录用无特殊字符的工作副本执行——onnx shape-infer 会把
+    `-inferred.onnx` 中间文件写回输入同目录，含撇号/中文的用户路径下
+    读回会 FileNotFoundError（实测），临时目录可彻底规避。
+    """
+    import shutil
+    import tempfile
     from onnxruntime.quantization import QuantType, quantize_dynamic
 
     dst = (out_dir or src.parent) / (src.stem + "_int8.onnx")
     if dst.exists():
         return dst
-    quantize_dynamic(model_input=str(src), model_output=str(dst),
-                     weight_type=QuantType.QInt8)
+    with tempfile.TemporaryDirectory() as td:
+        work = Path(td)
+        tmp_src = work / "model.onnx"
+        shutil.copy2(src, tmp_src)
+        quantize_dynamic(model_input=str(tmp_src),
+                         model_output=str(work / "model_int8.onnx"),
+                         weight_type=QuantType.QInt8)
+        dst.parent.mkdir(parents=True, exist_ok=True)
+        shutil.move(str(work / "model_int8.onnx"), str(dst))
     return dst
 
 
