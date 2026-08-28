@@ -15,7 +15,7 @@ from dao.models import (
 from services.dispatch_service import (
     DispatchService, RISK_DEADLINE_HOURS, _hours_between, _now_str,
 )
-from services.permission_service import PermissionError
+from services.permission_service import AuthorizationError
 
 FIXED_NOW = "2030-01-10 12:00:00"
 
@@ -86,7 +86,7 @@ def test_dispatch_by_rule_sets_fields_and_audits(env):
 
 
 def test_dispatch_requires_override_permission(env):
-    with pytest.raises(PermissionError):
+    with pytest.raises(AuthorizationError):
         env["svc"].dispatch_order(env["task_id"], env["ids"]["lisi"],
                                   assignee_username="wangwu")
 
@@ -131,7 +131,7 @@ def test_safety_cannot_submit_rectification(env):
     svc = env["svc"]
     svc.dispatch_order(env["task_id"], env["ids"]["safety"], scene_id="hot_work")
     order = svc.orders.get_by_task(env["task_id"])
-    with pytest.raises(PermissionError):
+    with pytest.raises(AuthorizationError):
         svc.submit_rectification(order["id"], env["ids"]["safety"], "安全员代办")
 
 
@@ -170,7 +170,7 @@ def test_only_admin_can_review_but_not_responsible(env):
     svc.dispatch_order(env["task_id"], env["ids"]["safety"], scene_id="hot_work")
     order = svc.orders.get_by_task(env["task_id"])
     svc.submit_rectification(order["id"], env["ids"]["lisi"], "提交")
-    with pytest.raises(PermissionError):
+    with pytest.raises(AuthorizationError):
         svc.review_order(order["id"], env["ids"]["lisi"], True)
 
 

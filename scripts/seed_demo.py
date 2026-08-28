@@ -144,12 +144,12 @@ def main() -> None:
 
     # 导出可移植 JSON
     with open(SEED_JSON, "w", encoding="utf-8") as f:
-        json.dump({"users": ["safety/demo1234", "admin/admin1234"],
+        json.dump({"users": [f"safety/{_safety_pass}", f"admin/{_admin_pass}"],
                    "work_orders": rows}, f, ensure_ascii=False, indent=2)
 
     print(f"演示库已生成：{DEMO_DB}")
     print(f"演示数据：{SEED_JSON}")
-    print("账号：safety/demo1234（安全员），admin/admin1234（管理员）")
+    print(f"账号：safety/{_safety_pass}（安全员），admin/{_admin_pass}（管理员）")
     print(f"工单数：{len(rows)}（重大/较大/一般/低 四级覆盖）")
     conn.close()
 

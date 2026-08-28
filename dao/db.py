@@ -129,18 +129,33 @@ def _migrate_user_role_check(conn: sqlite3.Connection) -> bool:
     ).fetchall()
     for dep in deps:
         conn.execute(f"DROP {dep['type'].upper()} IF EXISTS \"{dep['name']}\"")
-    conn.execute("""
+
+    # 检测老表是否已有治理列（避免重建时丢失 must_change_password / disabled）
+    old_cols = {row["name"] for row in conn.execute("PRAGMA table_info(users)")}
+    extra_cols = []
+    for col in ("must_change_password", "disabled"):
+        if col in old_cols:
+            extra_cols.append(col)
+
+    col_defs = "".join(
+        f",\n    {col} INTEGER NOT NULL DEFAULT 0" for col in extra_cols
+    )
+    col_list = "id,username,pwd_hash,role,created_at" + (
+        "," + ",".join(extra_cols) if extra_cols else ""
+    )
+
+    conn.execute(f"""
         CREATE TABLE users_new (
             id         TEXT PRIMARY KEY,
             username   TEXT NOT NULL UNIQUE,
             pwd_hash   TEXT NOT NULL,
             role       TEXT NOT NULL CHECK(role IN ('safety','admin','responsible')),
-            created_at TEXT NOT NULL
+            created_at TEXT NOT NULL{col_defs}
         )
     """)
     conn.execute(
-        "INSERT INTO users_new(id,username,pwd_hash,role,created_at) "
-        "SELECT id,username,pwd_hash,role,created_at FROM users"
+        f"INSERT INTO users_new({col_list}) "
+        f"SELECT {col_list} FROM users"
     )
     conn.execute("DROP TABLE users")
     conn.execute("ALTER TABLE users_new RENAME TO users")

@@ -206,8 +206,7 @@ class YoloEngine:
                     continue  # 白名单外/忽略类（如 default）
                 cls = mapped
             else:
-                # ? class_map ??????????????? ONNX ?????
-                # ??? WHITELIST ???????????? WHITELIST ?????
+                # 无 class_map 时直接使用模型原始类名（需调用方自行验证）
                 cls = raw_name
             cx, cy, w, h = (float(v) for v in boxes[i])
             candidates.append((i, conf, cls, [cx, cy, w, h]))

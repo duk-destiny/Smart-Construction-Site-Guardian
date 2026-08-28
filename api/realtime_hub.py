@@ -25,6 +25,7 @@ from dataclasses import dataclass, field
 
 import cv2
 
+from core.compliance import SEVERITY
 from core.config import shared_config
 from core.logging import get_logger
 from core.realtime_engine import RealtimeEngine
@@ -184,7 +185,7 @@ class RealtimeHub:
             alarms: list[dict] = []
             if comp.get("level") == "critical" and dets:
                 for d in [d for d in dets
-                          if d.get("severity") == "critical"] or dets[:1]:
+                          if SEVERITY.get(d.get("cls"), "warning") == "critical"] or dets[:1]:
                     key = (idx, d.get("cls") or "")
                     if now - self._last_alert.get(key, 0.0) < self.cooldown_sec:
                         continue

@@ -20,8 +20,8 @@ BASE = Path(__file__).resolve().parent.parent
 DEMO  = BASE / "data" / "demo_video"
 SHOTS = DEMO / "screenshots"
 TMP   = DEMO / "_tmp"
-FFPROBE = r"D:\ffmpeg-2026-03-26-git-fd9f1e9c52-full_build\ffmpeg-2026-03-26-git-fd9f1e9c52-full_build\bin\ffprobe.exe"
-FFMPEG  = r"D:\ffmpeg-2026-03-26-git-fd9f1e9c52-full_build\ffmpeg-2026-03-26-git-fd9f1e9c52-full_build\bin\ffmpeg.exe"
+FFPROBE = os.environ.get("FFPROBE", r"D:\ffmpeg-2026-03-26-git-fd9f1e9c52-full_build\ffmpeg-2026-03-26-git-fd9f1e9c52-full_build\bin\ffprobe.exe")
+FFMPEG  = os.environ.get("FFMPEG", r"D:\ffmpeg-2026-03-26-git-fd9f1e9c52-full_build\ffmpeg-2026-03-26-git-fd9f1e9c52-full_build\bin\ffmpeg.exe")
 TEST_IMG = str(BASE / "data" / "raw" / "construction-ppe" / "images" / "test" / "image1.jpeg")
 APP  = "http://127.0.0.1:8501"
 FONT_PATH = r"C:\Windows\Fonts\msyh.ttc"
@@ -389,9 +389,13 @@ def main():
         for i, (shot, text, dur) in enumerate(SEGMENTS):
             start, end = cur, cur + dur
             cur = end
-            h1, m1, s1 = int(start // 3600), int(start % 3600 // 60), start % 60
-            h2, m2, s2 = int(end // 3600), int(end % 3600 // 60), end % 60
-            f.write(f"{i+1}\n{h1:02d}:{m1:02d}:{s1:05.2f} --> {h2:02d}:{m2:02d}:{s2:05.2f}\n{text}\n\n")
+            def _fmt_srt_time(t: float) -> str:
+                h = int(t // 3600)
+                m = int((t % 3600) // 60)
+                s = int(t % 60)
+                ms = int(round((t - int(t)) * 1000))
+                return f"{h:02d}:{m:02d}:{s:02d},{ms:03d}"
+            f.write(f"{i+1}\n{_fmt_srt_time(start)} --> {_fmt_srt_time(end)}\n{text}\n\n")
 
     print(f"\n>>> DONE: {demo}")
     print(f">>> Screenshots: {SHOTS}")

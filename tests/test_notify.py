@@ -196,7 +196,9 @@ def test_monitor_poll_once_cooldown(tmp_path, monkeypatch):
 
 def test_demo_test_push_no_http(monkeypatch, tmp_path):
     """演示模式 test_push：不发真实 HTTP，捕获 payload 到 mock_capture.jsonl，返回 sent。"""
-    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(
+        "services.notify_service.data_path",
+        lambda *parts: str(tmp_path.joinpath("data", *parts)))
     conn = get_conn(":memory:")
     init_db(conn)
     svc = NotificationService(
@@ -228,7 +230,9 @@ def test_demo_test_push_no_http(monkeypatch, tmp_path):
 
 def test_demo_push_alarm_full_loop(monkeypatch, tmp_path):
     """演示模式 push_alarm：跳过 enabled/webhook 门禁，捕获 payload，DB 留 sent(模拟)。"""
-    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(
+        "services.notify_service.data_path",
+        lambda *parts: str(tmp_path.joinpath("data", *parts)))
     conn = get_conn(":memory:")
     init_db(conn)
     aid = AlarmEventDAO(conn).insert("s1", None, "hot_work", "spark", 0.9,

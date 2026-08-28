@@ -21,7 +21,6 @@ class ExportService:
 
     def __init__(self, conn: sqlite3.Connection | None = None):
         self._conn = conn
-        self._permissions = PermissionService(self._get_conn())
 
     def _get_conn(self) -> sqlite3.Connection:
         if self._conn is not None:
@@ -33,12 +32,12 @@ class ExportService:
                     date_to: str | None = None,
                     user_id: str | None = None) -> dict:
         """导出 Excel，返回 {ok, data:{file_path}}。"""
-        if user_id:
-            self._permissions.require(user_id, "export")
         import openpyxl
         from openpyxl.styles import Font, Alignment, PatternFill
 
         conn = self._get_conn()
+        if user_id:
+            PermissionService(conn).require(user_id, "export")
         sql = (
             "SELECT w.id, w.task_id, w.hazard_desc, w.clause, w.requirement, "
             "w.risk_level, w.worker_notice, w.created_at "

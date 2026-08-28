@@ -26,16 +26,19 @@ def _best_metrics(run_dir: Path) -> dict:
     results = run_dir / "results.csv"
     if not results.exists():
         return {}
-    with open(results, encoding="utf-8", newline="") as f:
-        rows = list(csv.DictReader(f))
-    if not rows:
+    try:
+        with open(results, encoding="utf-8", newline="") as f:
+            rows = list(csv.DictReader(f))
+        if not rows:
+            return {}
+        best = max(rows, key=lambda r: float(r.get("metrics/mAP50(B)") or 0))
+        return {
+            "epoch": int(float(best["epoch"])),
+            "mAP50": float(best["metrics/mAP50(B)"]),
+            "mAP50_95": float(best.get("metrics/mAP50-95(B)") or 0),
+        }
+    except (KeyError, TypeError, ValueError):
         return {}
-    best = max(rows, key=lambda r: float(r["metrics/mAP50(B)"]))
-    return {
-        "epoch": int(float(best["epoch"])),
-        "mAP50": float(best["metrics/mAP50(B)"]),
-        "mAP50_95": float(best["metrics/mAP50-95(B)"]),
-    }
 
 
 def main() -> int:

@@ -10,7 +10,7 @@ import pytest
 from dao.db import get_conn, init_db
 from dao.models import AlarmEventDAO, RiskDAO, TaskDAO, UserDAO, WorkOrderDAO
 from services.dispatch_service import DispatchService
-from services.permission_service import PermissionError
+from services.permission_service import AuthorizationError
 
 
 @pytest.fixture
@@ -69,7 +69,7 @@ def test_resolved_alarm_cannot_convert(env):
 
 
 def test_responsible_cannot_convert(env):
-    with pytest.raises(PermissionError):
+    with pytest.raises(AuthorizationError):
         env["svc"].convert_alarm_to_order(env["spark"], env["ids"]["lisi"])
 
 

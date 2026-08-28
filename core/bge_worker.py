@@ -34,7 +34,12 @@ def main() -> None:
         from sentence_transformers import SentenceTransformer
         model = SentenceTransformer(_DEFAULT_BGE, device="cpu")
     except Exception as exc:
-        # 模型加载失败：逐请求回复错误，主进程据此降级
+        # 模型加载失败：立即通知主进程，避免 60s 就绪超时
+        sys.stdout.write(json.dumps(
+            {"id": 0, "ok": False, "error": f"model load failed: {exc}"}
+        ) + "\n")
+        sys.stdout.flush()
+        # 继续服务请求（逐条回复错误），保持协议一致
         for line in sys.stdin:
             try:
                 req = json.loads(line)

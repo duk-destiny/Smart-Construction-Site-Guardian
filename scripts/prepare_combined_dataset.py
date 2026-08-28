@@ -183,7 +183,7 @@ def _prepare_spec(spec: dict) -> dict:
     processed = 0
     for split in ("train", "valid", "test"):
         # feedback 目录用 val 而非 valid，映射进来
-        alt_split = "valid" if split == "valid" else split
+        alt_split = "val" if split == "valid" else split
         image_dir = next(
             (p for p in (src_root / split / "images",
                          src_root / "images" / split,

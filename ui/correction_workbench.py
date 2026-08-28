@@ -38,6 +38,14 @@ def _annotate(frame, detections: list[dict], corrections: list[dict]):
     return out
 
 
+def _normalize_bbox(bbox: list, img_w: int, img_h: int) -> list:
+    """将像素坐标 [cx,cy,w,h] 归一化为 0-1 范围（YOLO 标注格式）。"""
+    if img_w <= 0 or img_h <= 0:
+        return bbox
+    cx, cy, w, h = (float(v) for v in bbox)
+    return [cx / img_w, cy / img_h, w / img_w, h / img_h]
+
+
 def render_target_corrections(
     image_path: str | None,
     detections: list[dict],
@@ -56,6 +64,8 @@ def render_target_corrections(
     else:
         st.caption("未找到原图，仅显示文本纠偏控件")
 
+    img_h, img_w = frame.shape[:2] if frame is not None else (0, 0)
+
     updated: list[dict] = []
     for i, det in enumerate(detections):
         fix = corrections[i] if i < len(corrections) else {}
@@ -69,15 +79,26 @@ def render_target_corrections(
                 "误报", value=bool(fix.get("is_fp")),
                 key=f"{key_prefix}_fp_{i}")
         with c2:
+            corrected_cls = fix.get("corrected_cls")
+            if corrected_cls and corrected_cls in WHITELIST:
+                idx = WHITELIST.index(corrected_cls) + 1
+            else:
+                idx = 0
+                corrected_cls = None
             corrected = st.selectbox(
                 "修正类别", ["保持"] + WHITELIST,
-                index=0 if not fix.get("corrected_cls") else WHITELIST.index(
-                    fix["corrected_cls"]) + 1,
+                index=idx,
                 key=f"{key_prefix}_cls_{i}")
+        
+        bbox = det.get("bbox")
+        if (isinstance(bbox, list) and len(bbox) == 4 
+                and img_w > 0 and img_h > 0):
+            bbox = _normalize_bbox(bbox, img_w, img_h)
+        
         updated.append({
             "cls": det.get("cls"),
             "conf": det.get("conf"),
-            "bbox": det.get("bbox"),
+            "bbox": bbox,
             "is_fp": is_fp,
             "corrected_cls": None if corrected == "保持" else corrected,
         })

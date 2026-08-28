@@ -366,7 +366,8 @@ class DetectionRecordDAO:
         self.conn.commit()
 
     def query(self, start: str | None = None, end: str | None = None,
-              severity: str | None = None, cls: str | None = None) -> list:
+              severity: str | None = None, cls: str | None = None,
+              limit: int = 2000) -> list:
         """按日期范围/严重度/类别查询（B5 日期筛选）。"""
         sql = "SELECT * FROM detection_records WHERE 1=1"
         params: list = []
@@ -382,7 +383,8 @@ class DetectionRecordDAO:
         if cls:
             sql += " AND cls = ?"
             params.append(cls)
-        sql += " ORDER BY created_at DESC"
+        sql += " ORDER BY created_at DESC LIMIT ?"
+        params.append(limit)
         return self.conn.execute(sql, params).fetchall()
 
     def stats_by_date(self, start: str | None = None, end: str | None = None) -> list:

@@ -30,7 +30,7 @@ from api.routers import (admin, alarms, auth, history, media, orders,
                          reports, tasks, ws)
 from core.config import ConfigError, shared_config  # 白名单（情况1）：只读配置
 from core.logging import get_logger      # 白名单（情况1）：日志
-from services.permission_service import PermissionError as ServicePermissionError
+from services.permission_service import AuthorizationError as ServicePermissionError
 
 log = get_logger(__name__)
 
@@ -104,7 +104,6 @@ async def _lifespan(_: FastAPI):
 def _install_error_handlers(app: FastAPI) -> None:
     """服务层异常 → HTTP 语义：权限不足 403 / 入参业务错误 400 / 配置缺失 503。"""
     @app.exception_handler(ServicePermissionError)
-    @app.exception_handler(PermissionError)
     async def _perm(_: Request, exc: Exception) -> JSONResponse:
         return JSONResponse(status_code=403, content={"detail": str(exc)})
 

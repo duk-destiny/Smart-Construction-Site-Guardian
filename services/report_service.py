@@ -24,6 +24,22 @@ def _day_end(date_str: str) -> str:
     return f"{date_str} 23:59:59" if len(date_str) == 10 else date_str
 
 
+_CJK_FONT_CANDIDATES = (
+    r"C:\Windows\Fonts\simhei.ttf",
+    r"C:\Windows\Fonts\msyh.ttc",
+    "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc",
+    "/usr/share/fonts/truetype/wqy/wqy-microhei.ttc",
+    "/usr/share/fonts/truetype/wqy/wqy-zenhei.ttc",
+)
+
+
+def _cjk_font_path() -> str:
+    for p in _CJK_FONT_CANDIDATES:
+        if os.path.exists(p):
+            return p
+    return _CJK_FONT_CANDIDATES[0]
+
+
 class WeeklyReportService:
     """周期安全周报：gather(纯查询) → render_pdf(纯渲染) → generate(编排+审计)。"""
 
@@ -75,7 +91,8 @@ class WeeklyReportService:
             wo_by_status[r["status"]] = wo_by_status.get(r["status"], 0) + 1
 
         # 当前存量视角：所有未销项工单按截止时间对照报告期末尾判逾期
-        as_of = _day_end(end or start or "")
+        # 无日期范围时以当前时刻为截止点，避免 as_of="" 导致逾期统计全为 0
+        as_of = _day_end(end or start or "") or datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         overdue_ids = {
             r["id"] for r in self.conn.execute(
                 "SELECT id, assignee_id FROM work_orders "
@@ -151,11 +168,10 @@ class WeeklyReportService:
     def render_pdf(self, stats: dict, out_path: str) -> str:
         """将 gather 结果渲染为中文 PDF 并写入 out_path，返回路径。"""
         from fpdf import FPDF
-        from tests.cjk_font import cjk_font_path
 
         pdf = FPDF()
         pdf.add_page()
-        pdf.add_font("cjk", "", cjk_font_path())
+        pdf.add_font("cjk", "", _cjk_font_path())
         pdf.set_font("cjk", size=16)
         pdf.cell(text="智护工地 · 风险分级周报", align="C", new_x="LMARGIN", new_y="NEXT")
         pdf.set_font("cjk", size=11)

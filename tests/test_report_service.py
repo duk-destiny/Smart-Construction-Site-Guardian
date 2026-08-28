@@ -155,7 +155,7 @@ def test_generate_audits_and_writes_file(env, tmp_path, monkeypatch):
 
 
 def test_generate_requires_export_permission(env, tmp_path):
-    # responsible 无 export 权限 → PermissionError（自定义异常类）
-    from services.permission_service import PermissionError as PErr
+    # responsible 无 export 权限 → AuthorizationError（自定义异常类）
+    from services.permission_service import AuthorizationError as PErr
     with pytest.raises(PErr):
         env["svc"].generate(S, E, user_id="u_lisi", out_dir=str(tmp_path))

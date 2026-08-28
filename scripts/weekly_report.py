@@ -33,9 +33,9 @@ def main() -> None:
                         help="从今天往前回看的周期天数（默认 7）")
     parser.add_argument("--start", default=None, help="起始日期 YYYY-MM-DD")
     parser.add_argument("--end", default=None, help="结束日期 YYYY-MM-DD")
-    parser.add_argument("--out-dir", default="data/exports",
+    parser.add_argument("--out-dir", default=str(ROOT / "data/exports"),
                         help="输出目录（默认 data/exports）")
-    parser.add_argument("--db", default="data/app.db", help="SQLite 路径")
+    parser.add_argument("--db", default=str(ROOT / "data/app.db"), help="SQLite 路径")
     args = parser.parse_args()
 
     end = args.end or date.today().isoformat()

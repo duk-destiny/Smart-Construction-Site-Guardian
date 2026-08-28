@@ -13,7 +13,7 @@ import streamlit as st
 from ui.page_helpers import safe_page
 
 from services import lookup_service, order_service, task_entry
-from services.permission_service import PermissionError as ServicePermissionError
+from services.permission_service import AuthorizationError as ServicePermissionError
 from ui.components import compliance_banner
 from ui.correction_workbench import render_target_corrections
 

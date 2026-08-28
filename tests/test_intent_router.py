@@ -11,7 +11,7 @@ import pytest
 from dao.db import get_conn, init_db
 from dao.models import AuditDAO, RiskDAO, TaskDAO, UserDAO, WorkOrderDAO
 from services.intent_router import IntentRouter
-from services.permission_service import PermissionError
+from services.permission_service import AuthorizationError
 
 OLD, MID, NEW = ["2030-01-01 00:00:00", "2030-01-02 00:00:00",
                  "2030-01-03 00:00:00"]
@@ -164,4 +164,4 @@ def test_llm_fallback_whitelist_branch(env, monkeypatch):
 
 def test_permission_negative_still_unused_here_guard():
     """占位断言：确保本文件确实引用了权限异常类型（防误删导入）。"""
-    assert PermissionError is not None
+    assert AuthorizationError is not None

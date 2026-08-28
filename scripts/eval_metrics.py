@@ -10,11 +10,13 @@ import json
 import os
 import sys
 import time
+from pathlib import Path
 
+ROOT = Path(__file__).resolve().parent.parent
 os.environ.setdefault("CUDA_VISIBLE_DEVICES", "")
 os.environ.setdefault("OMP_NUM_THREADS", "1")
 os.environ.setdefault("TQDM_DISABLE", "1")
-sys.path.insert(0, os.getcwd())
+sys.path.insert(0, str(ROOT))
 
 import numpy as np
 
@@ -28,20 +30,20 @@ def eval_detection():
     from core.config import ConfigLoader
 
     cfg = ConfigLoader()
-    img_path = "data/uploads/t_031dcfb623cb_fire1_mp4-26_jpg.rf.5a09c11c9facf23a9413ca63bc2a6085.jpg"
+    img_path = str(ROOT / "data/uploads/t_031dcfb623cb_fire1_mp4-26_jpg.rf.5a09c11c9facf23a9413ca63bc2a6085.jpg")
     if not os.path.exists(img_path):
         import glob
-        fs = glob.glob("data/uploads/*fire1*.jpg")
+        fs = glob.glob(str(ROOT / "data/uploads/*fire1*.jpg"))
         img_path = fs[0] if fs else None
     frame = cv2.imread(img_path) if img_path else np.zeros((640, 640, 3), np.uint8)
 
     fire = YoloEngine(conf_thres=0.35, iou_thres=0.45,
                       class_map={"spark": "spark", "smoke": "smoke", "extinguisher": "extinguisher"})
-    fire.load("data/models/yolov8_fire_smoke_v2.onnx", intra_op_threads=2)
+    fire.load(str(ROOT / "data/models/yolov8_fire_smoke_v2.onnx"), intra_op_threads=2)
     ppe = YoloEngine(conf_thres=0.25, iou_thres=0.45,
                      class_map={"helmet": "helmet", "no_helmet": "no_helmet",
                                 "vest": "vest", "no_vest": "no_vest", "person": "person"})
-    ppe.load("data/models/ppe_yolov8_v2.onnx", intra_op_threads=2)
+    ppe.load(str(ROOT / "data/models/ppe_yolov8_v2.onnx"), intra_op_threads=2)
 
     def bench(fn, n=20):
         fn()  # warmup
@@ -83,7 +85,7 @@ def eval_rag():
     import chromadb
 
     RagEngine.preload()
-    client = chromadb.PersistentClient(path="data/kb/chroma")
+    client = chromadb.PersistentClient(path=str(ROOT / "data/kb/chroma"))
     cols = [c.name for c in client.list_collections()]
     if "kb_hot_work" not in cols:
         print("kb_hot_work 集合不存在，跳过 RAG 评测")
@@ -155,7 +157,7 @@ if __name__ == "__main__":
         eval_rag()
     except Exception as e:
         print(f"RAG 评测失败：{type(e).__name__}: {e}")
-    os.makedirs("data/eval", exist_ok=True)
-    with open("data/eval/metrics.json", "w", encoding="utf-8") as f:
+    os.makedirs(str(ROOT / "data/eval"), exist_ok=True)
+    with open(str(ROOT / "data/eval/metrics.json"), "w", encoding="utf-8") as f:
         json.dump(OUT, f, ensure_ascii=False, indent=2)
     print("\n已写入 data/eval/metrics.json")

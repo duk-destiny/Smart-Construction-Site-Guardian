@@ -17,9 +17,7 @@ import sqlite3
 from datetime import datetime, timedelta, timezone
 
 from dao.models import AuditDAO, UserDAO, WorkOrderDAO
-# 有意遮蔽内置 PermissionError：与服务层其余模块共用同一异常类型，
-# 保证 PermissionService.require 与本服务的"非本单责任人"等拒绝能被 UI 统一捕获。
-from services.permission_service import PermissionError
+from services.permission_service import AuthorizationError
 from services.permission_service import PermissionService
 
 # 各风险等级的默认整改时限（小时）；"低"亦给一周余量便于台账统计，
@@ -177,7 +175,8 @@ class DispatchService:
         # 不可篡改的 audit_logs 是唯一可信的"已转换"凭证（audit 仅追加）
         dup = conn.execute(
             "SELECT 1 FROM audit_logs WHERE action='alarm_to_order' "
-            "AND detail_json LIKE ? LIMIT 1", (f'%{alarm_id}%',)).fetchone()
+            "AND detail_json LIKE ? LIMIT 1",
+            (f'%"alarm_id": "{alarm_id}"%',)).fetchone()
         if dup:
             raise ValueError("该告警已转为工单，请勿重复转换")
 
@@ -272,15 +271,23 @@ class DispatchService:
         每单两档推送：责任人催办；逾期满 escalate_after_hours 追加越级升级
         （收件语义为管理层）。notify 未启用时推送自动 skipped（留痕），
         审计流水不受影响。`notifier` 供测试注入 fake。
+
+        每单设冷却窗口（取 notifier.cooldown_sec），同一订单在窗口内不重复推送，
+        避免 cron 高频触发导致消息轰炸。
         """
         if notifier is None:
             from services.notify_service import NotificationService
             notifier = NotificationService()
         now = as_of or _now_str()
         rows = self.orders.list_overdue(now)
+        cooldown_sec = getattr(notifier, "cooldown_sec", lambda: 60)()
         notified = escalated = 0
         push_sent = push_skipped = push_failed = 0
+        cooldown_skipped = 0
         for row in rows:
+            if self._recently_notified(row["id"], now, cooldown_sec):
+                cooldown_skipped += 1
+                continue
             overdue_h = max(0.0, _hours_between(now, row["deadline"] or now))
             base = {
                 "order_id": row["id"], "task_id": row["task_id"],
@@ -308,5 +315,17 @@ class DispatchService:
                 push_failed += res2.get("status") == "failed"
         return {"as_of": now, "overdue": len(rows),
                 "notified": notified, "escalated": escalated,
+                "cooldown_skipped": cooldown_skipped,
                 "push_sent": push_sent, "push_skipped": push_skipped,
                 "push_failed": push_failed}
+
+    def _recently_notified(self, order_id: str, as_of: str,
+                           cooldown_sec: float) -> bool:
+        """检查该工单在 cooldown_sec 内是否已有催办审计记录。"""
+        cutoff = (datetime.strptime(as_of[:19], "%Y-%m-%d %H:%M:%S")
+                  - timedelta(seconds=cooldown_sec)).strftime("%Y-%m-%d %H:%M:%S")
+        row = self.conn.execute(
+            "SELECT 1 FROM audit_logs WHERE action='overdue_notify' "
+            "AND detail_json LIKE ? AND created_at > ? LIMIT 1",
+            (f'%"order_id": "{order_id}"%', cutoff)).fetchone()
+        return row is not None

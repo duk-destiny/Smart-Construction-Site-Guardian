@@ -112,7 +112,7 @@ def main() -> int:
     if args.before:
         before = args.before
     elif args.retention_days is not None:
-        before = (datetime.now() - timedelta(days=args.retention_days)) \
+        before = (datetime.utcnow() - timedelta(days=args.retention_days)) \
             .strftime("%Y-%m-%d")
     else:
         print(json.dumps({"error": "必须指定 --before 或 --retention-days"},

@@ -12,12 +12,13 @@ from services.task_service import TaskService
 
 def query_records(start: str | None = None, end: str | None = None,
                   severity: str | None = None,
-                  cls: str | None = None) -> list[dict]:
+                  cls: str | None = None,
+                  limit: int = 2000) -> list[dict]:
     """检测明细查询（帧/目标级）。"""
     from dao.models import DetectionRecordDAO
     with scoped() as conn:
         rows = DetectionRecordDAO(conn).query(start, end, severity=severity,
-                                              cls=cls)
+                                              cls=cls, limit=limit)
         return [dict(r) for r in rows]
 
 

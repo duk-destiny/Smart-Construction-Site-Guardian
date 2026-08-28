@@ -104,6 +104,9 @@ def main() -> int:
 
             if not history or history[-1][0] != epoch:
                 history.append((epoch, map50))
+                #  stall 检测：比较最近 N 轮与**进入该窗口前**的最佳值
+                #  （不能用含当前 epoch 的 best_map，否则 max(recent)<=best_map 恒成立）
+                best_before_window = max((m for e, m in history[:-args.stall_epochs]), default=0.0)
                 best_map = max(best_map, map50)
                 _log(
                     f"EPOCH {epoch} mAP50={map50:.4f} "
@@ -118,10 +121,10 @@ def main() -> int:
 
                 recent = [m for e, m in history if e >= epoch - args.stall_epochs + 1]
                 if len(recent) >= args.stall_epochs:
-                    if max(recent) <= best_map:
+                    if max(recent) <= best_before_window:
                         _stop(args.pid, (
                             f"last {args.stall_epochs} epochs no improvement, "
-                            f"best={best_map:.4f}"))
+                            f"best={best_before_window:.4f}"))
                         break
         time.sleep(args.poll_seconds)
 

@@ -31,6 +31,9 @@
 - 纳入发布前工作区既有变更（单独成提交）：润色后台线程池化、Orchestrator
   分 agent 超时预算、BGE 分块上限/重叠与会话 LRU、`scripts/backup_db.py`
   在线备份脚本——发布基线回归已含上述变更全绿；
+- CI 适配（打版后首推发现）：配置出库后云端 fresh checkout 无
+  `config/config.yaml`，测试前从 `config.example.yaml` 引导；
+  ruff 范围补 `api/` 目录；
 - 回退预案：Streamlit 经典版保留可运行，至 React 版稳定一个迭代周期后下线；
 - 已知边界（记 backlog，不阻断打版）：BGE 转 ONNX、OCR 扫描件入库、
   INT8 量化版本达标后的线上切换、答辩材料同步 React 功能面。

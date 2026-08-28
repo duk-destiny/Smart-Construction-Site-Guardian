@@ -48,10 +48,12 @@ class PdfParser:
 
         try:
             doc = fitz.open(str(path))
-            raw_lines: list[str] = []
-            for page in doc:
-                raw_lines.extend(page.get_text().split("\n"))
-            doc.close()
+            try:
+                raw_lines: list[str] = []
+                for page in doc:
+                    raw_lines.extend(page.get_text().split("\n"))
+            finally:
+                doc.close()
         except Exception as e:
             log.warning(f"打开 {path} 失败: {e}")
             return []

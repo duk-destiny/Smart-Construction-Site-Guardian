@@ -9,6 +9,8 @@ import sqlite3
 import csv
 import io
 import threading
+import time
+from concurrent.futures import ThreadPoolExecutor
 
 from dao.models import (
     TaskDAO, RiskDAO, DetectionDAO, ComplianceDAO, WorkOrderDAO,
@@ -18,6 +20,9 @@ from core.logging import get_logger
 from services.permission_service import PermissionService
 
 log = get_logger(__name__)
+
+_MEM_TTL_SECONDS = 3600
+_MAX_ASYNC_WORKERS = 4
 
 
 class TaskService:
@@ -31,6 +36,8 @@ class TaskService:
     # TOCTOU（两请求同时通过检查 → 同任务双线程研判）；所有跨线程读写
     # （进度/属主/运行标志/结果）一律持锁。
     _STATE_LOCK = threading.Lock()
+    _EXECUTOR = ThreadPoolExecutor(max_workers=_MAX_ASYNC_WORKERS)
+    _timestamps: dict[str, float] = {}
     # 测试注入口：后台异步研判的 Orchestrator 类（None=真实实现）
     _ORCH_FACTORY = None
 
@@ -73,6 +80,7 @@ class TaskService:
         with TaskService._STATE_LOCK:
             TaskService._progress[tid] = {}
             TaskService._task_owners[tid] = user_id or ""
+            TaskService._timestamps[tid] = time.monotonic()
         return tid
 
     # ---------- v0.6 上传链路异步化 ----------
@@ -116,6 +124,8 @@ class TaskService:
                                           permit_info=permit_info)
                     svc.save_result(task_id, result.payload)
                     TaskService._async_results[task_id] = result.to_dict()
+                    with TaskService._STATE_LOCK:
+                        TaskService._timestamps[task_id] = time.monotonic()
                     wo = result.payload.get("work_order") or {}
                     if getattr(orch, "action", None) is not None:
                         orch.action.polish(task_id, wo.get("hazard_desc", ""),
@@ -126,10 +136,12 @@ class TaskService:
                 log.warning(f"后台研判任务 {task_id} 失败: {type(exc).__name__}: {exc}")
                 TaskService._async_results[task_id] = {
                     "status": "failed", "error": f"{type(exc).__name__}: {exc}"}
+                with TaskService._STATE_LOCK:
+                    TaskService._timestamps[task_id] = time.monotonic()
             finally:
                 TaskService._async_running.pop(task_id, None)
 
-        threading.Thread(target=_worker, daemon=True).start()
+        TaskService._EXECUTOR.submit(_worker)
         return True
 
     def pop_async_result(self, task_id: str,
@@ -142,7 +154,23 @@ class TaskService:
         if user_id and not self._is_owner(task_id, user_id):
             return None
         with TaskService._STATE_LOCK:
+            TaskService._cleanup_expired()
             return TaskService._async_results.pop(task_id, None)
+
+    @staticmethod
+    def _cleanup_expired() -> None:
+        """清除超过 TTL 的内存进度/属主/结果条目，防止字典无限增长。
+
+        必须在 _STATE_LOCK 已持有时调用。
+        """
+        cutoff = time.monotonic() - _MEM_TTL_SECONDS
+        stale = [tid for tid, ts in TaskService._timestamps.items()
+                 if ts < cutoff]
+        for tid in stale:
+            TaskService._progress.pop(tid, None)
+            TaskService._task_owners.pop(tid, None)
+            TaskService._async_results.pop(tid, None)
+            TaskService._timestamps.pop(tid, None)
 
     def create_text_hazard(self, user_id: str | None, description: str,
                            hazard_key: str, scene_id: str = "hot_work",
@@ -171,7 +199,9 @@ class TaskService:
                        "report_type": "text"}
         tid = self.tasks.insert(user_id, json.dumps(permit_info, ensure_ascii=False),
                                 "completed", source="text")
-        TaskService._task_owners[tid] = user_id or ""
+        with TaskService._STATE_LOCK:
+            TaskService._task_owners[tid] = user_id or ""
+            TaskService._timestamps[tid] = time.monotonic()
         # 复用处置 Agent 的等级话术模板，保持工单文案口径一致
         from agents.action_agent import ActionAgent
         agent = ActionAgent()
@@ -402,7 +432,7 @@ class TaskService:
             except Exception as exc:  # noqa: BLE001 条款挂载失败不影响告警，但留痕
                 log.warning(f"告警 {alarm_id} 条款挂载失败: {exc}")
 
-        threading.Thread(target=_worker, daemon=True).start()
+        TaskService._EXECUTOR.submit(_worker)
 
     @staticmethod
     def _pick_clause(rows: list[dict]) -> dict | None:

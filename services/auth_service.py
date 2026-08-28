@@ -16,6 +16,10 @@ import time
 
 from dao.models import UserDAO, AuditDAO
 
+
+class AuthorizationError(Exception):
+    """权限不足或用户不存在时抛出。"""
+
 # 登录失败限速：同一用户名在滑动窗口内失败达上限即临时锁定（仅内存态）
 _FAIL_WINDOW_SEC = 300.0
 _FAIL_LIMIT = 10
@@ -135,7 +139,7 @@ class AuthService:
         """
         try:
             self._require_actor(actor_user_id, "manage_users")
-        except PermissionError as exc:
+        except AuthorizationError as exc:
             return {"ok": False, "error": str(exc)}
         role = (role or "").strip()
         if role not in _ROLES:
@@ -181,7 +185,7 @@ class AuthService:
         """管理员重置密码：无需原密码，重置后强制对方下次登录改密。"""
         try:
             self._require_actor(actor_user_id, "manage_users")
-        except PermissionError as exc:
+        except AuthorizationError as exc:
             return {"ok": False, "error": str(exc)}
         row = self.users.get_by_id(target_user_id) if target_user_id else None
         if row is None:
@@ -200,7 +204,7 @@ class AuthService:
         """停用/启用账号。守卫：不能停用自己；不能停用最后一名可用管理员。"""
         try:
             self._require_actor(actor_user_id, "manage_users")
-        except PermissionError as exc:
+        except AuthorizationError as exc:
             return {"ok": False, "error": str(exc)}
         row = self.users.get_by_id(target_user_id) if target_user_id else None
         if row is None:
@@ -223,4 +227,4 @@ class AuthService:
     def _require_actor(self, actor_user_id: str | None, action: str) -> None:
         """账号治理的统一权限门（服务层，不依赖 UI RBAC）。"""
         if not actor_user_id or not self.check_permission(actor_user_id, action):
-            raise PermissionError(f"用户 {actor_user_id or '（空）'} 无权限执行 {action}")
+            raise AuthorizationError(f"用户 {actor_user_id or '（空）'} 无权限执行 {action}")

@@ -20,8 +20,9 @@ def records(start: str | None = None, end: str | None = None,
             limit: int = Query(500, ge=1, le=2000),
             user=Depends(_staff)) -> list[dict]:
     """检测明细（帧/目标级，新→旧）。"""
-    rows = history_service.query_records(start, end, severity=severity, cls=cls)
-    return rows[:limit]
+    rows = history_service.query_records(start, end, severity=severity, cls=cls,
+                                         limit=limit)
+    return rows
 
 
 @router.get("/stats-by-date")

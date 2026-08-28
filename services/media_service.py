@@ -31,8 +31,8 @@ def resolve_media(rel: str) -> tuple[str, str]:
     ext = os.path.splitext(clean)[1].lower()
     if ext not in _ALLOWED_EXTS:
         raise ValueError(f"不支持的媒体类型 {ext or '（无扩展名）'}")
-    path = os.path.abspath(os.path.join(str(BASE_DIR), clean))
-    data_root = os.path.abspath(str(DATA_DIR))
+    path = os.path.realpath(os.path.join(str(BASE_DIR), clean))
+    data_root = os.path.realpath(str(DATA_DIR))
     if os.path.dirname(path) != data_root \
             and not path.startswith(data_root + os.sep):
         raise ValueError("非法的媒体路径")

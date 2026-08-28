@@ -142,23 +142,24 @@ def _model_from_ckpt(path: Path):
 
 def _train_and_export(name: str, job: dict,
                       from_best: bool = False,
-                      version: str = "v3") -> dict:
+                      version: str = "v3",
+                      device=0) -> dict:
     data_yaml = _resolve_data_yaml(name, job)
     run_name = job.get("run_name", name)
     batch = job.get("batch", 16)
-    base_best_rel = f"data/runs_combined/{run_name}/weights/best.pt"
+    base_best_rel = PROJECT / run_name / "weights" / "best.pt"
     export_name = run_name
 
-    if from_best and Path(base_best_rel).exists():
+    if from_best and base_best_rel.exists():
         export_name = f"{run_name}_ft_{version}"
         print(f"[{name}] 基于现有 best.pt 续训 {job['epochs']} epoch", flush=True)
-        model = _model_from_ckpt(Path(base_best_rel))
+        model = _model_from_ckpt(base_best_rel)
         model.train(
             data=data_yaml,
             epochs=job["epochs"],
             imgsz=job["imgsz"],
             batch=batch,
-            device=0,
+            device=device,
             workers=4,
             patience=10,
             seed=0,
@@ -174,7 +175,7 @@ def _train_and_export(name: str, job: dict,
             exist_ok=True,
             verbose=True,
         )
-    elif job.get("skip_existing") and Path(base_best_rel).exists():
+    elif job.get("skip_existing") and base_best_rel.exists():
         print(f"[{name}] 检测到已完成 best.pt，跳过训练并直接导出", flush=True)
     else:
         if from_best:
@@ -194,7 +195,7 @@ def _train_and_export(name: str, job: dict,
             epochs=job["epochs"],
             imgsz=job["imgsz"],
             batch=batch,
-            device=0,
+            device=device,
             workers=4,
             patience=20,
             seed=0,
@@ -207,11 +208,11 @@ def _train_and_export(name: str, job: dict,
             verbose=True,
         )
 
-    best_rel = f"data/runs_combined/{export_name}/weights/best.pt"
-    if not Path(best_rel).exists():
+    best_rel = PROJECT / export_name / "weights" / "best.pt"
+    if not best_rel.exists():
         raise SystemExit(f"训练完成但未找到 best.pt: {best_rel}")
 
-    model = _model_from_ckpt(Path(best_rel))
+    model = _model_from_ckpt(best_rel)
     exported = model.export(
         format="onnx", imgsz=job["imgsz"], opset=17, simplify=False)
     dst = _output_path(name, version)
@@ -241,7 +242,16 @@ def main() -> int:
     parser.add_argument("--only", choices=["ppe", "fire"],
                         help="只训练指定场景")
     parser.add_argument("--epochs", type=int, help="覆盖默认 epochs")
+    parser.add_argument("--device", default=0,
+                        help="训练设备：0/1… 为 GPU，'cpu' 为 CPU")
     args = parser.parse_args()
+
+    device = args.device
+    if device != "cpu":
+        try:
+            device = int(device)
+        except ValueError:
+            pass
 
     if not PROJECT.exists():
         PROJECT.mkdir(parents=True, exist_ok=True)
@@ -253,7 +263,8 @@ def main() -> int:
             job["epochs"] = args.epochs
         print(f"[train_combined] 开始训练 {name}", flush=True)
         results[name] = _train_and_export(
-            name, job, from_best=args.from_best, version=args.version)
+            name, job, from_best=args.from_best, version=args.version,
+            device=device)
         print(f"[train_combined] 完成 {name}", flush=True)
 
     result_path = ROOT / "data" / "train" / "last_training_result.json"

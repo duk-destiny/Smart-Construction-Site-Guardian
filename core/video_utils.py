@@ -27,23 +27,26 @@ class VideoUtils:
         """
         cap = cv2.VideoCapture(path)
         if not cap.isOpened():
+            cap.release()
             return []
-        video_fps = cap.get(cv2.CAP_PROP_FPS) or 0.0
-        # 源帧率下每隔多少帧抽一帧；源帧率为 0 时退化为逐帧
-        frame_interval = max(1, int(round(video_fps / fps))) if video_fps else 1
-        max_frames = max(1, int(max_sec * fps))
+        try:
+            video_fps = cap.get(cv2.CAP_PROP_FPS) or 0.0
+            # 源帧率下每隔多少帧抽一帧；源帧率为 0 时退化为逐帧
+            frame_interval = max(1, int(round(video_fps / fps))) if video_fps else 1
+            max_frames = max(1, int(max_sec * fps))
 
-        out: list[str] = []
-        idx = 0
-        while len(out) < max_frames:
-            ret, frame = cap.read()
-            if not ret:
-                break
-            if idx % frame_interval == 0:
-                fd, fp = tempfile.mkstemp(suffix=".jpg", prefix="frame_")
-                os.close(fd)
-                cv2.imwrite(fp, frame)
-                out.append(fp)
-            idx += 1
-        cap.release()
-        return out
+            out: list[str] = []
+            idx = 0
+            while len(out) < max_frames:
+                ret, frame = cap.read()
+                if not ret:
+                    break
+                if idx % frame_interval == 0:
+                    fd, fp = tempfile.mkstemp(suffix=".jpg", prefix="frame_")
+                    os.close(fd)
+                    cv2.imwrite(fp, frame)
+                    out.append(fp)
+                idx += 1
+            return out
+        finally:
+            cap.release()

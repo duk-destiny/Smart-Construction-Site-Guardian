@@ -43,8 +43,11 @@ def save_media(user_id: str | None, uploaded) -> tuple[str | None, str]:
         return None, err
     save_dir = data_path("uploads")
     os.makedirs(save_dir, exist_ok=True)
+    import uuid
     name = sanitize_filename(uploaded.name, fallback="media")
-    path = os.path.join(save_dir, name)
+    prefix = uuid.uuid4().hex[:8]
+    safe_name = f"{prefix}_{name}"
+    path = os.path.join(save_dir, safe_name)
     with open(path, "wb") as f:
         f.write(data)
     return to_rel(path), ""

@@ -55,6 +55,25 @@ class Orchestrator:
         self._progress_cb(task_id, agent, status, cost_ms)
 
     @staticmethod
+    def _run_with_timeout(fn, arg, timeout: float, agent: str, task_id: str = "") -> AgentMessage:
+        """在独立线程执行 fn(arg)，超时返回降级消息，不阻塞等待未完成线程。"""
+        ex = ThreadPoolExecutor(max_workers=1)
+        try:
+            future = ex.submit(fn, arg)
+            try:
+                return future.result(timeout=timeout)
+            except FuturesTimeout:
+                return AgentMessage(
+                    task_id=task_id, agent=agent, status="degraded",
+                    payload={}, error=f"{agent} 超时({timeout}s)")
+            except Exception as e:  # noqa: BLE001
+                return AgentMessage(
+                    task_id=task_id, agent=agent, status="failed",
+                    payload={}, error=f"{type(e).__name__}: {e}")
+        finally:
+            ex.shutdown(wait=False, cancel_futures=True)
+
+    @staticmethod
     def _safe(future, timeout: float, agent: str, task_id: str = "") -> AgentMessage:
         """取结果，超时/异常返回降级消息（保留 task_id 便于追踪）。"""
         try:
@@ -128,9 +147,9 @@ class Orchestrator:
                 },
                 error=None, cost_ms=0)
             # 二阶段 RAG 检索受超时预算保护；超时/异常则保留一阶段结论并降级
-            with ThreadPoolExecutor(max_workers=1) as ex:
-                fr2 = ex.submit(self.rule.run, rmsg)
-                rout2 = self._safe(fr2, _TIMEOUT_RULE, "rule", task_id=task_id)
+            rout2 = self._run_with_timeout(
+                self.rule.run, rmsg,
+                timeout=_TIMEOUT_RULE, agent="rule", task_id=task_id)
             if rout2.status == "success":
                 rout = rout2
             else:
@@ -141,34 +160,37 @@ class Orchestrator:
 
         # 融合
         self._push(task_id, "fusion", "running")
-        with ThreadPoolExecutor(max_workers=1) as ex:
-            ff = ex.submit(self.fusion.run, AgentMessage(
+        fmsg = self._run_with_timeout(
+            self.fusion.run,
+            AgentMessage(
                 task_id=task_id, agent="fusion", status="pending",
                 payload={
                     "detections": vout.payload.get("detections", []) if vout.status == "success" else [],
                     "compliance": rout.payload.get("compliance", []) if rout.status == "success" else [],
-                }, error=None, cost_ms=0))
-            fmsg = self._safe(ff, _TIMEOUT_FUSION, "fusion", task_id=task_id)
+                }, error=None, cost_ms=0),
+            timeout=_TIMEOUT_FUSION, agent="fusion", task_id=task_id)
         self._push(task_id, "fusion", fmsg.status, fmsg.cost_ms)
 
         # 复核：高风险或证据不足的结果标记人工复核
         self._push(task_id, "review", "running")
-        with ThreadPoolExecutor(max_workers=1) as ex:
-            frv = ex.submit(self.review.run, AgentMessage(
+        rvmsg = self._run_with_timeout(
+            self.review.run,
+            AgentMessage(
                 task_id=task_id, agent="review", status="pending",
                 payload={
                     "detections": vout.payload.get("detections", []) if vout.status == "success" else [],
                     "compliance": rout.payload.get("compliance", []) if rout.status == "success" else [],
                     "risk_level": fmsg.payload.get("risk_level", "一般"),
                     "filtered_fp": fmsg.payload.get("filtered_fp", []),
-                }, error=None, cost_ms=0))
-            rvmsg = self._safe(frv, _TIMEOUT_REVIEW, "review", task_id=task_id)
+                }, error=None, cost_ms=0),
+            timeout=_TIMEOUT_REVIEW, agent="review", task_id=task_id)
         self._push(task_id, "review", rvmsg.status, rvmsg.cost_ms)
 
         # 闭环处置
         self._push(task_id, "action", "running")
-        with ThreadPoolExecutor(max_workers=1) as ex:
-            fa = ex.submit(self.action.run, AgentMessage(
+        amsg = self._run_with_timeout(
+            self.action.run,
+            AgentMessage(
                 task_id=task_id, agent="action", status="pending",
                 payload={
                     "risk_level": fmsg.payload.get("risk_level", "一般"),
@@ -177,8 +199,8 @@ class Orchestrator:
                     "training_tips": rout.payload.get("training_tips", []) if rout.status == "success" else [],
                     "needs_review": rvmsg.payload.get("needs_review", False),
                     "review_reasons": rvmsg.payload.get("review_reasons", []),
-                }, error=None, cost_ms=0))
-            amsg = self._safe(fa, _TIMEOUT_ACTION, "action", task_id=task_id)
+                }, error=None, cost_ms=0),
+            timeout=_TIMEOUT_ACTION, agent="action", task_id=task_id)
         self._push(task_id, "action", amsg.status, amsg.cost_ms)
 
         # 整体降级/失败判定：failed > degraded > success

@@ -12,13 +12,14 @@ from __future__ import annotations
 
 import json
 import os
-import threading
 import time
 import urllib.error
 import urllib.parse
 import urllib.request
+from concurrent.futures import ThreadPoolExecutor
 
 from core.config import ConfigLoader
+from core.paths import data_path
 from dao.db import DEFAULT_DB_PATH, get_conn, init_db
 from dao.models import AlarmEventDAO, NotificationLogDAO
 
@@ -27,6 +28,8 @@ CHANNEL_LABEL = {"wecom": "企业微信", "dingtalk": "钉钉", "generic": "通�
 
 class NotificationService:
     """构造各渠道 payload 并通过 webhook 推送告警。"""
+
+    _EXECUTOR = ThreadPoolExecutor(max_workers=2)
 
     def __init__(self, cfg: ConfigLoader | None = None,
                  db_path: str | None = None,
@@ -139,10 +142,11 @@ class NotificationService:
     def _capture(self, payload: dict) -> None:
         """演示模式：把 payload 追加到 data/mock_capture.jsonl，不发真实 HTTP。"""
         try:
-            os.makedirs("data", exist_ok=True)
+            capture_dir = data_path("")
+            os.makedirs(capture_dir, exist_ok=True)
             rec = {"ts": time.strftime("%Y-%m-%d %H:%M:%S"),
                    "channel": self.channel(), "payload": payload}
-            with open(os.path.join("data", "mock_capture.jsonl"),
+            with open(os.path.join(capture_dir, "mock_capture.jsonl"),
                       "a", encoding="utf-8") as f:
                 f.write(json.dumps(rec, ensure_ascii=False) + "\n")
         except Exception:  # noqa: BLE001 捕获失败不应中断推送主链路
@@ -282,9 +286,8 @@ class NotificationService:
         return {"ok": False, "status": "failed", "error": last_error}
 
     def push_alarm_async(self, alarm_id: str) -> None:
-        """异步推送（daemon 线程），调用方立即返回。"""
-        threading.Thread(target=self.push_alarm, args=(alarm_id,),
-                         daemon=True).start()
+        """异步推送（有界线程池），调用方立即返回。"""
+        NotificationService._EXECUTOR.submit(self.push_alarm, alarm_id)
 
     def test_push(self) -> dict:
         """管理端测试推送：构造一条示例告警并发到当前通道。"""

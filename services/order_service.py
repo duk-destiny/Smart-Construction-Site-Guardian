@@ -10,6 +10,7 @@ import json
 from core.evidence import save_rectification_photo
 from services.db import scoped
 from services.dispatch_service import DispatchService, RISK_DEADLINE_HOURS
+from services.permission_service import AuthorizationError
 from services.task_service import TaskService
 
 
@@ -48,7 +49,7 @@ def dispatch_order(task_id: str, actor_user_id: str | None,
                                      assignee_username=assignee,
                                      deadline_hours=float(hours),
                                      scene_id=scene_id)
-        except PermissionError as exc:  # 服务层自定义权限异常
+        except AuthorizationError as exc:  # 服务层自定义权限异常
             return False, f"权限不足：{exc}"
         except ValueError as exc:
             return False, str(exc)
@@ -65,7 +66,9 @@ def submit_override(task_id: str, user_id: str | None, new_level: str,
     with scoped() as conn:
         svc = TaskService(conn)
         ok = svc.manual_override(task_id, new_level, reason, user_id=user_id)
-        risk = svc.risks.get_by_task(task_id) if ok else None
+        if not ok:
+            return False, "未找到该任务风险记录"
+        risk = svc.risks.get_by_task(task_id)
         svc.save_feedback_sample(
             task_id=task_id,
             user_id=user_id,
@@ -84,7 +87,7 @@ def submit_override(task_id: str, user_id: str | None, new_level: str,
         AuditService(conn).append(user_id, "override",
                                   {"task_id": task_id, "level": new_level,
                                    "reason": reason})
-    return ok, ("改判已记录" if ok else "未找到该任务风险记录")
+    return True, "改判已记录"
 
 
 def save_detection_fix(task_id: str, user_id: str | None, risk_level: str,
@@ -148,7 +151,7 @@ def submit_rectification(order_id: str, user_id: str | None, note: str,
         svc = DispatchService(conn)
         try:
             svc.submit_rectification(order_id, user_id, note, paths)
-        except PermissionError as exc:
+        except AuthorizationError as exc:
             return False, f"权限不足：{exc}"
         except ValueError as exc:
             return False, str(exc)
@@ -190,7 +193,7 @@ def review_order(order_id: str, reviewer_user_id: str | None,
         svc = DispatchService(conn)
         try:
             svc.review_order(order_id, reviewer_user_id, approve, reason)
-        except PermissionError as exc:
+        except AuthorizationError as exc:
             return False, f"权限不足：{exc}"
         except ValueError as exc:
             return False, str(exc)

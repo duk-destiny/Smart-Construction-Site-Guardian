@@ -199,9 +199,10 @@ def render_realtime() -> None:
         if comp["level"] == "critical":
             st.toast("⚠️ 检测到高危违规，请立即处置！", icon="⚠️")
             st.markdown(_alarm_html(), unsafe_allow_html=True)
+            st.session_state["_alarm_last"] = now
         elif comp["level"] == "warning":
             st.toast("⚠️ 发现需关注项，请尽快整改。", icon="⚠️")
-        st.session_state["_alarm_last"] = now
+            st.session_state["_alarm_last"] = now
 
     if continuous:
         time.sleep(0.3)

@@ -12,7 +12,7 @@ from core.asr_engine import AsrEngine
 from dao.db import get_conn, init_db
 from dao.models import AuditDAO, UserDAO, WorkOrderDAO
 from services.task_service import TaskService
-from services.permission_service import PermissionError
+from services.permission_service import AuthorizationError
 
 
 @pytest.fixture
@@ -93,7 +93,7 @@ def test_unknown_key_rejected(env):
 def test_responsible_cannot_create_text_report(env):
     users = UserDAO(env["conn"])
     lisi = users.insert("lisi", "hashed", "responsible")
-    with pytest.raises(PermissionError):
+    with pytest.raises(AuthorizationError):
         env["svc"].create_text_hazard(lisi, "描述", "spark")
 
 

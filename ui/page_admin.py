@@ -15,7 +15,7 @@ from ui.page_helpers import safe_page
 from services import admin_console, order_service
 from services.dispatch_service import _now_str
 from services.notify_service import CHANNEL_LABEL, NotificationService
-from services.permission_service import PermissionError
+from services.permission_service import AuthorizationError
 from services.training_service import TrainingService
 from ui.correction_workbench import render_target_corrections
 
@@ -305,7 +305,7 @@ def render_admin() -> None:
                                     st.success(
                                         f"已生成工单 {_oid}，"
                                         "请到「工单/改判/导出」页派发")
-                                except (PermissionError, ValueError) as e:
+                                except (AuthorizationError, ValueError) as e:
                                     st.error(str(e))
             if len(_alarm_view) > 50:
                 st.caption(f"仅显示前 50 条，共 {_len_cn(_alarm_view)} 条，请用筛选缩小范围")
@@ -336,7 +336,7 @@ def render_admin() -> None:
                            use_container_width=True):
                 try:
                     ok, msg = order_service.review_order(_o["id"], uid, approve=True)
-                except (PermissionError, ValueError) as e:
+                except (AuthorizationError, ValueError) as e:
                     st.error(str(e))
                 else:
                     if ok:
@@ -350,7 +350,7 @@ def render_admin() -> None:
                     ok, msg = order_service.review_order(_o["id"], uid,
                                                          approve=False,
                                                          reason=_reject_reason)
-                except (PermissionError, ValueError) as e:
+                except (AuthorizationError, ValueError) as e:
                     st.error(str(e))
                 else:
                     if ok:
@@ -427,7 +427,7 @@ def render_admin() -> None:
         try:
             _res = admin_console.weekly_report(
                 _r_start.isoformat(), _r_end.isoformat(), uid)
-        except PermissionError as e:
+        except AuthorizationError as e:
             st.error(f"权限不足：{e}")
         else:
             st.session_state["_weekly_report"] = _res["data"]
@@ -480,7 +480,7 @@ def render_admin() -> None:
         for m in models:
             families.setdefault(m["name"], []).append(m)
         for name, rows in families.items():
-            rows = sorted(rows, key=lambda r: r["version"], reverse=True)
+            rows = sorted(rows, key=lambda r: int(r["version"].lstrip("v") or 0), reverse=True)
             ver_to_row = {r["version"]: r for r in rows}
             active = next((r for r in rows if r["active"]), None)
             active_ver = active["version"] if active else rows[0]["version"]
@@ -543,8 +543,10 @@ def render_admin() -> None:
                     st.success("已早停并导出当前最佳")
                 else:
                     st.error(f"导出失败: {msg2}")
-            else:
+            elif ok:
                 st.success(msg)
+            else:
+                st.error(f"早停失败: {msg}")
             st.rerun()
 
     if st.button("生成合并训练集", key="btn_prepare_train"):
@@ -645,7 +647,7 @@ def render_admin() -> None:
                 st.session_state.pop("_clear_armed", None)
                 st.success(f"已清空 {deleted} 条监测/任务记录")
                 st.rerun()
-            except PermissionError as exc:
+            except AuthorizationError as exc:
                 st.error(str(exc))
             except ValueError as exc:
                 st.error(str(exc))

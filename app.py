@@ -59,16 +59,6 @@ def _render_change_password() -> None:
 
 
 def main() -> None:
-    # 首次启动自举：建库 + 种子默认账号，保证 clone 后开箱即登录
-    # v0.8：失败不再静默——记 warning 日志，避免后续登录页报错无从排查
-    try:
-        from core.bootstrap import ensure_initialized, ensure_models
-        ensure_initialized()
-        ensure_models()
-    except Exception as exc:  # noqa: BLE001 自举失败不阻断进程，但必须留痕
-        from core.logging import get_logger
-        get_logger(__name__).warning(f"启动自举失败（建库/种子账号）: {exc}")
-
     st.session_state.setdefault("role", None)
 
     if not st.session_state["role"]:
@@ -78,13 +68,16 @@ def main() -> None:
     role = st.session_state["role"]
     username = st.session_state.get("username", "未知用户")
 
-    # —— 启动期一次性工作：BGE 预热 / LLM 预热 / RTSP 监控，只在登录后首次 rerun 跑一次，
-    #    之后切页重跑 app.py 时跳过，省掉每次切页重复构造 LlmEngine + 起线程 + 读 config 的开销。
-    # —— 异步预热：登录后立刻渲染页面，后台单线程按优先级预热，不阻塞首屏 ——
-    # 优先级：monitor（RTSP 轮询，秒级）→ LLM warmup（ollama 常驻）→ BGE（~6s，RAG 要用）
-    # 预热完成前 RAG 自动降级跳过（rag_engine 已有 _MODEL is None 兜底）
+    # 首次启动自举 + 异步预热：建库/种子 + BGE/LLM/YOLO 预热只做一次
     if not st.session_state.get("_boot_done"):
         st.session_state["_boot_done"] = True
+        try:
+            from core.bootstrap import ensure_initialized, ensure_models
+            ensure_initialized()
+            ensure_models()
+        except Exception as exc:  # noqa: BLE001
+            from core.logging import get_logger
+            get_logger(__name__).warning(f"启动自举失败（建库/种子账号）: {exc}")
 
         def _background_prewarm():
             # BGE/torch 已隔离到独立子进程（core.bge_worker），主进程零 torch，
@@ -163,7 +156,8 @@ def main() -> None:
                           "_rt_frames", "_rt_violations", "_realtime_session",
                           "_ran_async", "_sync_ran", "t2_desc", "t2_desc_raw",
                           "t2_hazard", "t2_area", "t2_scene", "pwd_warning",
-                          "_pending_pwd_user"):
+                          "_pending_pwd_user", "_alarm_last", "_rtsp_results",
+                          "alarm_cooldown", "rtsp_sources", "_boot_done"):
                     st.session_state.pop(k, None)
                 st.rerun()
             with c3.popover("🔑 修改密码", use_container_width=True):

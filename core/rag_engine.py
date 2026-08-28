@@ -15,6 +15,7 @@ import subprocess
 import sys
 import atexit
 import threading
+import queue
 from pathlib import Path
 
 from core.pdf_parser import PdfParser
@@ -65,33 +66,35 @@ class _BgeProxy:
         )
         self._lock = threading.Lock()
         self._seq = 0
+        self._queue: queue.Queue[dict | None] = queue.Queue()
+        self._reader_thread = threading.Thread(target=self._reader_loop, daemon=True)
+        self._reader_thread.start()
         atexit.register(self._cleanup)
         ready = self._recv(timeout=60)
         if not ready or not ready.get("ok"):
             self._cleanup()
             raise RuntimeError(f"BGE worker 启动失败: {ready}")
 
+    def _reader_loop(self) -> None:
+        """持久读取线程：逐行读 stdout 并放入队列，避免多线程竞争。"""
+        try:
+            for line in self._proc.stdout:
+                try:
+                    msg = json.loads(line)
+                except Exception:
+                    continue
+                self._queue.put(msg)
+        except Exception:
+            pass
+        finally:
+            self._queue.put(None)
+
     def _recv(self, timeout: float = 30) -> dict | None:
-        """读一行 JSON，超时返回 None（Windows 兼容：线程中转，select 不支持 pipe）。"""
-        result: list[dict | None] = [None]
-        done = threading.Event()
-
-        def _reader():
-            try:
-                line = self._proc.stdout.readline()
-                if line:
-                    result[0] = json.loads(line)
-            except Exception:
-                pass
-            finally:
-                done.set()
-
-        t = threading.Thread(target=_reader, daemon=True)
-        t.start()
-        done.wait(timeout=timeout)
-        if not done.is_set():
+        """从队列取一条 JSON，超时返回 None。"""
+        try:
+            return self._queue.get(timeout=timeout)
+        except queue.Empty:
             return None
-        return result[0]
 
     def encode(self, text, normalize_embeddings: bool = True):
         import numpy as np
@@ -101,13 +104,16 @@ class _BgeProxy:
             if self._proc.poll() is not None:
                 raise RuntimeError("BGE worker 已退出")
             self._seq += 1
-            req = {"id": self._seq, "action": "encode",
+            req_id = self._seq
+            req = {"id": req_id, "action": "encode",
                    "texts": texts, "normalize": normalize_embeddings}
             self._proc.stdin.write(json.dumps(req) + "\n")
             self._proc.stdin.flush()
             resp = self._recv(timeout=30)
         if not resp or not resp.get("ok"):
             raise RuntimeError(f"BGE encode 失败: {resp}")
+        if resp.get("id") != req_id:
+            raise RuntimeError(f"BGE encode 响应 ID 不匹配: 期望 {req_id}, 实际 {resp.get('id')}")
         arr = np.array(resp["embeddings"], dtype=np.float32)
         return arr[0] if single else arr
 
@@ -209,10 +215,10 @@ class RagEngine:
         """从 PDF 列表构建知识库，返回入库条款数。
 
         幂等：重复 build 会清空旧数据重新写入。
+        注意：build 会重建集合，并发查询可能短暂失败（已加锁保护）。
         """
         model = self._load_model()
-        col = self._get_collection()
-        if model is None or col is None:
+        if model is None:
             return 0
 
         # 解析所有 PDF
@@ -226,16 +232,18 @@ class RagEngine:
         # （旧实现 col.client 抛 AttributeError 被吞掉，导致重复 build 变成追加而非覆盖）
         import chromadb
         client = chromadb.PersistentClient(path=self._chroma_dir)
-        try:
-            client.delete_collection(self._collection_name)
-        except Exception:
-            pass
-        col = client.get_or_create_collection(
-            name=self._collection_name,
-            metadata={"hnsw:space": "cosine"},
-        )
-        # 同步更新进程级缓存，避免 query 复用已删除的旧集合
-        _COLLECTIONS[f"{self._chroma_dir}::{self._collection_name}"] = col
+        key = f"{self._chroma_dir}::{self._collection_name}"
+        with _COLLECTION_LOCK:
+            try:
+                client.delete_collection(self._collection_name)
+            except Exception:
+                pass
+            col = client.get_or_create_collection(
+                name=self._collection_name,
+                metadata={"hnsw:space": "cosine"},
+            )
+            # 同步更新进程级缓存，避免 query 复用已删除的旧集合
+            _COLLECTIONS[key] = col
 
         # 批量向量化
         ids: list[str] = []
@@ -282,9 +290,9 @@ class RagEngine:
         if not all_clauses:
             return 0
 
-        # 生成唯一 ID：用现有条目数做偏移，避免与已有 clause_N 冲突
-        existing = col.count()
-        ids = []
+        # UUID 唯一 ID：避免并发 build 用 count() 做偏移导致 ID 冲突
+        import uuid
+        ids: list[str] = []
         embeddings = []
         metadatas = []
         documents = []
@@ -301,7 +309,7 @@ class RagEngine:
             import numpy as _np
             embs = _np.asarray(model.encode(texts, normalize_embeddings=True)).tolist()
         for i, (no, text) in enumerate(expanded):
-            ids.append(f"clause_{existing + i}")
+            ids.append(f"clause_{uuid.uuid4().hex[:12]}")
             embeddings.append(embs[i])
             metadatas.append({"clause_no": no})
             documents.append(text)

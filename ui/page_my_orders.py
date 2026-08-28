@@ -11,7 +11,7 @@ import streamlit as st
 from ui.page_helpers import safe_page
 
 from services import order_service
-from services.permission_service import PermissionError as ServicePermissionError
+from services.permission_service import AuthorizationError as ServicePermissionError
 
 _STATUS_TAG = {
     "open": "🔨 待整改",

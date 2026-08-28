@@ -33,7 +33,19 @@ async def realtime_socket(websocket: WebSocket, token: str = Query(""),
                           source: int = Query(0, ge=0, le=63)):
     payload = try_decode(token)
     if payload is None:
+        await websocket.accept()
         await websocket.close(code=4401)
+        return
+    # 角色 + 停用复核：与 HTTP 端点 /realtime/status 同口径
+    from services import session_entry
+    brief = session_entry.user_brief(payload.get("sub"))
+    if brief is None or brief.get("disabled"):
+        await websocket.accept()
+        await websocket.close(code=4401)
+        return
+    if brief.get("role") not in ("admin", "safety"):
+        await websocket.accept()
+        await websocket.close(code=4403)
         return
     hub = get_hub()
     await websocket.accept()
