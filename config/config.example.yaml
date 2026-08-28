@@ -162,3 +162,16 @@ enhance:
   #   - name: local       # type 省略时按名推断；model 空则用 llm.model
   #     type: local
   #     model: qwen3:8b
+
+# ================= API 服务（Phase 2 前后端分离）=================
+# FastAPI 接口层（api/ 包，uvicorn 启动）；React 前端构建产物由其静态挂载。
+api:
+  # JWT 签名密钥（HS256）：支持 ${ENV_VAR} 展开，务必经环境变量注入
+  # （如 API_JWT_SECRET）；留空则进程内随机生成——重启后所有登录态失效，
+  # 仅适合本机开发。生成方式：python -c "import secrets;print(secrets.token_urlsafe(48))"
+  jwt_secret: ${API_JWT_SECRET:-}
+  # 登录态有效期（小时），默认 12h
+  token_expire_hours: 12
+  # 仅开发模式放行 Vite dev server 的 CORS（http://localhost:5173）；生产保持 false
+  # 也可用环境变量 API_DEV_CORS=1 临时开启
+  dev_cors: false

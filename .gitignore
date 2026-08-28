@@ -16,6 +16,7 @@ data/app.log
 data/runs_combined/
 data/train/
 data/pytest_tmp/
+data/rectifications/
 .cache/
 runs/
 plugins/

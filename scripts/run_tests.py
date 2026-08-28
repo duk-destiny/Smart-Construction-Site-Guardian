@@ -16,14 +16,17 @@ import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
-TMP = ROOT / "data" / "pytest_tmp"
-TMP.mkdir(parents=True, exist_ok=True)
 
 env = os.environ.copy()
-# sandbox/Windows 下默认 temp 可能不可写，统一指向仓库内
-env["TMP"] = str(TMP)
-env["TEMP"] = str(TMP)
-env["TMPDIR"] = str(TMP)
+# sandbox/Windows 下默认 temp 可能不可写，指向仓库内——但仅当仓库路径为纯 ASCII：
+# onnx/onnxruntime 等原生库的临时文件层在非 ASCII TMPDIR 下会静默失败
+# （如仓库路径含中文时 test_quantize 必挂），此时保留系统 temp（用户级必可写）
+if str(ROOT).isascii():
+    TMP = ROOT / "data" / "pytest_tmp"
+    TMP.mkdir(parents=True, exist_ok=True)
+    env["TMP"] = str(TMP)
+    env["TEMP"] = str(TMP)
+    env["TMPDIR"] = str(TMP)
 env["PYTHONPATH"] = str(ROOT) + os.pathsep + env.get("PYTHONPATH", "")
 # 限制原生库 OpenMP/BLAS 线程并发，降低多原生库同进程时的线程争用（hygiene）
 env.setdefault("OMP_NUM_THREADS", "1")

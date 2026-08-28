@@ -45,13 +45,23 @@ def history_orders() -> list[dict]:
 
 
 def task_detection_detail(task_id: str) -> dict:
-    """单任务检测/合规明细（历史列表「查看检测数据」）。"""
+    """单任务检测/合规明细（历史列表「查看检测数据」+ API 任务详情）。
+
+    Phase 2 起附带 task/risk 概览行（向后兼容的增量键，UI 原调用不受影响）；
+    任务不存在时 task 为 None，由调用方判空。
+    """
     with scoped() as conn:
+        task = conn.execute(
+            "SELECT * FROM tasks WHERE id=?", (task_id,)).fetchone()
+        risk = conn.execute(
+            "SELECT * FROM risks WHERE task_id=?", (task_id,)).fetchone()
         detections = conn.execute(
             "SELECT * FROM detections WHERE task_id=?", (task_id,)).fetchall()
         comps = conn.execute(
             "SELECT * FROM compliances WHERE task_id=?", (task_id,)).fetchall()
     return {
+        "task": dict(task) if task else None,
+        "risk": dict(risk) if risk else None,
         "detections": [dict(d) for d in detections],
         "compliances": [dict(c) for c in comps],
     }

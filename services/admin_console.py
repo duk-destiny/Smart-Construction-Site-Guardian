@@ -43,6 +43,13 @@ def import_pdf(user_id: str | None, uploaded) -> dict:
     return res
 
 
+def kb_docs() -> list[dict]:
+    """知识库已导入文档列表（API 用）。"""
+    from services.kb_admin import KbAdmin
+    with scoped() as conn:
+        return [dict(r) for r in KbAdmin(conn).list_docs()]
+
+
 # ---------- 台账 / 审计 / 反馈 ----------
 
 def hazard_summary_rows(limit: int = 100) -> list[dict]:
@@ -118,6 +125,20 @@ def update_alarm_event(alarm_id: str, status: str, user_id: str | None) -> None:
     from services.task_service import TaskService
     with scoped() as conn:
         TaskService(conn).update_alarm_event(alarm_id, status, user_id=user_id)
+
+
+def alarm_detail(alarm_id: str) -> dict | None:
+    """单条告警详情（API 用）；不存在返回 None。"""
+    from services.task_service import TaskService
+    from core.paths import resolve
+    with scoped() as conn:
+        row = TaskService(conn).alarms.get_by_id(alarm_id)
+    if row is None:
+        return None
+    d = dict(row)
+    if d.get("image_path"):
+        d["image_abs"] = resolve(d["image_path"])
+    return d
 
 
 def convert_alarm_to_order(alarm_id: str, user_id: str | None) -> str:
@@ -268,6 +289,23 @@ def eval_summary_rows() -> list[dict]:
 
 def notify_demo_mode_default() -> bool:
     return bool((shared_config().get("notify") or {}).get("demo_mode", False))
+
+
+def notify_status() -> dict:
+    """推送通道状态（不回显 webhook URL，防密钥经 API 泄露）。"""
+    conf = shared_config().get("notify") or {}
+    return {
+        "enabled": bool(conf.get("enabled", False)),
+        "demo_mode": bool(conf.get("demo_mode", False)),
+        "channel": conf.get("channel", "generic"),
+        "webhook_configured": bool(str(conf.get("webhook_url") or "").strip()),
+    }
+
+
+def notify_test_push() -> dict:
+    """管理端测试推送（demo_mode 时捕获到 mock_capture.jsonl）。"""
+    from services.notify_service import NotificationService
+    return NotificationService().test_push()
 
 
 def mock_capture_tail(n: int = 10) -> list[dict]:

@@ -16,8 +16,14 @@ from services.task_service import TaskService
 
 
 @pytest.fixture
-def env(monkeypatch):
-    conn = get_conn(":memory:")
+def env(monkeypatch, tmp_path):
+    # Phase 2 起 worker 内自开自关连接（修复跨线程闭库写），
+    # 库必须落盘到临时文件，worker 的 scoped() 与测试断言连接指向同一物理库
+    import dao.db as dao_db
+
+    db_file = str(tmp_path / "async_run.db")
+    monkeypatch.setattr(dao_db, "DEFAULT_DB_PATH", db_file)
+    conn = get_conn(db_file)
     init_db(conn)
     users = UserDAO(conn)
     admin = users.insert("admin", "hashed", "admin")

@@ -61,6 +61,60 @@
 - 全量 **248 passed**（v0.8 237 + Phase0/1 回归 11）；ruff 全绿；
 - `test_ui_flows` 三处按新架构重写（模型切换断言 DB 翻转且 config 不变）。
 
+### 重构：前后端分离 · Phase 2（FastAPI 接口层）
+
+> 依据 `docs/前后端分离重构提示词.md` Phase 2 执行（同日接着 Phase 0/1 交付）。
+
+**接口层**
+
+- 新增 `api/` 包（与 ui/ 平级，只 import services；白名单同 Phase 0：
+  `core.config.shared_config` 只读 + `core.logging`）：
+  - `api/main.py` 应用工厂：`frontend/dist` 存在才挂静态（单进程单端口预留）、
+    全局异常映射（服务层自定义 PermissionError→403 / ValueError→400 /
+    ConfigError→503 / 其余 500 留痕）、`/healthz`、lifespan 自举
+    （`session_entry.ensure_ready()`，api 不直触 core/bootstrap）、
+    启动预热与 app.py 同序（`API_PREWARM=0` 可关）；
+  - `api/deps.py`：JWT（HS256，默认 12h；secret 取 `API_JWT_SECRET` 环境变量
+    > `config.api.jwt_secret`，皆空回退进程内随机值并 warning）+ **每请求
+    DB 复核**（`session_entry.user_brief`：停用/删除即时失效、角色取实时值）+
+    `require_roles()` 角色门；
+  - 7 个 router（auth/tasks/alarms/orders/reports/admin/ws）43 个端点，
+    router 零业务逻辑零 SQL，全部复用既有 services 门面；
+    `api/uploads.py` 把 FastAPI UploadFile 适配成服务层依赖的
+    UploadedFile 鸭子类型（name + getvalue()），业务代码零改动；
+  - `/api/ws/realtime` 先落 token 鉴权（4401 拒绝）+ 心跳保活，帧广播 Phase 4 接入；
+  - CORS 默认关，仅开发模式（`API_DEV_CORS=1` / `config.api.dev_cors`）
+    放行 Vite dev server（localhost:5173）。
+
+**服务层小扩展（供 API 复用，UI 不受影响）**：`session_entry.user_brief /
+ensure_ready`；`admin_console.alarm_detail / kb_docs / notify_status /
+notify_test_push`；`order_service.export_order_excel`；
+`export_service.load_export_file`（下载防穿越门面：basename 归一 + 必须落在
+data/exports 内）；`lookup_service.task_detection_detail` 增量附带 task/risk 概览行。
+
+**顺带修复的既有缺陷（同批提交）**
+
+- **`TaskService.start_async_run` 跨线程闭库写**（与 Phase 1 修过的
+  `_attach_clause_async` 同型、当时漏网）：worker 捕获调用方 TaskService，
+  `scoped()` 模式下请求返回即闭库，后台 `save_result` 必然
+  ProgrammingError——异步研判链路在 scoped 化之后实际不可用；改为 worker
+  内自开自关连接（`test_async_run` 夹具同步改临时文件库）；
+- `export_service` / `report_service` 导出路径 cwd 相对（Phase 1 路径锚点
+  统一漏网）→ 统一 `core.paths.data_path("exports")`；
+- `scripts/__init__.py` 免疫用户 site-packages 同名 `scripts` 常规包遮蔽
+  （常规包恒优先于 namespace 目录，致 tests 无法 import scripts.*）；
+- `run_tests.py` 临时目录重定向仅在仓库路径为纯 ASCII 时生效——
+  onnx/onnxruntime 原生临时文件层在非 ASCII TMPDIR 下静默失败
+  （仓库路径含中文时 test_quantize 必挂）。
+
+**测试**
+
+- 新增 `tests/test_api.py` 27 例（httpx AsyncClient 直连 ASGI）：全端点
+  正常路径 + 权限拒绝（safety 访问管理端 403 / responsible 上报 403 /
+  无·过期·伪造 token 401 / 停用后 token 即时失效）+ 上传负向
+  （魔数不符 / 扩展名与内容不一致 / 超限，注入 0MB 配置）+ 下载防穿越 +
+  WS 鉴权 + CORS 开关；临时库逐例隔离，`API_PREWARM=0` 关预热。
+
 ## [v0.8] — 2026-08-28
 
 ### 新增：安全收口 + 账号治理 + 运维闭环（三阶段一次交付）

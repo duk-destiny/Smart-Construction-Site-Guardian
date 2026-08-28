@@ -215,13 +215,15 @@ class WeeklyReportService:
     # ---------- 编排 ----------
     def generate(self, start: str, end: str,
                  user_id: str | None = None,
-                 out_dir: str = os.path.join("data", "exports")) -> dict:
+                 out_dir: str | None = None) -> dict:
         """校验权限 → 聚合 → 渲染 → 审计，返回 {ok, data:{file_path, stats}}。"""
+        from core.paths import data_path
+
         if user_id:
             self.permissions.require(user_id, "export")
         stats = self.gather(start, end)
         fname = f"风险周报_{end}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.pdf"
-        fpath = os.path.join(out_dir, fname)
+        fpath = os.path.join(out_dir or data_path("exports"), fname)
         self.render_pdf(stats, fpath)
         self.audit.insert(user_id, "report_generate", json.dumps({
             "file": fpath, "start": start, "end": end}, ensure_ascii=False))

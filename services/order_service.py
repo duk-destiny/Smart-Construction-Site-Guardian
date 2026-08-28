@@ -119,6 +119,15 @@ def export_excel(task_id: str, user_id: str | None) -> tuple[bool, str]:
     return False, "导出失败"
 
 
+def export_order_excel(order_id: str, user_id: str | None) -> tuple[bool, str]:
+    """按工单（而非任务）导出台账 Excel：order_id → task_id 转换。"""
+    with scoped() as conn:
+        wo = DispatchService(conn).orders.get(order_id)
+    if wo is None:
+        return False, "工单不存在"
+    return export_excel(wo["task_id"], user_id)
+
+
 # ---------- 责任人（responsible）侧 ----------
 
 def my_orders(user_id: str) -> list[dict]:

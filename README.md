@@ -185,8 +185,11 @@ pip install -r requirements.txt
 # 3.（可选）本地 Ollama 拉取 qwen3:8b，用于工单文案润色；不装则自动降级为模板
 ollama pull qwen3:8b
 
-# 4. 启动（默认 0.0.0.0:8501；首次启动自动建库并种子默认账号）
+# 4a. 启动 Streamlit 经典版（默认 0.0.0.0:8501；首次启动自动建库并种子默认账号）
 streamlit run app.py --server.address 0.0.0.0 --server.port 8501
+
+# 4b. 启动 FastAPI 接口层（Phase 2 前后端分离；Swagger 文档 /docs，健康检查 /healthz）
+python -m uvicorn api.main:app --host 0.0.0.0 --port 8000
 
 # 5. 全量单元/集成测试
 python scripts/run_tests.py
@@ -211,6 +214,23 @@ v0.2 升级的老演示库也会自动补齐责任人而不动既有密码）：
 `responsible` 责任人账号仅见 **我的整改单 🧰**。
 
 实时摄像头页面使用 `st.camera_input` 零依赖轮询方案：点击捕获帧即检测并展示，开启「连续监控」后自动刷新等待下一帧；**声音警报仅在实时监测态、且不合规时触发**。页面同时支持多路 RTSP / 本地视频源按帧抓取。
+
+## API 服务（Phase 2 前后端分离）
+
+`api/` 包提供与 Streamlit 平行的 HTTP 接口层（复用同一 services 层，零业务逻辑复制），
+为移动端 / React 前端（Phase 3）/ 第三方集成铺路：
+
+- **启动**：`python -m uvicorn api.main:app --host 0.0.0.0 --port 8000`
+- **认证**：`POST /api/auth/login` 取 JWT（HS256，默认 12h），后续请求带
+  `Authorization: Bearer <token>`；密钥经 `API_JWT_SECRET` 环境变量注入（见 config.example.yaml `api:` 段）
+- **资源路由**：`/api/auth`（登录/改密/me）、`/api/tasks`（影像/文字上报、进度/结果轮询、
+  证据链、改判、对话式只读查询）、`/api/alarms`（列表/误报标记/转工单）、
+  `/api/orders`（派发/整改/验收/逾期/导出）、`/api/reports`（周报生成与下载）、
+  `/api/admin`（用户/模型/知识库/推送/自检/审计，全部 admin-only）、`/api/ws/realtime`（Phase 4 帧广播占位）
+- **权限**：角色门（admin/safety/responsible）+ 服务层动作权限双层校验；
+  账号停用后 token 即时失效（每请求 DB 复核）
+- **前端托管**：`frontend/dist` 存在时自动静态挂载（Phase 3 产物，单进程单端口部署）；
+  开发模式可用 `API_DEV_CORS=1` 放行 Vite dev server（localhost:5173）
 
 ## Docker / CI
 

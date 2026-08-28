@@ -89,25 +89,32 @@ class TaskService:
         if not self._is_owner(task_id, user_id or ""):
             return False
         TaskService._async_running[task_id] = True
-        svc_ref = self
 
         def _worker() -> None:
             try:
                 from agents.orchestrator import Orchestrator
                 cls = TaskService._ORCH_FACTORY or Orchestrator
-                orch = cls(progress_cb=svc_ref.update_progress,
-                                    scene_id=scene_id,
-                                    work_order_dao=svc_ref.work_orders)
-                result = orch.execute(task_id, images=images,
-                                      permit_info=permit_info)
-                svc_ref.save_result(task_id, result.payload)
-                TaskService._async_results[task_id] = result.to_dict()
-                wo = result.payload.get("work_order") or {}
-                if getattr(orch, "action", None) is not None:
-                    orch.action.polish(task_id, wo.get("hazard_desc", ""),
-                                       wo.get("clause", ""),
-                                       wo.get("requirement", ""),
-                                       wo.get("deadline", ""))
+                # Phase 2 修复（与 Phase 1 _attach_clause_async 同型）：
+                # worker 与请求生命周期解耦——原实现捕获调用方 TaskService
+                # 实例（scoped 连接在请求返回时即关闭），save_result/润色桥
+                # 写库必然 ProgrammingError；改为 worker 内自开自关连接。
+                # update_progress 写类级内存字典，无连接依赖，仍复用 self。
+                from services.db import scoped
+                with scoped() as conn:
+                    svc = TaskService(conn)
+                    orch = cls(progress_cb=self.update_progress,
+                               scene_id=scene_id,
+                               work_order_dao=svc.work_orders)
+                    result = orch.execute(task_id, images=images,
+                                          permit_info=permit_info)
+                    svc.save_result(task_id, result.payload)
+                    TaskService._async_results[task_id] = result.to_dict()
+                    wo = result.payload.get("work_order") or {}
+                    if getattr(orch, "action", None) is not None:
+                        orch.action.polish(task_id, wo.get("hazard_desc", ""),
+                                           wo.get("clause", ""),
+                                           wo.get("requirement", ""),
+                                           wo.get("deadline", ""))
             except Exception as exc:  # noqa: BLE001 失败也要落可读结果
                 log.warning(f"后台研判任务 {task_id} 失败: {type(exc).__name__}: {exc}")
                 TaskService._async_results[task_id] = {
