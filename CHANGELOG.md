@@ -159,6 +159,53 @@ data/exports 内）；`lookup_service.task_detection_detail` 增量附带 task/r
   → chromium 走查 登录→强制改密→文字上报→查结果→拍照提交整改→验收销项
   全链路 PASS。
 
+### 重构：前后端分离重构 · Phase 4（实时链路重做，四阶段收官）
+
+**后端唯一推理循环（api/realtime_hub.py）**
+
+- 常驻 daemon 线程汇聚多路帧源（realtime.sources → 回退 monitor.sources →
+  demo:// 合成源兜底），每帧 检测→误报过滤→per-source 跟踪→三级合规
+  （纯规则轻链路铁律不变），critical 当帧出警（建告警→证据→异步推送→
+  条款挂载，复用 history_service 既有链路）+ (源,类别) 冷却去重 + 帧级历史持久化；
+- WebSocket `/api/ws/realtime` 推 JPEG（框已标注）+ 违规框摘要 + 告警事件 JSON：
+  广播模型为「每源最新帧 + seq 递增」，各 WS 连接独立轮询取新帧——
+  **N 个观看者共享同一路推理，推理成本 O(1)**；无人观看降频保活
+  （idle_fps 默认 1，有观看者恢复 active_fps 默认 2，可配）；
+- 与 monitor_service 收敛：Hub 启动置接管标志（services.realtime_entry），
+  ensure_monitor_started 检测到即跳过后台轮询——同进程绝无双路推理；
+  Streamlit 进程不受影响仍走旧链路（回退可用）；
+- 新增 REST `GET /api/realtime/status`（源清单凭据打码/观看者/计数/当前 fps）。
+
+**core/realtime_engine 两处结构性修复**
+
+- **per-source tracker**：原实现全部源共享一个 IoUTracker——跨摄像头目标
+  ID 互相串扰；改按 source_key 惰性建 tracker（双检锁），并解锁多源并行
+  analyze 能力（当前 Hub 串行调度，CPU 预算内最稳）；
+- **reload build-then-swap**：原实现先清空再逐个 append，检测线程会读到
+  半空引擎列表；改局部列表构建成功后原子替换，失败抛出旧引擎组原封不动；
+  配合引擎快照读取，admin 切换模型过程中检测不崩（并发测试覆盖）。
+
+**services/task_service 类级可变状态加锁（TOCTOU）**
+
+- start_async_run 的「查再置」存在竞态（两请求同过检查 → 同任务双线程
+  研判）；新增 _STATE_LOCK 统一守护 _progress/_task_owners/_async_running/
+  _async_results 的全部跨线程读写。
+
+**前端实时页（React）**
+
+- WebSocket 帧广播消费：canvas 渲染标注 JPEG（红/黄/绿边框随合规等级）、
+  源选择器、连接状态、帧序/耗时统计；告警当帧弹窗（notification）+
+  800Hz 警报音（与 Streamlit 同源的 base64 WAV 资产，客户端 5s 冷却）；
+  Hub 未启用自动降级为告警只读列表（Phase 3 行为保留）。
+
+**测试**
+
+- 新增 `tests/test_realtime_hub.py` 10 例：Hub 循环发布/告警落库、open 告警
+  去重、观看者降频、多源隔离、接管标志收敛、per-source tracker 隔离、
+  reload 换代与并发 detect 不崩、TOCTOU 双线程仅一方启动；
+- `test_api.py` WS 用例升级为真实广播断言（hello→frame→ping/pong→
+  观看者回落）+ realtime/status 端点两态；API 34 例 + 全量回归绿。
+
 ## [v0.8] — 2026-08-28
 
 ### 新增：安全收口 + 账号治理 + 运维闭环（三阶段一次交付）

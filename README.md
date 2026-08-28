@@ -236,14 +236,19 @@ v0.2 升级的老演示库也会自动补齐责任人而不动既有密码）：
 - **启动**：`python -m uvicorn api.main:app --host 0.0.0.0 --port 8000`
 - **认证**：`POST /api/auth/login` 取 JWT（HS256，默认 12h），后续请求带
   `Authorization: Bearer <token>`；密钥经 `API_JWT_SECRET` 环境变量注入（见 config.example.yaml `api:` 段）
+- **实时监测（Phase 4）**：`config.realtime.enabled=true` 后由 API 进程常驻
+  Hub 承担视频源推理（后端单推理循环），实时页经 `/api/ws/realtime` 观看——
+  N 个浏览器共享同一路推理，无人观看自动降频保活；与 `monitor.*` 轮询互斥
+  （Hub 优先），Streamlit 进程不受影响
 - **资源路由**：`/api/auth`（登录/改密/me）、`/api/tasks`（影像/文字上报、进度/结果轮询、
   证据链、改判、对话式只读查询）、`/api/alarms`（列表/误报标记/转工单）、
   `/api/orders`（派发/整改/验收/逾期/导出）、`/api/reports`（周报生成与下载）、
-  `/api/admin`（用户/模型/知识库/推送/自检/审计，全部 admin-only）、`/api/ws/realtime`（Phase 4 帧广播占位）
+  `/api/admin`（用户/模型/知识库/推送/自检/审计，全部 admin-only）、
+  `/api/realtime/status` + `/api/ws/realtime`（帧广播）
 - **权限**：角色门（admin/safety/responsible）+ 服务层动作权限双层校验；
   账号停用后 token 即时失效（每请求 DB 复核）
-- **前端托管**：`frontend/dist` 存在时自动静态挂载（Phase 3 产物，单进程单端口部署）；
-  开发模式可用 `API_DEV_CORS=1` 放行 Vite dev server（localhost:5173）
+- **前端托管**：`frontend/dist` 已随仓库提供（改动前端后 `cd frontend && npm run build` 重建），
+  单进程单端口部署；开发模式可用 `API_DEV_CORS=1` 放行 Vite dev server（localhost:5173）
 
 ## Docker / CI
 

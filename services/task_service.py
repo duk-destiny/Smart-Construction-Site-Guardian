@@ -27,6 +27,10 @@ class TaskService:
     _progress: dict[str, dict] = {}
     # 任务属主登记（v0.8）：task_id -> user_id，进度/结果轮询按属主隔离
     _task_owners: dict[str, str] = {}
+    # Phase 4：类级可变状态统一加锁——start_async_run 的"查再置"此前存在
+    # TOCTOU（两请求同时通过检查 → 同任务双线程研判）；所有跨线程读写
+    # （进度/属主/运行标志/结果）一律持锁。
+    _STATE_LOCK = threading.Lock()
     # 测试注入口：后台异步研判的 Orchestrator 类（None=真实实现）
     _ORCH_FACTORY = None
 
@@ -66,8 +70,9 @@ class TaskService:
         self.permissions.require(user_id, "upload")
         tid = self.tasks.insert(user_id, json.dumps(permit_info, ensure_ascii=False),
                                 "running", source=source)
-        TaskService._progress[tid] = {}
-        TaskService._task_owners[tid] = user_id or ""
+        with TaskService._STATE_LOCK:
+            TaskService._progress[tid] = {}
+            TaskService._task_owners[tid] = user_id or ""
         return tid
 
     # ---------- v0.6 上传链路异步化 ----------
@@ -83,12 +88,14 @@ class TaskService:
         页面 fragment 轮询到后展示。同一任务进行中重复启动返回 False。
         """
         self.permissions.require(user_id, "upload")
-        if TaskService._async_running.get(task_id):
-            return False
-        # v0.8：属主校验——非本任务属主不可发起后台研判（防跨会话操纵他人任务）
-        if not self._is_owner(task_id, user_id or ""):
-            return False
-        TaskService._async_running[task_id] = True
+        # 查+置原子化（Phase 4 TOCTOU 修复）：进行中重复启动返回 False
+        with TaskService._STATE_LOCK:
+            if TaskService._async_running.get(task_id):
+                return False
+            # v0.8：属主校验——非本任务属主不可发起后台研判（防跨会话操纵他人任务）
+            if not self._is_owner(task_id, user_id or ""):
+                return False
+            TaskService._async_running[task_id] = True
 
         def _worker() -> None:
             try:
@@ -134,7 +141,8 @@ class TaskService:
         """
         if user_id and not self._is_owner(task_id, user_id):
             return None
-        return TaskService._async_results.pop(task_id, None)
+        with TaskService._STATE_LOCK:
+            return TaskService._async_results.pop(task_id, None)
 
     def create_text_hazard(self, user_id: str | None, description: str,
                            hazard_key: str, scene_id: str = "hot_work",
@@ -194,7 +202,8 @@ class TaskService:
         with self.conn:
             for table in self._CLEARABLE_TABLES:
                 counts[table] = self.conn.execute(f"DELETE FROM {table}").rowcount
-            TaskService._progress.clear()
+            with TaskService._STATE_LOCK:
+                TaskService._progress.clear()
             self.conn.execute(
                 "INSERT INTO audit_logs(user_id, action, detail_json, created_at) "
                 "VALUES(?,?,?,datetime('now'))",
@@ -203,8 +212,9 @@ class TaskService:
 
     def update_progress(self, task_id: str, agent: str, status: str, cost_ms: int = 0) -> None:
         """供 Orchestrator 回调，更新某 Agent 的进度。"""
-        prog = TaskService._progress.setdefault(task_id, {})
-        prog[agent] = {"status": status, "cost_ms": cost_ms}
+        with TaskService._STATE_LOCK:
+            prog = TaskService._progress.setdefault(task_id, {})
+            prog[agent] = {"status": status, "cost_ms": cost_ms}
 
     def get_progress(self, task_id: str, user_id: str | None = None) -> dict:
         """返回 {agent: {status, cost_ms}}。
@@ -214,7 +224,8 @@ class TaskService:
         """
         if user_id and not self._is_owner(task_id, user_id):
             return {}
-        return dict(TaskService._progress.get(task_id, {}))
+        with TaskService._STATE_LOCK:
+            return dict(TaskService._progress.get(task_id, {}))
 
     @staticmethod
     def _is_owner(task_id: str, user_id: str) -> bool:

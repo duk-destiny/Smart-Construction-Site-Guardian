@@ -81,8 +81,24 @@ async def _lifespan(_: FastAPI):
         session_entry.ensure_ready()
     except Exception as exc:  # noqa: BLE001 自举失败不阻断进程，但必须留痕
         log.warning(f"启动自举失败（建库/种子账号/模型注册）: {exc}")
+    hub = None
+    try:
+        # Phase 4：实时 Hub（后端唯一推理循环）——config.realtime.enabled
+        # 才启动；API_PREWARM=0（测试/极简部署）一并跳过后台工作负载
+        if (os.environ.get("API_PREWARM", "1").strip() != "0"
+                and bool((shared_config().get("realtime") or {})
+                         .get("enabled", False))):
+            from api.realtime_hub import start_hub
+            hub = start_hub()
+    except Exception as exc:  # noqa: BLE001 Hub 启动失败不影响 API 可用
+        log.warning(f"实时 Hub 启动失败: {exc}")
     _background_prewarm()
     yield
+    if hub is not None:
+        try:
+            hub.stop()
+        except Exception:  # noqa: BLE001
+            log.warning("实时 Hub 停止异常")
 
 
 def _install_error_handlers(app: FastAPI) -> None:

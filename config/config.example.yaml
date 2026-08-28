@@ -175,3 +175,16 @@ api:
   # 仅开发模式放行 Vite dev server 的 CORS（http://localhost:5173）；生产保持 false
   # 也可用环境变量 API_DEV_CORS=1 临时开启
   dev_cors: false
+
+# ================= 实时 Hub（Phase 4：后端唯一推理循环 + WS 帧广播）=================
+# 启用后由 api 进程常驻线程接管视频源推理（React 实时页经 /api/ws/realtime 观看；
+# N 个观看者共享一路推理；无人观看时降频保活）。monitor.enabled 轮询与 Hub 二选一，
+# 同进程内 Hub 优先（monitor_service 自动跳过）；Streamlit 进程不受影响。
+realtime:
+  enabled: false
+  # 视频源列表（留空回退 monitor.sources，再空则 demo:// 合成源兜底演示）
+  sources: []                # 如 ["rtsp://user:pass@host:554/stream", "demo://"]
+  active_fps: 2              # 有观看者时的推理帧率（每源）
+  idle_fps: 1                # 无人观看时的保活帧率（降频省 CPU；设为更小值近似暂停）
+  jpeg_quality: 70           # 广播 JPEG 质量（30-95）
+  cooldown_sec: 60           # 同源同类别告警冷却（秒）

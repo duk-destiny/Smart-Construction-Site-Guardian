@@ -646,8 +646,11 @@ async def test_cors_only_in_dev_mode(app_env, monkeypatch):
             == "http://localhost:5173"
 
 
-def test_ws_placeholder(app_env):
-    """Phase 4 占位：合法 token 可连并心跳；非法 token 以 4401 拒绝。"""
+def test_ws_realtime_broadcast(app_env, monkeypatch):
+    """Phase 4：Hub 运行时 WS 推帧（hello→frame→ping/pong）；未启用报告不可用。"""
+    import tempfile
+
+    from api.realtime_hub import RealtimeHub
     from starlette.testclient import TestClient
     from starlette.websockets import WebSocketDisconnect
 
@@ -655,16 +658,83 @@ def test_ws_placeholder(app_env):
 
     token, _ = create_access_token("u_admin", "admin", "admin")
     with TestClient(app_env) as tc:
+        # Hub 未启动 → accept 后报告 unavailable 并关闭
         with tc.websocket_connect(
                 f"/api/ws/realtime?token={quote(token, safe='')}") as ws:
             hello = ws.receive_json()
-            assert hello["type"] == "hello"
-            ws.send_text("ping")
-            assert ws.receive_json()["type"] == "pong"
+            assert hello["type"] == "unavailable"
+
+        # 注入 stub Hub：发布一帧后连接应收到该帧
+        class StubEngine:
+            def analyze(self, frame, source_key="default"):
+                return [], {"status": "合规", "level": "safe",
+                            "violations": [], "safe": []}
+
+            def draw(self, frame, comp):
+                return frame
+
+        hub = RealtimeHub(["demo://"], engine=StubEngine())
+        hub.start()
+        monkeypatch.setattr("api.routers.ws.get_hub", lambda: hub)
+        try:
+            hub.cycle()  # 手动发布一帧（不依赖后台线程时序）
+            with tc.websocket_connect(
+                    f"/api/ws/realtime?token={quote(token, safe='')}") as ws:
+                hello = ws.receive_json()
+                assert hello["type"] == "hello"
+                assert hello["sources"][0]["source"].startswith("demo://")
+                frame = ws.receive_json()
+                assert frame["type"] == "frame"
+                assert frame["jpeg"] and frame["level"] == "safe"
+                ws.send_text("ping")
+                assert ws.receive_json()["type"] == "pong"
+            # 连接关闭后观看者计数回落（驱动 Hub 降频）
+            deadline = time.time() + 2
+            while time.time() < deadline and hub.viewers > 0:
+                time.sleep(0.05)
+            assert hub.viewers == 0
+        finally:
+            hub.stop()
+
         # 非法 token：握手被拒/立即关闭（Starlette 在连接或首次接收时抛出）
         with pytest.raises(WebSocketDisconnect):
             with tc.websocket_connect("/api/ws/realtime?token=bad-token") as ws:
                 ws.receive_json()
+
+
+def test_realtime_status_endpoint(app_env, monkeypatch):
+    """状态端点：Hub 未启用报 enabled=false；启用后带源清单（打码）与计数。"""
+    import tempfile
+
+    from api.realtime_hub import RealtimeHub
+    from starlette.testclient import TestClient
+
+    from api.deps import create_access_token
+
+    token, _ = create_access_token("u_admin", "admin", "admin")
+    with TestClient(app_env) as tc:
+        r = tc.get("/api/realtime/status", headers=_auth(token))
+        assert r.status_code == 200
+        assert r.json()["enabled"] is False
+
+        class StubEngine:
+            def analyze(self, frame, source_key="default"):
+                return [], {"status": "合规", "level": "safe",
+                            "violations": [], "safe": []}
+
+            def draw(self, frame, comp):
+                return frame
+
+        hub = RealtimeHub(["demo://"], engine=StubEngine())
+        hub.start()
+        monkeypatch.setattr("api.routers.ws.get_hub", lambda: hub)
+        try:
+            r = tc.get("/api/realtime/status", headers=_auth(token))
+            body = r.json()
+            assert body["enabled"] is True and body["running"] is True
+            assert body["sources"][0]["source"].startswith("demo://")
+        finally:
+            hub.stop()
 
 
 # ---------- 下载门面单测（防穿越核心逻辑） ----------

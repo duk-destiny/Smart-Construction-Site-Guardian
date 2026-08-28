@@ -17,10 +17,27 @@ from core.video_source import check_source as _check_source
 from core.video_source import mask_source as _mask_source
 
 __all__ = ["get_engine", "prewarm", "mask_source",
-           "check_source", "MultiSourceMonitor"]
+           "check_source", "MultiSourceMonitor", "set_hub_active",
+           "hub_active"]
 
 _LOCK = threading.Lock()
 _ENGINE: RealtimeEngine | None = None
+# Phase 4：实时 Hub 接管标志——api.realtime_hub 启动/停止时置位，
+# monitor_service 据此跳过后台轮询（同进程内避免双路推理）。
+_HUB_ACTIVE = threading.Event()
+
+
+def set_hub_active(active: bool) -> None:
+    """api.realtime_hub 生命周期回调：Hub 运行中置位/停止时清除。"""
+    if active:
+        _HUB_ACTIVE.set()
+    else:
+        _HUB_ACTIVE.clear()
+
+
+def hub_active() -> bool:
+    """本进程是否已由实时 Hub 接管视频源推理（api 进程为真）。"""
+    return _HUB_ACTIVE.is_set()
 
 
 def get_engine() -> RealtimeEngine:

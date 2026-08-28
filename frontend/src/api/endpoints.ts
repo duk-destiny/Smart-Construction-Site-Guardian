@@ -188,6 +188,19 @@ export async function weeklyPreview(start?: string, end?: string) {
   return r.data as Record<string, unknown>
 }
 
+// ---------- realtime（Phase 4：Hub + WS 帧广播） ----------
+
+export async function realtimeStatus() {
+  const r = await api.get('/realtime/status')
+  return r.data as {
+    enabled: boolean; running: boolean;
+    sources: { index: number; source: string }[];
+    viewers: number; polls: number; alarms: number;
+    active_fps?: number; idle_fps?: number; target_fps?: number;
+    last_error?: string | null;
+  }
+}
+
 // ---------- admin ----------
 
 export async function listUsers() {

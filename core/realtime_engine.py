@@ -7,6 +7,7 @@
 from __future__ import annotations
 
 import os
+import threading
 from concurrent.futures import ThreadPoolExecutor
 from typing import Iterable
 
@@ -40,16 +41,24 @@ class RealtimeEngine:
     def __init__(self, scenes: Iterable[str] = ("construction_ppe", "hot_work")) -> None:
         self.cfg = ConfigLoader()
         self.engines: list[tuple[str, YoloEngine]] = []
-        self.tracker = IoUTracker()
+        # Phase 4：per-source tracker（按源字典）——原实现全引擎共享一个
+        # IoUTracker，跨摄像头目标 ID 互相串扰；改按 source_key 隔离，
+        # 也解锁多源并行 analyze（各源 tracker 无共享状态）。
+        self.trackers: dict[str, IoUTracker] = {}
+        self._tracker_lock = threading.Lock()
+        # Phase 4：reload 竞态保护——检测线程可能正读 self.engines，
+        # build-then-swap（新列表建完原子替换）消除"清空后半构建"窗口。
+        self._swap_lock = threading.Lock()
         # 检测头并行：onnxruntime run() 释放 GIL，多头用线程池并行跑。为防多 session
         # 抢核，每引擎 intra_op 封顶 ≈ 物理核/引擎数 = logical//(2*引擎数)（HT 机）；
         # 单头则用满物理核(≈logical//2)。实测：线程过多反而更慢（小模型同步开销）。
         scenes_list = list(scenes)
         self._scenes = list(scenes)  # 供 reload() 重建时复用同一场景集
         self._intra_op_threads = _compute_intra_op(self.cfg, len(scenes_list))
-        self._build(scenes_list)
+        self._build(scenes_list, self.engines)
 
-    def _build(self, scenes: list[str]) -> None:
+    def _build(self, scenes: list[str], out: list[tuple[str, YoloEngine]]) -> None:
+        """构建检测头写入 out（reload 传局部列表实现 build-then-swap）。"""
         from core.model_paths import active_weight_overrides, apply_overrides
         overrides = active_weight_overrides()
         conf = self.cfg.get("infer.conf_thres", 0.45)
@@ -69,7 +78,7 @@ class RealtimeEngine:
                     eng = YoloEngine(conf_thres=scene_conf, iou_thres=iou,
                                      class_map=spec.get("class_map"))
                     eng.load(path, intra_op_threads=self._intra_op_threads)
-                    self.engines.append((sid, eng))
+                    out.append((sid, eng))
                 except Exception as e:  # noqa: BLE001 单头缺失优雅跳过
                     log.warning(f"跳过不可用模型 {path}: {e}")
 
@@ -79,13 +88,29 @@ class RealtimeEngine:
 
     def reload(self) -> None:
         # 模型切换后热重载：重读 config 并重建引擎（复用 _SESSIONS 会话缓存）。
-        # 不重启进程即可让实时页/后台监控用上 DB active 指向的新模型；tracker 一并
-        # 重置，避免跨模型 track_id 串扰。供 page_admin 切换按钮后调用。
-        self.cfg = ConfigLoader()  # 丢弃旧 _cache，重读 config.yaml
-        self._intra_op_threads = _compute_intra_op(self.cfg, len(self._scenes))
-        self.engines = []
-        self.tracker = IoUTracker()
-        self._build(list(self._scenes))
+        # 不重启进程即可让实时页/后台监控/Hub 用上 DB active 指向的新模型。
+        # Phase 4：build-then-swap——先在局部列表完整构建，最后一次性原子替换
+        # self.engines（旧实现先清空再逐个 append，检测线程会读到半空列表）；
+        # 构建中途失败直接抛出，旧引擎组原封不动，检测不中断。trackers 一并
+        # 重置（换代），避免跨模型 track_id 串扰。
+        with self._swap_lock:
+            self.cfg = ConfigLoader()  # 丢弃旧 _cache，重读 config.yaml
+            self._intra_op_threads = _compute_intra_op(self.cfg, len(self._scenes))
+            engines: list[tuple[str, YoloEngine]] = []
+            self._build(list(self._scenes), engines)
+            self.engines = engines
+            self.trackers = {}
+
+    def _tracker_for(self, source_key: str) -> IoUTracker:
+        """取（或惰性建）某视频源专属 tracker，双检锁防并发首访重复建。"""
+        tracker = self.trackers.get(source_key)
+        if tracker is None:
+            with self._tracker_lock:
+                tracker = self.trackers.get(source_key)
+                if tracker is None:
+                    tracker = IoUTracker()
+                    self.trackers[source_key] = tracker
+        return tracker
 
     @staticmethod
     def _tag(dets: list[dict], sid: str) -> list[dict]:
@@ -100,14 +125,17 @@ class RealtimeEngine:
         """对一帧执行全部检测头，返回合并后的检测结果（坐标已还原到原图）。"""
         if frame is None or frame.size == 0:
             return []
+        # 引擎列表快照：reload 走 build-then-swap（原子替换），快照后本轮
+        # 检测要么全用旧引擎、要么全用新引擎，不会读到半构建状态。
+        engines = self.engines
         detections: list[dict] = []
         # 多头并行：onnxruntime run() 释放 GIL，用线程池把各头"求和"变"取最大"；
         # 单头或会话缺失时走串行。每会话 intra_op 已按 cpu//引擎数封顶防抢核。
-        if len(self.engines) > 1:
-            with ThreadPoolExecutor(max_workers=len(self.engines)) as pool:
-                futs = [(sid, eng, pool.submit(eng.infer_frame, frame))
-                        for sid, eng in self.engines]
-                for sid, eng, fut in futs:
+        if len(engines) > 1:
+            with ThreadPoolExecutor(max_workers=len(engines)) as pool:
+                futs = [(sid, pool.submit(eng.infer_frame, frame))
+                        for sid, eng in engines]
+                for sid, fut in futs:
                     try:
                         dets = fut.result()
                     except Exception as e:  # noqa: BLE001
@@ -115,7 +143,7 @@ class RealtimeEngine:
                         continue
                     detections.extend(self._tag(dets, sid))
         else:
-            for sid, eng in self.engines:
+            for sid, eng in engines:
                 try:
                     dets = eng.infer_frame(frame)
                 except Exception as e:  # noqa: BLE001
@@ -124,21 +152,29 @@ class RealtimeEngine:
                 detections.extend(self._tag(dets, sid))
         return detections
 
-    def analyze(self, frame: np.ndarray) -> dict:
+    def analyze(self, frame: np.ndarray,
+                source_key: str = "default") -> tuple[list[dict], dict]:
         """检测 + 三级合规研判，返回 (detections, compliance)。
 
         实时不变量（安全系统第一原则·实时性）：critical 帧必须当帧出警——
         analyze 与告警之间不得插入 LLM/RAG/工单等阻塞推理；本方法全程纯规则
         （检测→误报过滤→跟踪→三级合规），首帧 critical 即返回，无多帧确认门控。
+
+        source_key（Phase 4）：视频源标识——tracker 按源隔离，跨摄像头目标
+        ID 不再串扰；不同源可并行调用本方法（无共享可变状态）。
         """
         dets = self.detect(frame)
         dets, _ = filter_smoke_vest_conflict(dets)
         dets, _ = filter_ppe_contradiction(dets)
-        dets = self.tracker.update(dets)
+        dets = self._tracker_for(source_key).update(dets)
         return dets, evaluate(dets)
 
-    def reset_tracking(self) -> None:
-        self.tracker.reset()
+    def reset_tracking(self, source_key: str | None = None) -> None:
+        """重置 tracker：带 source_key 仅重置该源；None 全部重置。"""
+        if source_key is None:
+            self.trackers = {}
+            return
+        self.trackers.pop(source_key, None)
 
     @staticmethod
     def draw(frame: np.ndarray, compliance: dict) -> np.ndarray:

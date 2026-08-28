@@ -188,7 +188,16 @@ def stop_monitor() -> None:
 
 
 def ensure_monitor_started() -> RtspMonitor | None:
-    """按 monitor.* 配置启动后台监控；未启用或无源时返回 None。"""
+    """按 monitor.* 配置启动后台监控；未启用或无源时返回 None。
+
+    Phase 4 收敛：本进程若已由实时 Hub（api.realtime_hub）接管视频源推理，
+    跳过后台轮询——两套循环同跑会对同一路源做双倍推理（CPU 翻倍、告警重复）。
+    """
+    from services import realtime_entry
+    if realtime_entry.hub_active():
+        from core.logging import get_logger
+        get_logger(__name__).info("实时 Hub 已接管视频源推理，跳过后台轮询启动")
+        return None
     from core.config import shared_config
     conf = shared_config().get("monitor")
     if not isinstance(conf, dict) or not conf.get("enabled"):
