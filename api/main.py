@@ -177,7 +177,7 @@ def _mount_frontend(app: FastAPI) -> None:
 def create_app() -> FastAPI:
     app = FastAPI(
         title="智护工地 API",
-        version="0.9.0",
+        version="1.0.0",
         description="施工安全 AI 监控系统（动火作业 + 施工 PPE）。"
                     "认证：POST /api/auth/login 取 JWT，"
                     "后续请求带 Authorization: Bearer <token>。离线内网部署。",

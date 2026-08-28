@@ -6,6 +6,35 @@
 
 ---
 
+## [v1.0] — 2026-08-29
+
+### 🎉 首个稳定版：前后端分离架构正式打版
+
+> v0.9 期间连续交付重构四阶段（Phase 0-4，明细见下），全部验收口径
+> （含运维面）通过后于本日打版 v1.0。语义化版本自 0.x 进入 1.x：
+> 核心能力域（双场景检测、多 Agent 研判、本地 RAG、工单闭环、风险周报、
+> 实时 Hub 帧广播、React 前端、FastAPI 接口层）全部稳定可用。
+
+**发布基线**
+
+- pytest：PART1 288 passed + AppTest 分进程 4 passed（全绿）；
+- API 34 例（httpx AsyncClient 全端点走查）/ Vitest 组件冒烟 5 例 /
+  Playwright 双链路（登录→上报→查结果→整改→验收关键流程 +
+  双浏览器实时运维验收）全部 PASS；ruff 全绿；
+- 运维验收：双浏览器共享单路推理（3fps 单循环、未随观看者翻倍、
+  Hub 单次启动）、引擎切换检测不中断——PASS。
+
+**打版动作**
+
+- 版本号同步：`api/main.py`（/healthz 与 Swagger）、`frontend/package.json`；
+- tag：`v1.0`；
+- 纳入发布前工作区既有变更（单独成提交）：润色后台线程池化、Orchestrator
+  分 agent 超时预算、BGE 分块上限/重叠与会话 LRU、`scripts/backup_db.py`
+  在线备份脚本——发布基线回归已含上述变更全绿；
+- 回退预案：Streamlit 经典版保留可运行，至 React 版稳定一个迭代周期后下线；
+- 已知边界（记 backlog，不阻断打版）：BGE 转 ONNX、OCR 扫描件入库、
+  INT8 量化版本达标后的线上切换、答辩材料同步 React 功能面。
+
 ## [v0.9] — 2026-08-28
 
 ### 重构：前后端分离 · Phase 0 + Phase 1
