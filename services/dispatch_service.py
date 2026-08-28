@@ -17,7 +17,6 @@ import sqlite3
 from datetime import datetime, timedelta, timezone
 
 from dao.models import AuditDAO, UserDAO, WorkOrderDAO
-from services.permission_service import AuthorizationError
 from services.permission_service import PermissionService
 
 # 各风险等级的默认整改时限（小时）；"低"亦给一周余量便于台账统计，
