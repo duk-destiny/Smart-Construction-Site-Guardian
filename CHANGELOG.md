@@ -206,6 +206,17 @@ data/exports 内）；`lookup_service.task_detection_detail` 增量附带 task/r
 - `test_api.py` WS 用例升级为真实广播断言（hello→frame→ping/pong→
   观看者回落）+ realtime/status 端点两态；API 34 例 + 全量回归绿。
 
+**运维验收与顺带修复**
+
+- 新增 `scripts/realtime_acceptance.py` 运维验收：临时库+内存态配置启动，
+  双 chromium 观看同一路 demo:// 源——断言 2 观看者共享单路推理（ polls
+  按帧率推进不随人数翻倍）、"已启动"日志恰一条、admin 切换模型（引擎
+  reload）过程中推理与前端广播不中断——**PASS**；
+- 修复前端登录→强制改密页竞态：事件回调里 await 后紧跟 navigate 会被
+  路由状态竞争吞掉（token 已入库但被弹回登录框，且 Playwright page.url
+  在 pushState 下不刷新导致误判）——改为登录态上下文驱动路由（Login
+  effect）+ 改密页容忍瞬时未同步的登录态（显示同步中而非弹回）。
+
 ## [v0.8] — 2026-08-28
 
 ### 新增：安全收口 + 账号治理 + 运维闭环（三阶段一次交付）

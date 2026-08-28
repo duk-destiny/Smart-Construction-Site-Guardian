@@ -62,16 +62,32 @@ def start_server(db_path: Path) -> subprocess.Popen:
 
 def login_and_change_pwd(page, username: str, old_pwd: str, new_pwd: str) -> None:
     page.goto(BASE, wait_until="domcontentloaded")
+    # 等待 React 挂载完成再填写：服务端启动期负载高时，fill 早于 hydration
+    # 会导致 antd 表单 store 读不到值 → 校验静默失败（运维验收实测）
+    page.wait_for_selector("input[placeholder='用户名']", timeout=30_000)
+    page.wait_for_timeout(400)
     page.get_by_placeholder("用户名").fill(username)
     page.get_by_placeholder("密码", exact=True).fill(old_pwd)
     page.get_by_role("button", name="登 录").click()
-    # 种子账号带初始密码标记 → 强制改密页
-    page.wait_for_url("**/change-password", timeout=15_000)
+    # 种子账号带初始密码标记 → 强制改密页。
+    # 注意：SPA 的 pushState 路由下 Playwright 的 page.url 可能不刷新，
+    # 路由断言一律用页面内 location（wait_for_function），不用 wait_for_url。
+    try:
+        page.wait_for_function("location.pathname.includes('change-password')",
+                               timeout=20_000)
+    except Exception:
+        print(f"[diag] login stuck at {page.url}")
+        body = page.inner_text("body")[:300].replace("\n", " | ")
+        print("[diag] body:", body)
+        print("[diag] token:", page.evaluate("!!localStorage.getItem('zhg_token')"))
+        print("[diag] user:", page.evaluate("localStorage.getItem('zhg_user')"))
+        raise
     page.get_by_label("原密码").fill(old_pwd)
     page.get_by_label("新密码（至少 8 位）", exact=True).fill(new_pwd)
     page.get_by_label("确认新密码").fill(new_pwd)
     page.get_by_role("button", name="提交修改").click()
-    page.wait_for_url(lambda url: "/change-password" not in url, timeout=15_000)
+    page.wait_for_function("!location.pathname.includes('change-password')",
+                           timeout=20_000)
 
 
 def logout(page) -> None:
@@ -79,7 +95,8 @@ def logout(page) -> None:
         page.get_by_text("（safety）")).or_(
         page.get_by_text("（responsible）")).first.click()
     page.get_by_text("退出登录").click()
-    page.wait_for_url("**/login", timeout=10_000)
+    page.wait_for_function("location.pathname.includes('login')",
+                           timeout=15_000)
 
 
 def _login_api(username: str, password: str) -> str:

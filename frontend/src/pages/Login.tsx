@@ -2,7 +2,7 @@
 import { App as AntApp } from 'antd'
 import { Form, Input, Button, Card, Typography } from 'antd'
 import { useLocation, useNavigate } from 'react-router-dom'
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { useAuth } from '../auth/AuthContext'
 import { homeFor } from '../router'
 
@@ -13,19 +13,23 @@ export default function Login() {
   const { message } = AntApp.useApp()
   const [loading, setLoading] = useState(false)
 
-  if (user && !user.must_change_password) {
-    navigate(homeFor(user.role), { replace: true })
-  }
+  // 登录态驱动路由（单一事实源）：user 出现即跳改密页或角色首页。
+  // 不在 onFinish 里手动 navigate——事件回调里 await 之后紧跟 navigate
+  // 会被路由状态竞争吞掉（运维验收实测：token 已存但 URL 不变）。
+  useEffect(() => {
+    if (!user) return
+    navigate(user.must_change_password
+      ? '/change-password'
+      : (location.state?.from as string) || homeFor(user.role),
+      { replace: true })
+  }, [user, navigate, location.state])
 
   async function onFinish(v: { username: string; password: string }) {
     setLoading(true)
     try {
       const info = await login(v.username, v.password)
       message.success(`欢迎，${info.username}`)
-      navigate(info.must_change_password
-        ? '/change-password'
-        : (location.state?.from as string) || homeFor(info.role),
-        { replace: true })
+      void info
     } finally {
       setLoading(false)
     }
