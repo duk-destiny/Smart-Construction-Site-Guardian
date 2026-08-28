@@ -6,6 +6,56 @@
 
 ---
 
+## [v0.9] — 2026-08-28
+
+### 重构：前后端分离 · Phase 0 + Phase 1
+
+> 依据 `docs/前后端分离重构提示词.md` 执行前两个 Phase（纯 Python，不涉 API/前端）。
+> 目标：修复 ui→services 分层破坏，为 Phase 2 FastAPI 铺路；顺带修掉已探明的
+> 安全漏洞与质量项。Phase 2-4（FastAPI / React / 实时链路重做）未排期，待确认。
+
+**Phase 0 · ui→services 分层收敛**
+
+- 新增 8 个服务门面模块（`services/db.py` 连接收口 + `session_entry` /
+  `task_entry` / `lookup_service` / `order_service` / `history_service` /
+  `diag_service` / `lab_service` / `realtime_entry` / `admin_console`）；
+- 10 个 UI 页全部去 `get_conn/init_db/dao` 直连，连接生命周期统一由
+  `services.db.scoped()` 托管；grep 验证 `ui/` 零 `from dao`；
+- 白名单（纯展示/常量）：`core.compliance` 纯函数、`core.yolo_engine`
+  常量、`core.logging`、`core.config.shared_config`（只读配置）、
+  `core.evidence.sanitize_filename`（纯函数）。
+
+**Phase 1 · 安全**
+
+- 上传魔数校验 + 大小上限可配（`config.upload.*`，图片 20/视频 200/PDF 20MB）：
+  `core/upload_guard.py`，仅凭扩展名不再放行；
+- webhook SSRF 防护：生产仅 https + 拒绝内网地址段；演示模式允许 http 回环；
+  `notify.allow_private_webhook` 供内网中继；错误入库前脱敏（抹 URL 查询串）；
+- 用户名枚举消除：登录失败统一「用户名或密码错误」，审计明细不再区分；
+- 配置出库：`git rm --cached config/config.yaml`，新增 `config.example.yaml`，
+  `.gitignore` 排除真实配置，密钥字段支持 `${ENV}` 覆盖；
+- 模型切换唯一落 DB（`model_registry.active`），不再运行时回写 config.yaml。
+
+**Phase 1 · 质量**
+
+- 跨线程 SQLite：`_attach_clause_async` worker 自开自关连接；
+- Notify 连接泄漏：`push_*`/`test_push` try/finally 关闭自建连接；
+- 事务化：`save_result`（6 段写）与 `convert_alarm_to_order`（5 段写）单事务，
+  中途失败整体回滚；
+- 索引补齐（走 `_INDEX_MIGRATIONS`）：alarm_events / work_orders /
+  feedback_samples 四条高频索引；schema.sql 漂移回写（detection_records
+  track_id/track_frames、alarm_events image_path/source/clause）+ 表数注释修正；
+- `core/paths.py` 路径锚点：任意 cwd 启动不破；DB/URL 存相对 posix 路径；
+- 静默异常接日志：llm_engine 各失败路径、orchestrator 抽帧、action polish、
+  app 预热等保留降级但留痕；
+- `ConfigLoader` 进程级共享实例 + `compliance._build_severity` done-flag，
+  消除实时帧每帧重读 YAML；`dao.db.get_conn` 缺省路径改运行时读取。
+
+### 测试
+
+- 全量 **248 passed**（v0.8 237 + Phase0/1 回归 11）；ruff 全绿；
+- `test_ui_flows` 三处按新架构重写（模型切换断言 DB 翻转且 config 不变）。
+
 ## [v0.8] — 2026-08-28
 
 ### 新增：安全收口 + 账号治理 + 运维闭环（三阶段一次交付）
