@@ -1,6 +1,7 @@
 """页面3：多Agent分步结果面板（page_agents）★核心演示页。
 
 交互：对当前任务运行总控编排器，4 张 Agent 卡片展示状态/输出/耗时。
+Phase 0：编排/落库/审计/进度收口到 services.task_entry，本页零 get_conn。
 """
 from __future__ import annotations
 
@@ -9,12 +10,8 @@ import json
 import streamlit as st
 from ui.page_helpers import safe_page
 
-from agents.orchestrator import Orchestrator
-from core.compliance import evaluate
-from dao.db import get_conn, init_db
-from services.audit_service import AuditService
-from services.task_service import TaskService
-from ui.components import compliance_banner
+from core.compliance import evaluate  # 纯函数展示辅助（横幅渲染），白名单
+from services import task_entry
 
 _STATUS_COLOR = {
     "success": "🟢", "degraded": "🟡", "failed": "🔴",
@@ -42,20 +39,21 @@ def render_agents() -> None:
     if st.session_state.get("uploaded_path"):
         images = [st.session_state["uploaded_path"]]
 
-    conn = get_conn()
-    init_db(conn)
-    ts = TaskService(conn)
+    user_id = st.session_state.get("user_id")
 
     # —— v0.6 异步通路：后台线程跑重链路，fragment 每 2s 轮询进度 ——
     _ba, _bs = st.columns(2)
     if _ba.button("🚀 后台研判（不阻塞页面）", use_container_width=True):
         if not st.session_state.get("_ran_async"):
-            started = ts.start_async_run(
-                task_id, st.session_state.get("user_id"),
-                images, permit_info, scene_id=st.session_state.get("scene", "hot_work"))
-            AuditService(conn).append(st.session_state.get("user_id"),
-                                      "execute_async", {"task_id": task_id,
-                                                        "started": started})
+            started = task_entry.start_async_run(
+                task_id, user_id, images, permit_info,
+                scene_id=st.session_state.get("scene", "hot_work"))
+            from services.audit_service import AuditService
+            from services.db import scoped
+            with scoped() as conn:
+                AuditService(conn).append(user_id, "execute_async",
+                                          {"task_id": task_id,
+                                           "started": started})
         st.session_state["_ran_async"] = True
         st.rerun()
     _sync_clicked = _bs.button("▶ 同步研判（兼容模式）", type="primary",
@@ -67,12 +65,12 @@ def render_agents() -> None:
     def _poll_async() -> None:
         if st.session_state.get("_result"):
             return
-        done = ts.pop_async_result(task_id, st.session_state.get("user_id"))
+        done = task_entry.async_result(task_id, user_id)
         if done:
             st.session_state["_result"] = done
             st.session_state["_ran"] = True
             st.rerun(scope="app")
-        prog = ts.get_progress(task_id, st.session_state.get("user_id"))
+        prog = task_entry.progress(task_id, user_id)
         if prog or st.session_state.get("_ran_async"):
             st.caption("⏳ 后台研判进行中…（完成后自动刷新结果）")
 
@@ -80,20 +78,11 @@ def render_agents() -> None:
         _poll_async()
 
     if st.button("▶ 运行多Agent研判", type="primary") or st.session_state.get("_sync_ran"):
-        scene_id = st.session_state.get("scene", "hot_work")
-        orch = Orchestrator(progress_cb=ts.update_progress, scene_id=scene_id,
-                            work_order_dao=ts.work_orders)
-        result = orch.execute(task_id, images=images, permit_info=permit_info)
         st.session_state["_ran"] = True
         st.session_state.pop("_ran_async", None)
-        st.session_state["_result"] = result.to_dict()
-        # 持久化研判结果到数据库（幂等，已有则跳过）
-        ts.save_result(task_id, result.payload)
-        # 工单落库后触发异步润色（保证 update_notice 命中已有行；LLM 不可用则跳过）
-        _wo = result.payload.get("work_order") or {}
-        orch.action.polish(task_id, _wo.get("hazard_desc", ""), _wo.get("clause", ""),
-                           _wo.get("requirement", ""), _wo.get("deadline", ""))
-        AuditService(conn).append(st.session_state.get("user_id"), "execute", {"task_id": task_id})
+        st.session_state["_result"] = task_entry.run_sync(
+            task_id, user_id, images, permit_info,
+            scene_id=st.session_state.get("scene", "hot_work"))
 
     result = st.session_state.get("_result")
     if not result:
@@ -107,18 +96,19 @@ def render_agents() -> None:
     dets = vp.get("detections", []) if isinstance(vp, dict) else []
     comp = evaluate(dets)
     risk_level = payload.get("risk_level") or result.get("risk_level")
+    from ui.components import compliance_banner
     compliance_banner(comp, risk_level=risk_level,
                       subtitle=f"检出目标 {len(dets)} 项")
 
     # 顶部进度条
-    prog = ts.get_progress(task_id, st.session_state.get("user_id"))
+    prog = task_entry.progress(task_id, user_id)
     cols = st.columns(len(_AGENT_TITLE))
     for i, (agent, title) in enumerate(_AGENT_TITLE.items()):
         info = prog.get(agent, {})
         cols[i].metric(title.split("（")[0], info.get("status", "—"), f"{info.get('cost_ms',0)}ms")
 
     with st.expander("证据链 / Agent 运行轨迹"):
-        runs = ts.list_agent_runs(task_id)
+        runs = task_entry.agent_runs(task_id)
         if not runs:
             st.caption("本次运行结果保存后自动生成，用于追溯每个 Agent 的耗时与输出。")
         for run in runs:

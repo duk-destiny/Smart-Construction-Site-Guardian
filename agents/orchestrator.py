@@ -79,8 +79,9 @@ class Orchestrator:
             try:
                 frame_paths = VideoUtils.extract_frames(video)
                 images = images + frame_paths
-            except Exception:
-                pass
+            except Exception as e:  # noqa: BLE001 抽帧失败按空影像降级，但留痕
+                from core.logging import get_logger
+                get_logger(__name__).warning(f"视频抽帧失败 {video}: {e}")
 
         vmsg = AgentMessage(
             task_id=task_id, agent="vision", status="pending",

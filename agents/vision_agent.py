@@ -32,18 +32,33 @@ class VisionAgent(AgentBase):
         self.scene_id = scene_id
 
     def _build_engines(self, cfg: ConfigLoader) -> list[YoloEngine]:
-        """按场景配置构建检测头列表；缺权重/不可用则跳过（优雅降级）。"""
+        """按场景配置构建检测头列表；缺权重/不可用则跳过（优雅降级）。
+
+        Phase 1：模型切换状态唯一落 DB——构建前经 core/model_paths 以
+        model_registry.active 覆盖 config 同族路径。
+        """
+        from core.model_paths import active_weight_overrides, apply_overrides
+        overrides = active_weight_overrides()
         if not self.scene_id:
             # 兜底：单火情模型（兼容旧行为 / 测试）
+            top = cfg.get("models.yolo_onnx")
+            fam = None
+            try:
+                from core.model_paths import family_of
+                fam = family_of(top or "")
+            except Exception:  # noqa: BLE001
+                fam = None
+            if fam and fam in overrides:
+                top = overrides[fam]
             eng = YoloEngine(
                 conf_thres=cfg.get("infer.conf_thres", 0.45),
                 iou_thres=cfg.get("infer.iou_thres", 0.45),
                 class_map=cfg.get("models.yolo_class_map"))
-            eng.load(cfg.get("models.yolo_onnx"))
+            eng.load(top)
             return [eng]
 
         scene = cfg.get_scene(self.scene_id)
-        specs = scene.get("yolo_weights", []) or []
+        specs = apply_overrides(scene.get("yolo_weights", []) or [], overrides)
         scene_conf = scene.get("conf_thres", cfg.get("infer.conf_thres", 0.45))
         engines: list[YoloEngine] = []
         for spec in specs:

@@ -1,4 +1,9 @@
-"""页面4：工单预览 / 改判 / 导出 / 历史记录（page_report）。"""
+"""页面4：工单预览 / 改判 / 导出 / 历史记录（page_report）。
+
+Phase 0：派发/改判/导出/历史/检测明细全部经 services.order_service 与
+services.lookup_service，本页零 get_conn/DAO；core.compliance.evaluate
+为纯函数展示辅助（横幅渲染），列入白名单。
+"""
 from __future__ import annotations
 
 import json
@@ -6,14 +11,9 @@ import json
 import streamlit as st
 from ui.page_helpers import safe_page
 
-from dao.db import get_conn, init_db
-from dao.models import UserDAO, WorkOrderDAO, RiskDAO
-from core.compliance import evaluate
-from services.audit_service import AuditService
-from services.dispatch_service import DispatchService, RISK_DEADLINE_HOURS
-from services.export_service import ExportService
+from core.compliance import evaluate  # 纯函数展示辅助（横幅渲染），白名单
+from services import lookup_service, order_service
 from services.permission_service import PermissionError as ServicePermissionError
-from services.task_service import TaskService
 from ui.components import compliance_banner
 from ui.correction_workbench import render_target_corrections
 
@@ -33,24 +33,18 @@ _SOURCE_LABEL = {
 
 def _render_dispatch_panel(task_id: str, risk_level: str | None) -> None:
     """派发与整改闭环面板：状态一览 + 责任人指派（规则预选）。"""
-    conn = get_conn()
-    init_db(conn)
-    svc = DispatchService(conn)
-    wo = svc.orders.get_by_task(task_id)
+    scene = st.session_state.get("scene", "hot_work")
+    panel = order_service.dispatch_panel(task_id, scene_id=scene)
 
     st.subheader("📮 派发与整改闭环")
-    if wo is None:
+    if panel is None:
         st.caption("本任务尚未生成工单")
         return
-
-    assignee_name = None
-    if wo["assignee_id"]:
-        user_row = UserDAO(conn).get_by_id(wo["assignee_id"])
-        assignee_name = user_row["username"] if user_row else str(wo["assignee_id"])
+    wo = panel["order"]
 
     c1, c2, c3 = st.columns(3)
     c1.metric("闭环状态", _WO_STATUS_TAG.get(wo["status"], wo["status"]))
-    c2.metric("责任人", assignee_name or "未派发")
+    c2.metric("责任人", panel["assignee_name"] or "未派发")
     c3.metric("截止", (wo["deadline"] or "—")[:19])
     if wo["status"] == "rejected":
         st.error(f"❌ 验收驳回原因:{wo['review_reason'] or '未填写'}——请改派或通知责任人重新提交。")
@@ -67,37 +61,38 @@ def _render_dispatch_panel(task_id: str, risk_level: str | None) -> None:
         st.caption("工单在验收流程中（submitted/closed），不可改派。")
         return
 
-    users_rows = UserDAO(conn).list_by_role("responsible")
-    names = [u["username"] for u in users_rows]
+    names = panel["responsible_names"]
     if not names:
-        st.warning("系统中暂无 responsible 责任人账号（演示账号 lisi / demo1234）；"
-                   "v0.2 启动时会自动补种，也可先到管理端重建数据库后再试。")
+        st.warning("系统中暂无 responsible 责任人账号"
+                   "（可在管理端「用户管理」创建，role=responsible）。")
         return
 
-    scene = st.session_state.get("scene", "hot_work")
-    suggestion = svc.resolve_assignee(scene_id=scene)
+    suggestion = panel["suggestion"]
     idx = names.index(suggestion) if suggestion in names else 0
-    tag_text = "改派" if assignee_name else "派发"
+    tag_text = "改派" if panel["assignee_name"] else "派发"
     ca, cb, cc = st.columns([2, 1.2, 1])
     chosen = ca.selectbox(
         "整改责任人", names, index=idx,
         help=f"默认按 dispatch.rules 对场景「{scene}」的命中建议{suggestion or ''}")
     hours = cb.number_input(
         "整改时限（小时）", min_value=0.5, max_value=720.0,
-        value=float(RISK_DEADLINE_HOURS.get(risk_level or "", 24)), step=1.0)
+        value=float(panel["default_hours"] or 24), step=1.0)
     if cc.button(f"{tag_text} 工单", type="primary",
                  key=f"dispatch_{task_id}", use_container_width=True):
         try:
-            svc.dispatch_order(task_id, uid, assignee_username=chosen,
-                               deadline_hours=float(hours), scene_id=scene)
+            ok, msg = order_service.dispatch_order(
+                task_id, uid, chosen, float(hours), scene_id=scene)
         except ServicePermissionError as e:
             st.error(f"权限不足：{e}")
+            return
         except ValueError as e:
             st.error(str(e))
-        else:
-            AuditService(conn).append(uid, "dispatch_ui", {"task_id": task_id})
+            return
+        if ok:
             st.success(f"已{tag_text}给 {chosen}，截止 {hours:.0f} 小时后")
             st.rerun()
+        else:
+            st.error(msg)
 
 
 def _show_work_order(payload: dict, task_id: str) -> None:
@@ -117,6 +112,7 @@ def _show_work_order(payload: dict, task_id: str) -> None:
     st.write(f"**违反规范**：{wo.get('clause','')}")
     st.write(f"**整改要求**：{wo.get('requirement','')}")
     st.write(f"**风险等级**：{payload.get('risk_level','—')}")
+
     if wo.get("review_required"):
         st.warning("该工单需要人工复核：" + "；".join(wo.get("review_reasons") or []))
     st.info(f"💬 工人白话提示：{payload.get('worker_notice','')}")
@@ -125,9 +121,8 @@ def _show_work_order(payload: dict, task_id: str) -> None:
     _render_dispatch_panel(task_id, payload.get("risk_level"))
 
     with st.expander("Agent 证据链"):
-        conn = get_conn()
-        init_db(conn)
-        runs = TaskService(conn).list_agent_runs(task_id)
+        from services import task_entry
+        runs = task_entry.agent_runs(task_id)
         if not runs:
             st.caption("暂无 Agent 运行记录")
         for run in runs:
@@ -153,33 +148,12 @@ def _show_work_order(payload: dict, task_id: str) -> None:
         if not reason:
             st.error("请填写改判原因")
         else:
-            conn = get_conn()
-            init_db(conn)
-            ts = TaskService(conn)
-            ok = ts.manual_override(
-                task_id, new_level, reason,
-                user_id=st.session_state.get("user_id"))
-            risk = RiskDAO(conn).get_by_task(task_id) if ok else None
-            ts.save_feedback_sample(
-                task_id=task_id,
-                user_id=st.session_state.get("user_id"),
-                corrected_level=new_level,
-                reason=reason,
-                auto_level=risk["risk_level"] if risk else None,
-                source_json={
-                    "reasons_json": risk["reasons_json"] if risk else None,
-                    "filtered_fp_json": risk["filtered_fp_json"] if risk else None,
-                },
+            uid = st.session_state.get("user_id")
+            ok, msg = order_service.submit_override(
+                task_id, uid, new_level, reason,
                 image_path=st.session_state.get("uploaded_path"),
-                detections=dets,
-                corrected_labels=[{
-                    "risk_level": new_level,
-                    "reason": reason,
-                }],
-            )
-            AuditService(conn).append(st.session_state.get("user_id"), "override",
-                                     {"task_id": task_id, "level": new_level, "reason": reason})
-            st.success("改判已记录" if ok else "未找到该任务风险记录")
+                detections=dets)
+            st.success(msg) if ok else st.error(msg)
 
     st.divider()
     with st.expander("逐目标纠偏（可生成训练样本）"):
@@ -190,45 +164,27 @@ def _show_work_order(payload: dict, task_id: str) -> None:
                 st.session_state.get("uploaded_path"),
                 dets, [], f"report_{task_id}")
             if st.button("保存逐目标纠偏", key=f"save_fix_{task_id}"):
-                conn = get_conn()
-                init_db(conn)
-                ts = TaskService(conn)
-                ts.save_feedback_sample(
-                    task_id=task_id,
-                    user_id=st.session_state.get("user_id"),
-                    corrected_level=payload.get("risk_level", "一般"),
-                    reason="逐目标纠偏",
-                    auto_level=payload.get("risk_level", "一般"),
-                    feedback_type="detection_fix",
-                    image_path=st.session_state.get("uploaded_path"),
-                    detections=dets,
-                    corrected_labels=corrections,
-                )
-                AuditService(conn).append(
-                    st.session_state.get("user_id"), "detection_fix",
-                    {"task_id": task_id, "items": len(corrections)})
+                order_service.save_detection_fix(
+                    task_id, st.session_state.get("user_id"),
+                    payload.get("risk_level", "一般"),
+                    st.session_state.get("uploaded_path"),
+                    dets, corrections)
                 st.success("逐目标纠偏已保存为待审核反馈样本")
 
     st.divider()
     st.subheader("导出台账")
     if st.button("导出 Excel 台账", key="btn_export"):
-        conn = get_conn()
-        init_db(conn)
-        r = ExportService(conn).export_excel(
-            task_id=task_id,
-            user_id=st.session_state.get("user_id"))
-        if r["ok"]:
-            st.success(f"已导出：{r['data']['file_path']}")
+        ok, msg = order_service.export_excel(
+            task_id, st.session_state.get("user_id"))
+        if ok:
+            st.success(f"已导出：{msg}")
         else:
-            st.error("导出失败")
+            st.error(msg)
 
 
 def _render_history_list() -> None:
     """历史研判记录列表。"""
-    conn = get_conn()
-    init_db(conn)
-    wo_dao = WorkOrderDAO(conn)
-    rows = wo_dao.list_all_with_risk()
+    rows = lookup_service.history_orders()
     if not rows:
         st.info("暂无历史研判记录")
         return
@@ -277,12 +233,9 @@ def _render_history_list() -> None:
 
             # 查看检测详情
             if st.button("查看检测数据", key=f"detail_{row['task_id']}"):
-                detections = conn.execute(
-                    "SELECT * FROM detections WHERE task_id=?",
-                    (row["task_id"],)).fetchall()
-                comps = conn.execute(
-                    "SELECT * FROM compliances WHERE task_id=?",
-                    (row["task_id"],)).fetchall()
+                detail = lookup_service.task_detection_detail(row["task_id"])
+                detections = detail["detections"]
+                comps = detail["compliances"]
                 if detections:
                     st.caption(f"视觉检测结果（{len(detections)} 条）")
                     for d in detections:

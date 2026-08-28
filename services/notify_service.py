@@ -37,10 +37,12 @@ class NotificationService:
         self._conn = conn
         self._demo_mode_override = demo_mode
 
-    def _get_conn(self):
+    def _get_conn(self) -> tuple[object, bool]:
+        """返回 (连接, 是否本服务自建)。自建连接由调用方 try/finally 关闭
+        （Phase 1 连接泄漏修复：此前 push 路径建连后从不关闭）。"""
         if self._conn is not None:
-            return self._conn
-        return get_conn(self.db_path or DEFAULT_DB_PATH)
+            return self._conn, False
+        return get_conn(self.db_path or DEFAULT_DB_PATH), True
 
     # ---------- 配置 ----------
     def _conf(self) -> dict:
@@ -65,6 +67,10 @@ class NotificationService:
     def image_base_url(self) -> str:
         return str(self._conf().get("image_base_url", "") or "").strip().rstrip("/")
 
+    def allow_private_webhook(self) -> bool:
+        """内网 webhook 白名单开关（内网中继部署时显式开启，默认拒绝）。"""
+        return bool(self._conf().get("allow_private_webhook", False))
+
     def cooldown_sec(self) -> float:
         return max(0.0, float(self._conf().get("cooldown_sec", 60) or 60))
 
@@ -73,6 +79,58 @@ class NotificationService:
         if self._demo_mode_override is not None:
             return bool(self._demo_mode_override)
         return bool(self._conf().get("demo_mode", False))
+
+    # ---------- webhook SSRF 防护（Phase 1）----------
+    @staticmethod
+    def _is_private_host(host: str) -> bool:
+        """判定主机是否属内网/回环段（SSRF 面）。域名仅做词法判定，
+        不做 DNS 解析——完整防 rebinding 需出口层配合（见 README 部署建议）。"""
+        import ipaddress
+        try:
+            ip = ipaddress.ip_address(host)
+            return (ip.is_private or ip.is_loopback or ip.is_link_local
+                    or ip.is_reserved)
+        except ValueError:
+            return (host == "localhost" or host.endswith(".local")
+                    or host.endswith(".internal"))
+
+    def check_webhook_url(self) -> str | None:
+        """校验 webhook_url 安全性，返回错误消息或 None（通过）。
+
+        规则：生产仅 https 且拒绝内网地址段；演示模式额外允许 http 回环
+        （本地 mock webhook）。内网中继部署可显式置 allow_private_webhook=true。
+        """
+        url = self.webhook_url()
+        if not url:
+            return None
+        try:
+            parts = urllib.parse.urlsplit(url)
+        except ValueError:
+            return "webhook_url 无法解析"
+        scheme = parts.scheme.lower()
+        host = (parts.hostname or "").lower()
+        if not host:
+            return "webhook_url 缺少主机名"
+        demo = self._demo_mode()
+        demo_loopback = (demo and scheme == "http"
+                         and host in ("localhost", "127.0.0.1", "::1"))
+        if scheme != "https" and not demo_loopback:
+            return (f"不支持的 scheme: {scheme or '（空）'}"
+                    "（生产仅 https；演示模式允许 http 回环）")
+        if demo_loopback:
+            return None                       # 演示模式本地 mock 回环直接放行
+        if not self.allow_private_webhook() and self._is_private_host(host):
+            return f"拒绝内网地址 {host}（防 SSRF；内网中继请置 notify.allow_private_webhook=true）"
+        return None
+
+    @staticmethod
+    def _sanitize_error(err: str | None) -> str:
+        """错误信息入库前截断脱敏：抹去 URL 查询串（webhook key 防泄漏）。"""
+        if not err:
+            return ""
+        import re
+        masked = re.sub(r"\?\S*", "?***", str(err))
+        return masked[:200]
 
     def _log_channel(self) -> str:
         ch = self.channel()
@@ -157,7 +215,17 @@ class NotificationService:
 
     def push_alarm(self, alarm_id: str) -> dict:
         """同步推送一次告警并写 notification_logs；返回结果字典。"""
-        conn = self._get_conn()
+        conn, owned = self._get_conn()
+        try:
+            return self._push_alarm_with(conn, alarm_id)
+        finally:
+            if owned:
+                try:
+                    conn.close()
+                except Exception:  # noqa: BLE001 关闭失败不影响结果
+                    pass
+
+    def _push_alarm_with(self, conn, alarm_id: str) -> dict:
         init_db(conn)
         logs = NotificationLogDAO(conn)
         log_channel = self._log_channel()
@@ -168,6 +236,13 @@ class NotificationService:
                         "推送未启用或未配置 webhook_url")
             return {"ok": False, "status": "skipped",
                     "error": "推送未启用或未配置 webhook_url"}
+        # Phase 1 SSRF 防护：scheme/内网段校验不过即 skipped 留痕
+        guard_err = self.check_webhook_url()
+        if not demo and guard_err:
+            logs.insert(alarm_id, log_channel, "skipped",
+                        self._sanitize_error(guard_err))
+            return {"ok": False, "status": "skipped",
+                    "error": self._sanitize_error(guard_err)}
 
         alarm = self._alarm_row_to_dict(AlarmEventDAO(conn).get_by_id(alarm_id))
         if not alarm:
@@ -202,6 +277,7 @@ class NotificationService:
             if attempt < self.retries():
                 time.sleep(0.5 * (attempt + 1))
 
+        last_error = self._sanitize_error(last_error)
         logs.insert(alarm_id, log_channel, "failed", last_error)
         return {"ok": False, "status": "failed", "error": last_error}
 
@@ -227,6 +303,10 @@ class NotificationService:
         if self._demo_mode():
             self._capture(payload)
             return
+        # 纵深防御：调用方已校验过，发送前再拦一次（防中途改配置）
+        guard = self.check_webhook_url()
+        if guard:
+            raise ValueError(self._sanitize_error(guard))
         data = json.dumps(payload, ensure_ascii=False).encode("utf-8")
         req = urllib.request.Request(
             self.webhook_url(), data=data,
@@ -295,21 +375,35 @@ class NotificationService:
 
         push_overdue / push_dispatch / test_push 共用；未启用时 skipped 留痕。
         """
-        conn = self._get_conn()
-        init_db(conn)
-        logs = NotificationLogDAO(conn)
-        log_channel = self._log_channel()
-        demo = self._demo_mode()
-        if not demo and (not self.enabled() or not self.webhook_url()):
-            logs.insert(sample["id"], log_channel, "skipped",
-                        "推送未启用或未配置 webhook_url")
-            return {"ok": False, "status": "skipped",
-                    "error": "推送未启用或未配置 webhook_url"}
+        conn, owned = self._get_conn()
         try:
-            self._post(self.build_payload(sample))
-            logs.insert(sample["id"], log_channel, "sent", None)
-            return {"ok": True, "status": "sent"}
-        except Exception as exc:  # noqa: BLE001
-            err = str(exc)[:200]
-            logs.insert(sample["id"], log_channel, "failed", err)
-            return {"ok": False, "status": "failed", "error": err}
+            init_db(conn)
+            logs = NotificationLogDAO(conn)
+            log_channel = self._log_channel()
+            demo = self._demo_mode()
+            if not demo and (not self.enabled() or not self.webhook_url()):
+                logs.insert(sample["id"], log_channel, "skipped",
+                            "推送未启用或未配置 webhook_url")
+                return {"ok": False, "status": "skipped",
+                        "error": "推送未启用或未配置 webhook_url"}
+            # Phase 1 SSRF 防护：scheme/内网段校验不过即 skipped 留痕
+            guard_err = self.check_webhook_url()
+            if not demo and guard_err:
+                logs.insert(sample["id"], log_channel, "skipped",
+                            self._sanitize_error(guard_err))
+                return {"ok": False, "status": "skipped",
+                        "error": self._sanitize_error(guard_err)}
+            try:
+                self._post(self.build_payload(sample))
+                logs.insert(sample["id"], log_channel, "sent", None)
+                return {"ok": True, "status": "sent"}
+            except Exception as exc:  # noqa: BLE001
+                err = self._sanitize_error(str(exc))
+                logs.insert(sample["id"], log_channel, "failed", err)
+                return {"ok": False, "status": "failed", "error": err}
+        finally:
+            if owned:
+                try:
+                    conn.close()
+                except Exception:  # noqa: BLE001
+                    pass

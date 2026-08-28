@@ -79,7 +79,9 @@ class AuthService:
             fails.append(now)
             self.audit.insert(None, "login_fail",
                               _detail_json({"username": username}))
-            return {"ok": False, "error": "用户不存在"}
+            # Phase 1 消除用户名枚举：不存在/密码错误统一口径，
+            # 审计明细不再区分（用户名保留供运维排查）
+            return {"ok": False, "error": "用户名或密码错误"}
         if row["disabled"]:
             self.audit.insert(row["id"], "login_fail",
                               _detail_json({"detail": "账号已停用"}))
@@ -97,8 +99,8 @@ class AuthService:
                     "must_change_password": bool(row["must_change_password"])}
         fails.append(now)
         self.audit.insert(user_id, "login_fail",
-                          _detail_json({"detail": "密码错误"}))
-        return {"ok": False, "error": "密码错误"}
+                          _detail_json({"username": username}))
+        return {"ok": False, "error": "用户名或密码错误"}
 
     def check_permission(self, user_id: str, action: str) -> bool:
         """按用户角色判定是否允许某操作；停用账号一律拒绝（立即生效）。"""

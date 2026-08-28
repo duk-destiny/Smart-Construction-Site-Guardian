@@ -3,17 +3,14 @@
 列出派给本人的工单：查看要求与截止 → 填整改说明 + 拍照上传 → 申请验收；
 被驳回的单子展示原因并可重新提交。所有写操作均由显式按钮触发，
 对话/意图入口不可达本页（读写硬隔离，见方案文档 5.2）。
+Phase 0：照片落盘与工单读写收口到 services.order_service，本页零 get_conn/DAO。
 """
 from __future__ import annotations
-
 
 import streamlit as st
 from ui.page_helpers import safe_page
 
-from core.evidence import save_rectification_photo
-from dao.db import get_conn, init_db
-from services.audit_service import AuditService
-from services.dispatch_service import DispatchService
+from services import order_service
 from services.permission_service import PermissionError as ServicePermissionError
 
 _STATUS_TAG = {
@@ -49,10 +46,7 @@ def render_my_orders() -> None:
         st.info("该页面向「整改责任人」账号开放（演示账号 lisi / demo1234）。")
         return
 
-    conn = get_conn()
-    init_db(conn)
-    svc = DispatchService(conn)
-    orders = svc.orders.list_by_assignee(user_id)
+    orders = order_service.my_orders(user_id)
     username = st.session_state.get("username", "")
 
     if not orders:
@@ -94,21 +88,16 @@ def render_my_orders() -> None:
 
             if st.button("📤 提交整改并申请验收", key=f"submit_{order['id']}",
                          use_container_width=True):
-                paths: list[str] = []
-                for f in uploads or []:
-                    path = save_rectification_photo(
-                        order["id"], f.name, f.getvalue())
-                    if path:
-                        paths.append(path)
                 try:
-                    svc.submit_rectification(order["id"], user_id, note, paths)
+                    ok, msg = order_service.submit_rectification(
+                        order["id"], user_id, note, uploads or [])
                 except ServicePermissionError as e:
                     st.error(f"权限不足：{e}")
                 except ValueError as e:
                     st.error(str(e))
                 else:
-                    AuditService(conn).append(
-                        user_id, "rectification_submit_view",
-                        {"order_id": order["id"], "images": len(paths)})
-                    st.success("已提交验收 ✅ 请等待复核结果")
-                    st.rerun()
+                    if ok:
+                        st.success(msg)
+                        st.rerun()
+                    else:
+                        st.error(msg)

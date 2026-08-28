@@ -2,6 +2,8 @@
 
 零依赖轮询方案（A）：st.camera_input 捕获帧 → 轻链路检测 → 三级合规 + 红框高亮；
 不合规时触发 800Hz 声音警报（仅实时态，A2）与 Toast 提示（B2）。
+Phase 0：引擎单例/视频源工具在 services.realtime_entry，帧持久化与告警
+链路在 services.history_service——本页零 get_conn/DAO/core。
 """
 from __future__ import annotations
 
@@ -16,11 +18,8 @@ import numpy as np
 import streamlit as st
 from ui.page_helpers import safe_page
 
-from core.realtime_engine import RealtimeEngine
-from core.video_source import MultiSourceMonitor, mask_source
-from dao.db import get_conn, init_db
-from dao.models import DetectionRecordDAO
-from services.task_service import TaskService
+from core.compliance import SEVERITY  # 纯常量映射（展示分级），白名单
+from services import history_service, realtime_entry
 from ui.components import compliance_banner, severity_summary
 from core.logging import get_logger
 log = get_logger(__name__)
@@ -45,68 +44,17 @@ def _alarm_html() -> str:
             f'<a href="data:audio/wav;base64,{b64}" download="alarm.wav">下载警报音</a></audio>')
 
 
-# v0.6 预热改造：模块级单例 + 锁，取代 st.cache_resource——后者在预热线程
-# （非 Streamlit 脚本线程）中调用会绕过缓存，导致预热白做、首请求重复建引擎。
+# 引擎单例/预热已收口到 services.realtime_entry（Phase 0）：
 # 预热线程（app._background_prewarm）与页面经同一入口共享实例；
-# admin 换模型后 page_admin._reload_running_engines 继续经本入口调 reload()。
-_ENGINE_LOCK = __import__("threading").Lock()
-_ENGINE: RealtimeEngine | None = None
-
-
-def _get_engine() -> RealtimeEngine:
-    global _ENGINE
-    if _ENGINE is None:
-        with _ENGINE_LOCK:
-            if _ENGINE is None:  # 双重检查：并发首访只建一次
-                _ENGINE = RealtimeEngine()
-    return _ENGINE
-
-
-def _prewarm_engine() -> None:
-    """启动期预热入口：构建双场景检测头（ONNX 会话进程级缓存复用）。
-
-    由 app.py 预热守护线程调用；完成/失败都打一条日志，供启动排查与
-    答辩展示"模型前置预热、消除首请求卡顿"的启动日志证据。
-    """
-    global _ENGINE
-    try:
-        eng = _get_engine()
-        n = len(eng.engines)
-        log.info(f"[prewarm] YOLO 双场景检测头预热完成：{n} 个检测头已就绪"
-                 if n else "[prewarm] 预热完成但未加载到任何检测头（检查权重路径）")
-    except Exception as exc:  # noqa: BLE001 预热失败不影响页面按需重试
-        _ENGINE = None
-        log.warning(f"[prewarm] YOLO 预热失败（将由首请求重试）: {exc}")
+# admin 换模型后 page_admin._reload_running_engines 经该入口调 reload()。
 
 
 def _persist(session_id: str, frame_status: str, dets: list[dict]) -> None:
-    conn = None
-    try:
-        conn = get_conn()
-        init_db(conn)
-        dao = DetectionRecordDAO(conn)
-        rows = [{
-            "scene_id": d.get("scene"),
-            "cls": d.get("cls"),
-            "conf": d.get("conf", 0.0),
-            "severity": _sev_of(d.get("cls")),
-            "track_id": d.get("track_id"),
-            "track_frames": d.get("track_frames"),
-        } for d in dets]
-        dao.bulk_insert(session_id, frame_status, rows, mode="realtime")
-    except Exception as e:  # noqa: BLE001 历史写入失败不应中断监测
-        log.warning(f"历史持久化失败: {e}")
-    finally:
-        # 每帧一连接，必须显式关闭，长跑不泄漏句柄
-        if conn is not None:
-            try:
-                conn.close()
-            except Exception:  # noqa: BLE001
-                pass
+    """单帧持久化（连接与 SQL 在 services.history_service；失败留痕不中断）。"""
+    history_service.record_frame(session_id, frame_status, dets, mode="realtime")
 
 
 def _sev_of(cls: str | None) -> str:
-    from core.compliance import SEVERITY
     return SEVERITY.get(cls, "warning")
 
 
@@ -117,7 +65,7 @@ def render_realtime() -> None:
     if "_realtime_session" not in st.session_state:
         st.session_state["_realtime_session"] = f"s_{uuid.uuid4().hex[:12]}"
 
-    engine = _get_engine()
+    engine = realtime_entry.get_engine()
     if not engine.available:
         st.error("未加载到任何检测模型，请确认 data/models 下权重文件存在（"
                  "yolov8_fire_smoke_v2.onnx / ppe_yolov8_v2.onnx）。")
@@ -140,9 +88,9 @@ def render_realtime() -> None:
             if not sources:
                 st.warning("请先输入至少一个 RTSP/本地视频源")
             else:
-                results = MultiSourceMonitor(sources).grab_all(engine.analyze, engine.draw)
+                results = realtime_entry.MultiSourceMonitor(sources).grab_all(engine.analyze, engine.draw)
                 st.session_state["_rtsp_results"] = results
-                alarm_conn = None
+                alarm_errors: list[str] = []
                 try:
                     for r in results:
                         if not r.get("ok"):
@@ -155,11 +103,9 @@ def render_realtime() -> None:
                             crit = [d for d in dets_r if _sev_of(d.get("cls")) == "critical"] or [dets_r[0]]
                             for d in crit[:1]:
                                 try:
-                                    if alarm_conn is None:
-                                        # 本轮抓取共用一条连接，避免逐告警反复建连
-                                        alarm_conn = get_conn()
-                                        init_db(alarm_conn)
-                                    TaskService(alarm_conn).raise_alarm(
+                                    # Phase 0：告警链路（建告警→证据→推送→条款挂载）
+                                    # 全在服务层，连接自持
+                                    history_service.raise_realtime_alarm(
                                         session_id=st.session_state.get("_realtime_session"),
                                         scene_id=d.get("scene"),
                                         cls=d.get("cls"),
@@ -169,12 +115,10 @@ def render_realtime() -> None:
                                     )
                                 except Exception as exc:  # noqa: BLE001 单条告警失败不中断本轮
                                     log.warning(f"实时告警触发失败（{r.get('source')}）: {exc}")
+                                    alarm_errors.append(str(exc))
                 finally:
-                    if alarm_conn is not None:
-                        try:
-                            alarm_conn.close()
-                        except Exception:  # noqa: BLE001
-                            pass
+                    if alarm_errors:
+                        st.caption(f"本轮 {len(alarm_errors)} 条告警触发失败，详见服务端日志")
                 st.success(f"已抓取 {sum(1 for r in results if r.get('ok'))} 路源")
     with st.expander("后台自动轮询监控"):
         import services.monitor_service as mon_svc
@@ -182,8 +126,8 @@ def render_realtime() -> None:
         if mon is None:
             st.caption("后台轮询未启动：config.yaml 中 monitor.enabled=false 或未配置 sources。")
             if st.button("启动后台轮询", key="mon_start"):
-                from core.config import ConfigLoader
-                mconf = ConfigLoader().get("monitor") or {}
+                from core.config import shared_config
+                mconf = shared_config().get("monitor") or {}
                 msrcs = [str(x).strip() for x in (mconf.get("sources") or []) if str(x).strip()]
                 if not msrcs:
                     st.warning("config.yaml 的 monitor.sources 为空，无法启动")
@@ -203,7 +147,7 @@ def render_realtime() -> None:
             st.caption(f"间隔 {mstatus['interval_sec']:.0f}s ｜ 冷却 {mstatus['cooldown_sec']:.0f}s ｜ 源数 {len(mstatus['sources'])}")
             if mstatus["sources"]:
                 # v0.8：展示层打码 RTSP 凭据（数据库/内部链路仍存原始 source）
-                st.code("\n".join(mask_source(s) for s in mstatus["sources"]))
+                st.code("\n".join(realtime_entry.mask_source(s) for s in mstatus["sources"]))
             if mstatus["last_error"]:
                 st.error(mstatus["last_error"])
             if st.button("停止后台轮询", key="mon_stop"):
@@ -212,11 +156,10 @@ def render_realtime() -> None:
                 st.rerun()
             st.divider()
             if st.button("源连通性自检", key="mon_src_check"):
-                from core.video_source import check_source
                 for _src in (mstatus["sources"] or ["demo://"]):
-                    _r = check_source(_src)
+                    _r = realtime_entry.check_source(_src)
                     _flag = "✅" if _r["ok"] else "❌"
-                    st.caption(f"{_flag} {mask_source(_src)} ｜ {_r['width']}×{_r['height']} ｜ {_r['fps']:.1f}fps" + (f" ｜ {_r['error']}" if _r['error'] else ""))
+                    st.caption(f"{_flag} {realtime_entry.mask_source(_src)} ｜ {_r['width']}×{_r['height']} ｜ {_r['fps']:.1f}fps" + (f" ｜ {_r['error']}" if _r['error'] else ""))
     _show_rtsp_results()
 
     img = st.camera_input("现场画面", key="realtime_cam")
@@ -255,12 +198,9 @@ def render_realtime() -> None:
     # 告警生命周期：高危帧创建告警事件 → 证据截图留存 → 异步外部推送
     if comp["level"] == "critical" and dets:
         crit = [d for d in dets if _sev_of(d.get("cls")) == "critical"] or [dets[0]]
-        conn = None
-        try:
-            conn = get_conn()
-            init_db(conn)
-            for d in crit[:1]:
-                TaskService(conn).raise_alarm(
+        for d in crit[:1]:
+            try:
+                history_service.raise_realtime_alarm(
                     session_id=st.session_state.get("_realtime_session"),
                     scene_id=d.get("scene"),
                     cls=d.get("cls"),
@@ -268,14 +208,8 @@ def render_realtime() -> None:
                     source="camera",
                     annotated_bgr=annotated,
                 )
-        except Exception:
-            pass
-        finally:
-            if conn is not None:
-                try:
-                    conn.close()
-                except Exception:  # noqa: BLE001
-                    pass
+            except Exception as exc:  # noqa: BLE001 告警失败不中断监测，但留痕
+                log.warning(f"实时告警触发失败（camera）: {exc}")
 
     # 不合规：声音警报（A2）+ Toast（B2）
     now = time.time()
@@ -346,7 +280,7 @@ def _show_rtsp_results() -> None:
     st.divider()
     st.subheader("多路视频源结果")
     for r in results:
-        st.caption(f"源 {r['index'] + 1}：{mask_source(str(r['source']))}")
+        st.caption(f"源 {r['index'] + 1}：{realtime_entry.mask_source(str(r['source']))}")
         if not r.get("ok"):
             st.warning("读取失败，请检查 RTSP/文件路径后重试")
             continue

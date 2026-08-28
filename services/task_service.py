@@ -360,10 +360,10 @@ class TaskService:
             try:
                 if not alarm_id or not scene_id or not cls:
                     return
-                from core.config import ConfigLoader
+                from core.config import shared_config
                 from core.rag_engine import RagEngine
                 from core.yolo_engine import WHITELIST_CN
-                kb = (ConfigLoader().get_scene(scene_id) or {}).get("kb_collection")
+                kb = (shared_config().get_scene(scene_id) or {}).get("kb_collection")
                 if not kb:
                     return
                 desc = WHITELIST_CN.get(cls)
@@ -374,8 +374,13 @@ class TaskService:
                     return
                 no, text = top.get("clause_no", ""), top.get("clause_text", "")
                 clause = (f"第{no}条 {text}".strip()) if no else text
-                if clause:
-                    self.alarms.update_clause(alarm_id, clause)
+                if not clause:
+                    return
+                # Phase 1：worker 内自开自关连接——此前复用调用方连接，
+                # 调用方 finally close 后后台线程写库属跨线程悬空句柄
+                from services.db import scoped
+                with scoped() as conn:
+                    AlarmEventDAO(conn).update_clause(alarm_id, clause)
             except Exception as exc:  # noqa: BLE001 条款挂载失败不影响告警，但留痕
                 log.warning(f"告警 {alarm_id} 条款挂载失败: {exc}")
 
@@ -434,60 +439,70 @@ class TaskService:
         action_payload = (agent_results.get("action", {}).get("payload")
                           if isinstance(agent_results.get("action"), dict) else {}) or {}
 
-        # 1) 视觉检测结果
-        det_rows: list[dict] = []
-        for d in vision_payload.get("detections") or []:
-            det_rows.append({
-                "task_id": task_id,
-                "frame_path": None,
-                "cls": d.get("cls", ""),
-                "conf": float(d.get("conf", 0)),
-                "bbox_json": json.dumps(d.get("bbox", []), ensure_ascii=False),
-                "violation_desc": d.get("violation_desc", ""),
-            })
-        if det_rows:
-            self.detections.bulk_insert(det_rows)
+        # Phase 1 事务化：六段写挂起逐段提交，末尾单次 commit；
+        # 任一段失败整体回滚，杜绝"半张工单"（有 risk 无 order 等中间态）
+        try:
+            # 1) 视觉检测结果
+            det_rows: list[dict] = []
+            for d in vision_payload.get("detections") or []:
+                det_rows.append({
+                    "task_id": task_id,
+                    "frame_path": None,
+                    "cls": d.get("cls", ""),
+                    "conf": float(d.get("conf", 0)),
+                    "bbox_json": json.dumps(d.get("bbox", []), ensure_ascii=False),
+                    "violation_desc": d.get("violation_desc", ""),
+                })
+            if det_rows:
+                self.detections.bulk_insert(det_rows, commit=False)
 
-        # 2) 规范合规结果
-        comp_rows: list[dict] = []
-        for c in rule_payload.get("compliance") or []:
-            comp_rows.append({
-                "task_id": task_id,
-                "verdict": c.get("verdict", ""),
-                "clause_no": c.get("clause_no") or c.get("clause_ref") or "",
-                "clause_text": c.get("clause_text", ""),
-                "score": None,
-            })
-        if comp_rows:
-            self.compliances.bulk_insert(comp_rows)
+            # 2) 规范合规结果
+            comp_rows: list[dict] = []
+            for c in rule_payload.get("compliance") or []:
+                comp_rows.append({
+                    "task_id": task_id,
+                    "verdict": c.get("verdict", ""),
+                    "clause_no": c.get("clause_no") or c.get("clause_ref") or "",
+                    "clause_text": c.get("clause_text", ""),
+                    "score": None,
+                })
+            if comp_rows:
+                self.compliances.bulk_insert(comp_rows, commit=False)
 
-        # 3) 融合风险
-        risk_level = fusion_payload.get("risk_level") or action_payload.get("risk_level") or "一般"
-        self.risks.insert(
-            task_id=task_id,
-            risk_level=risk_level,
-            reasons_json=json.dumps(fusion_payload.get("reasons") or [], ensure_ascii=False),
-            filtered_fp_json=json.dumps(fusion_payload.get("filtered_fp") or [], ensure_ascii=False),
-        )
+            # 3) 融合风险
+            risk_level = fusion_payload.get("risk_level") or action_payload.get("risk_level") or "一般"
+            self.risks.insert(
+                task_id=task_id,
+                risk_level=risk_level,
+                reasons_json=json.dumps(fusion_payload.get("reasons") or [], ensure_ascii=False),
+                filtered_fp_json=json.dumps(fusion_payload.get("filtered_fp") or [], ensure_ascii=False),
+                commit=False,
+            )
 
-        # 4) 工单
-        wo = action_payload.get("work_order") or {}
-        self.work_orders.insert(
-            task_id=task_id,
-            hazard_desc=wo.get("hazard_desc", ""),
-            clause=wo.get("clause", ""),
-            requirement=wo.get("requirement", ""),
-            risk_level=risk_level,
-            worker_notice=action_payload.get("worker_notice", ""),
-        )
+            # 4) 工单
+            wo = action_payload.get("work_order") or {}
+            self.work_orders.insert(
+                task_id=task_id,
+                hazard_desc=wo.get("hazard_desc", ""),
+                clause=wo.get("clause", ""),
+                requirement=wo.get("requirement", ""),
+                risk_level=risk_level,
+                worker_notice=action_payload.get("worker_notice", ""),
+                commit=False,
+            )
 
-        # 5) Agent 运行证据链：展示多 Agent 协同、耗时与输出摘要
-        self.save_agent_runs(task_id, agent_results)
+            # 5) Agent 运行证据链：展示多 Agent 协同、耗时与输出摘要
+            self.save_agent_runs(task_id, agent_results, commit=False)
 
-        # 标记任务完成
-        self.tasks.update_status(task_id, "completed")
+            # 标记任务完成
+            self.tasks.update_status(task_id, "completed", commit=False)
+            self.conn.commit()
+        except Exception:
+            self.conn.rollback()
+            raise
 
-    def save_agent_runs(self, task_id: str, agent_results: dict) -> None:
+    def save_agent_runs(self, task_id: str, agent_results: dict,
+                        commit: bool = True) -> None:
         """持久化各 Agent 的执行轨迹，供证据链追溯与答辩演示使用。"""
         rows: list[dict] = []
         for agent, node in (agent_results or {}).items():
@@ -507,7 +522,7 @@ class TaskService:
                 "error": node.get("error"),
             })
         if rows:
-            self.agent_runs.bulk_insert(rows)
+            self.agent_runs.bulk_insert(rows, commit=commit)
 
     @staticmethod
     def _summarize_input(payload) -> dict:

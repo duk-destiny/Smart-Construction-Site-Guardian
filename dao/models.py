@@ -78,13 +78,14 @@ class TaskDAO:
         self.conn = conn
 
     def insert(self, user_id: str, permit_json: str, status: str = "pending",
-               source: str = "upload") -> str:
+               source: str = "upload", commit: bool = True) -> str:
         tid = _new_id("t")
         self.conn.execute(
             "INSERT INTO tasks(id,user_id,permit_json,status,source,created_at) "
             "VALUES(?,?,?,?,?,datetime('now'))",
             (tid, user_id, permit_json, status, source))
-        self.conn.commit()
+        if commit:
+            self.conn.commit()
         return tid
 
     def get(self, task_id: str):
@@ -96,10 +97,12 @@ class TaskDAO:
             "SELECT * FROM tasks WHERE user_id=? ORDER BY created_at DESC",
             (user_id,)).fetchall()
 
-    def update_status(self, task_id: str, status: str) -> None:
+    def update_status(self, task_id: str, status: str,
+                      commit: bool = True) -> None:
         self.conn.execute(
             "UPDATE tasks SET status=? WHERE id=?", (status, task_id))
-        self.conn.commit()
+        if commit:
+            self.conn.commit()
 
 
 class DetectionDAO:
@@ -108,7 +111,7 @@ class DetectionDAO:
     def __init__(self, conn: sqlite3.Connection) -> None:
         self.conn = conn
 
-    def bulk_insert(self, rows: list[dict]) -> None:
+    def bulk_insert(self, rows: list[dict], commit: bool = True) -> None:
         data = [(
             _new_id("d"), r["task_id"], r.get("frame_path"), r["cls"],
             r["conf"], r.get("bbox_json"), r.get("violation_desc"))
@@ -116,7 +119,8 @@ class DetectionDAO:
         self.conn.executemany(
             "INSERT INTO detections(id,task_id,frame_path,cls,conf,bbox_json,violation_desc) "
             "VALUES(?,?,?,?,?,?,?)", data)
-        self.conn.commit()
+        if commit:
+            self.conn.commit()
 
 
 class ComplianceDAO:
@@ -125,14 +129,15 @@ class ComplianceDAO:
     def __init__(self, conn: sqlite3.Connection) -> None:
         self.conn = conn
 
-    def bulk_insert(self, rows: list[dict]) -> None:
+    def bulk_insert(self, rows: list[dict], commit: bool = True) -> None:
         data = [(
             _new_id("c"), r["task_id"], r["verdict"], r.get("clause_no"),
             r.get("clause_text"), r.get("score")) for r in rows]
         self.conn.executemany(
             "INSERT INTO compliances(id,task_id,verdict,clause_no,clause_text,score) "
             "VALUES(?,?,?,?,?,?)", data)
-        self.conn.commit()
+        if commit:
+            self.conn.commit()
 
 
 class RiskDAO:
@@ -142,13 +147,14 @@ class RiskDAO:
         self.conn = conn
 
     def insert(self, task_id: str, risk_level: str, reasons_json: str,
-               filtered_fp_json: str) -> str:
+               filtered_fp_json: str, commit: bool = True) -> str:
         rid = _new_id("r")
         self.conn.execute(
             "INSERT INTO risks(id,task_id,risk_level,reasons_json,filtered_fp_json) "
             "VALUES(?,?,?,?,?)",
             (rid, task_id, risk_level, reasons_json, filtered_fp_json))
-        self.conn.commit()
+        if commit:
+            self.conn.commit()
         return rid
 
     def get_by_task(self, task_id: str):
@@ -169,13 +175,15 @@ class WorkOrderDAO:
         self.conn = conn
 
     def insert(self, task_id: str, hazard_desc: str, clause: str, requirement: str,
-               risk_level: str, worker_notice: str) -> str:
+               risk_level: str, worker_notice: str,
+               commit: bool = True) -> str:
         wid = _new_id("w")
         self.conn.execute(
             "INSERT INTO work_orders(id,task_id,hazard_desc,clause,requirement,risk_level,worker_notice,created_at) "
             "VALUES(?,?,?,?,?,?,?,datetime('now'))",
             (wid, task_id, hazard_desc, clause, requirement, risk_level, worker_notice))
-        self.conn.commit()
+        if commit:
+            self.conn.commit()
         return wid
 
     def get_by_task(self, task_id: str):
@@ -272,11 +280,13 @@ class AuditDAO:
     def __init__(self, conn: sqlite3.Connection) -> None:
         self.conn = conn
 
-    def insert(self, user_id: str | None, action: str, detail_json: str) -> int:
+    def insert(self, user_id: str | None, action: str, detail_json: str,
+               commit: bool = True) -> int:
         cur = self.conn.execute(
             "INSERT INTO audit_logs(user_id,action,detail_json,created_at) "
             "VALUES(?,?,?,datetime('now'))", (user_id, action, detail_json))
-        self.conn.commit()
+        if commit:
+            self.conn.commit()
         return cur.lastrowid
 
     def list_range(self, start: str | None = None, end: str | None = None,
@@ -418,7 +428,7 @@ class AgentRunDAO:
     def __init__(self, conn: sqlite3.Connection) -> None:
         self.conn = conn
 
-    def bulk_insert(self, rows: list[dict]) -> None:
+    def bulk_insert(self, rows: list[dict], commit: bool = True) -> None:
         """写入多条 Agent 运行记录。rows: [{task_id, agent, status, cost_ms, input_json, output_json, error}]。"""
         data = [(
             _new_id("ar"), r["task_id"], r["agent"], r.get("status", "unknown"),
@@ -429,7 +439,8 @@ class AgentRunDAO:
             "INSERT INTO agent_runs"
             "(id,task_id,agent,status,cost_ms,input_json,output_json,error,created_at) "
             "VALUES(?,?,?,?,?,?,?,?,datetime('now'))", data)
-        self.conn.commit()
+        if commit:
+            self.conn.commit()
 
     def list_by_task(self, task_id: str) -> list:
         """按任务返回 Agent 运行轨迹，按创建时间与执行顺序排列。"""
@@ -549,12 +560,13 @@ class AlarmEventDAO:
         self.conn.commit()
 
     def update_status(self, alarm_id: str, status: str,
-                      reviewed_by: str | None) -> None:
+                      reviewed_by: str | None, commit: bool = True) -> None:
         self.conn.execute(
             "UPDATE alarm_events SET status=?, reviewed_by=?, updated_at=datetime('now') "
             "WHERE id=?",
             (status, reviewed_by, alarm_id))
-        self.conn.commit()
+        if commit:
+            self.conn.commit()
 
 
 class NotificationLogDAO:

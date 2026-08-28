@@ -106,3 +106,6 @@ data/subs_frames/
 
 # 交付压缩包不进 git
 *.zip
+
+# 本地敏感配置（含真实密钥）不入 git
+config/config.yaml

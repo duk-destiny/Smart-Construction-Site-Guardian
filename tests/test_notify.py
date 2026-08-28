@@ -107,7 +107,7 @@ def test_push_success_mock_urlopen(monkeypatch):
     aid = AlarmEventDAO(conn).insert("s1", None, "hot_work", "spark", 0.9,
                                      source="camera")
     svc = _svc({"notify": {"enabled": True, "channel": "generic",
-                           "webhook_url": "http://hook"}}, conn=conn)
+                           "webhook_url": "https://example.com/hook"}}, conn=conn)
     captured = {}
 
     def fake_urlopen(req, timeout=None):
@@ -128,12 +128,12 @@ def test_push_failed_errcode(monkeypatch):
     init_db(conn)
     aid = AlarmEventDAO(conn).insert("s1", None, "hot_work", "smoke", 0.8)
     svc = _svc({"notify": {"enabled": True, "channel": "wecom",
-                           "webhook_url": "http://hook", "retries": 0}},
+                           "webhook_url": "https://example.com/hook", "retries": 0}},
                conn=conn)
 
     def fake_urlopen(req, timeout=None):
         raise urllib.error.HTTPError(
-            "http://hook", 400, "bad", {},
+            "https://example.com/hook", 400, "bad", {},
             io.BytesIO(b'{"errcode": 93000, "errmsg": "invalid webhook"}'))
 
     monkeypatch.setattr("services.notify_service.urllib.request.urlopen",

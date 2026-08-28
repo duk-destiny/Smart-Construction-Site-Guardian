@@ -56,12 +56,28 @@ _MIGRATIONS: dict[str, list[tuple[str, str]]] = {
     ],
 }
 
-def get_conn(db_path: str = DEFAULT_DB_PATH) -> sqlite3.Connection:
+# 追加式索引迁移（Phase 1）：高频查询路径补索引，幂等可重复执行
+_INDEX_MIGRATIONS: tuple[str, ...] = (
+    "CREATE INDEX IF NOT EXISTS idx_alarm_session_cls "
+    "ON alarm_events(session_id, cls, status)",
+    "CREATE INDEX IF NOT EXISTS idx_wo_assignee_status "
+    "ON work_orders(assignee_id, status)",
+    "CREATE INDEX IF NOT EXISTS idx_wo_status_deadline "
+    "ON work_orders(status, deadline)",
+    "CREATE INDEX IF NOT EXISTS idx_feedback_status "
+    "ON feedback_samples(status)",
+)
+
+def get_conn(db_path: str | None = None) -> sqlite3.Connection:
     """建立 SQLite 连接并开启 WAL 与外键约束；自动创建父目录。
 
     统一设置 row_factory=sqlite3.Row，使查询行支持列名访问（row["id"]）
     与位置访问（row[0]）兼容（DB 文档 §1/§7）。
+    db_path 缺省时**运行时**读 DEFAULT_DB_PATH（不用默认参数绑定——
+    默认参数在函数定义时求值，测试/多库场景替换模块级 DEFAULT_DB_PATH 会失效）。
     """
+    if db_path is None:
+        db_path = DEFAULT_DB_PATH
     os.makedirs(os.path.dirname(db_path) or ".", exist_ok=True)
     conn = sqlite3.connect(db_path, check_same_thread=False)
     conn.row_factory = sqlite3.Row
@@ -163,6 +179,8 @@ def init_db(conn: sqlite3.Connection) -> None:
                 if column not in existing:
                     conn.execute(
                         f"ALTER TABLE {table} ADD COLUMN {column} {ddl}")
+        for ddl in _INDEX_MIGRATIONS:
+            conn.execute(ddl)
         conn.commit()
         if key is not None:
             _SCHEMA_DONE[key] = schema_mtime

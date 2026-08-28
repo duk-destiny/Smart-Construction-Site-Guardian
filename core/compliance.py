@@ -28,17 +28,29 @@ _SEVERITY_DEFAULT: dict[str, str] = {
 SEVERITY: dict[str, str] = dict(_SEVERITY_DEFAULT)
 
 
+_SEVERITY_BUILT = False
+
+
 def _build_severity() -> None:
-    """合并 config.yaml 中 compliance.severity 覆盖项（数据驱动，C2）。"""
+    """合并 config.yaml 中 compliance.severity 覆盖项（数据驱动，C2）。
+
+    done-flag：仅首个 evaluate 调用构建一次——此前每帧重读 YAML，
+    实时连续监测下是无谓的每帧磁盘解析（Phase 1 性能项）。
+    """
+    global _SEVERITY_BUILT
+    if _SEVERITY_BUILT:
+        return
     try:
-        from core.config import ConfigLoader
-        override = ConfigLoader().get("compliance.severity") or {}
+        from core.config import shared_config
+        override = shared_config().get("compliance.severity") or {}
         if isinstance(override, dict):
             for k, v in override.items():
                 if v in ("critical", "warning", "safe"):
                     SEVERITY[k] = v
     except Exception:  # noqa: BLE001 配置缺失则使用默认
         pass
+    finally:
+        _SEVERITY_BUILT = True
 
 # 严重度 → 三级合规文案
 LEVEL_LABEL = {"critical": "不合规", "warning": "警告", "safe": "合规"}

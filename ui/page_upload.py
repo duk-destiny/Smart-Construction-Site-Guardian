@@ -5,20 +5,20 @@ Tab② 文字/语音上报：自由文本线索直接建单（source=text，跳�
     风险按 compliance.severity 查表），语音为可选转写调用——
     未配置 `asr.*` 时入口**完全不渲染**（静默，用户约定）；
 Tab③ 工单速查：输入工单号直达详情（跳报告页历史记录，只读）。
+Phase 0：任务创建/媒体落盘/速查查询收口到 services.task_entry 与
+services.lookup_service，本页零 get_conn/DAO。
 """
 from __future__ import annotations
 
 import streamlit as st
 from ui.page_helpers import safe_page
 
-from core.asr_engine import AsrEngine
 from core.compliance import SEVERITY
 from core.yolo_engine import WHITELIST_CN
-from dao.db import get_conn, init_db
-from services.task_service import TaskService
+from services import lookup_service, task_entry
 
 
-def _tab1_media(svc: TaskService) -> None:
+def _tab1_media() -> None:
     uploaded = st.file_uploader("现场图片/视频", type=["jpg", "jpeg", "png", "mp4"])
     if uploaded:
         (st.image(uploaded, caption="预览", width=320)
@@ -56,23 +56,13 @@ def _tab1_media(svc: TaskService) -> None:
             "extinguisher": extinguisher, "fire_blanket": fire_blanket,
             "approval": approval,
         }
-        tid = svc.create_task(st.session_state.get("user_id", "u_demo"), [],
-                              permit_info)
-        if uploaded:
-            import os
-            from core.evidence import sanitize_filename
-            # v0.8：文件名消毒 + 大小上限（Streamlit 默认 200MB，这里按业务再收紧）
-            if uploaded.size > 200 * 1024 * 1024:
-                st.error("文件超过 200MB 上限，请压缩或分段上传")
-                return
-            save_dir = "data/uploads"
-            os.makedirs(save_dir, exist_ok=True)
-            path = os.path.join(
-                save_dir,
-                f"{tid}_{sanitize_filename(uploaded.name, fallback='media')}")
-            with open(path, "wb") as f:
-                f.write(uploaded.getbuffer())
-            st.session_state["uploaded_path"] = path
+        tid, media_rel, err = task_entry.create_media_task(
+            st.session_state.get("user_id"), permit_info, uploaded)
+        if err:
+            st.error(err)
+            return
+        if media_rel:
+            st.session_state["uploaded_path"] = media_rel
         _goto_task(tid, permit_info, next_page="agents")
 
 
@@ -90,7 +80,7 @@ def _option_label(key: str) -> str:
     return f"{sev_tag}｜{WHITELIST_CN.get(key, key)}（{key}）"
 
 
-def _tab2_text_voice(svc: TaskService) -> None:
+def _tab2_text_voice() -> None:
     st.caption("适合摄像头拍不到的隐患（无证上岗、无交底、通道占用等）。"
                "提交后**跳过视觉研判**，风险按规则查表定级，直接进入派发闭环。")
 
@@ -126,22 +116,21 @@ def _tab2_text_voice(svc: TaskService) -> None:
                                "请手动填写。")
 
     # —— 语音入口：未配置 asr.* 时整块不渲染（静默，用户约定）——
-    asr = AsrEngine()
-    if asr.available():
+    if task_entry.asr_available():
         audio = st.audio_input("🎤 或先说一段话，转写后自动填入下方文本框")
         ca, cb = st.columns([1, 3])
         if ca.button("🎤 转写", key="btn_asr"):
             if audio is None:
                 st.warning("请先录音")
             else:
-                text = asr.transcribe(audio.getvalue(),
-                                      getattr(audio, "name", None) or "record.wav")
+                text, err = task_entry.asr_transcribe(
+                    audio.getvalue(), getattr(audio, "name", None) or "record.wav")
                 if text:
                     st.session_state["t2_desc"] = text
                     st.success("转写完成，已填入描述（可修改后提交）")
                     st.rerun()
                 else:
-                    st.warning(f"转写暂不可用：{asr.last_error or '未知原因'}，"
+                    st.warning(f"转写暂不可用：{err or '未知原因'}，"
                                "可直接手填。")
 
     st.session_state["t2_desc_raw"] = st.session_state.get("t2_desc", "")
@@ -154,45 +143,35 @@ def _tab2_text_voice(svc: TaskService) -> None:
                              placeholder="如：3号楼西侧 / 地库B区")
 
     if st.button("📝 创建文字隐患单", type="primary", use_container_width=True):
-        try:
-            tid = svc.create_text_hazard(
-                st.session_state.get("user_id", "u_demo"), desc, hkey,
-                scene_id=scene_t2, location=location)
-        except ValueError as e:
-            st.error(str(e))
-        else:
-            from core.config import ConfigLoader  # noqa: F401 占位：便于后续扩展场景文案
-            risk_row = svc.risks.get_by_task(tid)
-            level = risk_row["risk_level"] if risk_row else "一般"
-            wo = svc.work_orders.get_by_task(tid)
-            payload = {
-                "risk_level": level,
-                "vision": {"payload": {"detections": []}},
-                "work_order": {
-                    "risk_level": level,
-                    "hazard_desc": wo["hazard_desc"],
-                    "clause": wo["clause"], "requirement": wo["requirement"],
-                },
-                "worker_notice": wo["worker_notice"],
-            }
-            _goto_task(tid, {"scene": scene_t2, "area": location,
-                             "report_type": "text"}, next_page="report",
-                       result={"status": "success", "payload": payload})
+        res = task_entry.create_text_hazard(
+            st.session_state.get("user_id"), desc, hkey,
+            scene_id=scene_t2, location=location)
+        if not res.get("ok"):
+            st.error(res.get("error", "创建失败"))
+            return
+        tid = res["task_id"]
+        payload = {
+            "risk_level": res["risk_level"],
+            "vision": {"payload": {"detections": []}},
+            "work_order": res["work_order"],
+            "worker_notice": res["worker_notice"],
+        }
+        _goto_task(tid, {"scene": scene_t2, "area": location,
+                         "report_type": "text"}, next_page="report",
+                   result={"status": "success", "payload": payload})
 
 
 def _tab3_lookup() -> None:
     """只读对话式查询（P3，v0.5）：规则优先 → LLM 兜底 → 人工点选。"""
     st.caption("只读查询：支持「#w_xxx 进度」「3号工单怎么样了」「近7天逾期」"
                "「本周统计」等说法；不提供任何写操作（读写硬隔离）。")
-    conn = get_conn()
-    init_db(conn)
-    from services.intent_router import IntentRouter
-    router = IntentRouter(conn)
+    from datetime import date, timedelta
+    from services.dispatch_service import _now_str
 
     text = st.text_input("问一句", "", key="lk_q",
                          placeholder="如：最近有没有逾期的？w_123 的进度？")
     if not text.strip():
-        res = router.list_view()
+        res = lookup_service.list_view()
         if res:
             st.caption("最新待办工单（输入问题可精确查询）")
             for r in res:
@@ -202,13 +181,12 @@ def _tab3_lookup() -> None:
             st.info("暂无工单记录")
         return
 
-    route = router.route(text)
-    from services.dispatch_service import _now_str
+    route = lookup_service.route(text)
     if route.tier == "llm":
         st.caption("🤖 已理解（本地模型）")
 
     if route.action == "order_detail" and route.order_id:
-        card = router.detail_view(route.order_id)
+        card = lookup_service.detail_view(route.order_id)
         if card is None:
             st.error(f"未找到工单 {route.order_id}")
             return
@@ -227,7 +205,7 @@ def _tab3_lookup() -> None:
         pick = st.radio("匹配到多张，请选择", route.candidates,
                         format_func=lambda i: f"`{i}`",
                         key="lk_pick")
-        card = router.detail_view(pick)
+        card = lookup_service.detail_view(pick)
         if card:
             st.write(f"**状态**：{card['status']}　|　"
                      f"**责任人**：{card['assignee_name'] or '—'}　|　"
@@ -236,7 +214,7 @@ def _tab3_lookup() -> None:
         return
 
     if route.action == "overdue_stats":
-        rows = router.overdue_rows(_now_str())
+        rows = lookup_service.overdue_rows(_now_str())
         st.metric("存量逾期未整改", len(rows))
         for r in rows[:20]:
             st.markdown(f"- `{r['id']}`　{r['risk_level']}｜截止 "
@@ -245,11 +223,9 @@ def _tab3_lookup() -> None:
         return
 
     if route.action == "weekly_stats":
-        from services.report_service import WeeklyReportService
-        from datetime import date, timedelta
         end = date.today().isoformat()
         start = (date.today() - timedelta(days=route.days - 1)).isoformat()
-        s = WeeklyReportService(conn).gather(start, end)
+        s = lookup_service.weekly_stats(start, end)
         m1c, m2c, m3c, m4c = st.columns(4)
         m1c.metric("检测帧", s["frames"])
         m2c.metric("不合规帧", s["bad"])
@@ -262,7 +238,7 @@ def _tab3_lookup() -> None:
     # unknown / human：兜底展示最近列表 + 提示
     if route.hint:
         st.info(route.hint)
-    res = router.list_view()
+    res = lookup_service.list_view()
     for r in res[:10]:
         st.markdown(f"- `{r['id']}`　{r['risk_level']}｜{r['status']}"
                     f"｜责任人 {r['assignee_name'] or '—'}")
@@ -271,15 +247,12 @@ def _tab3_lookup() -> None:
 @safe_page("统一上报")
 def render_upload() -> None:
     st.title("📤 统一上报")
-    conn = get_conn()
-    init_db(conn)
-    svc = TaskService(conn)
 
     t_media, t_text, t_look = st.tabs(["📷 影像研判", "📝 文字 / 🎤 语音上报", "🔍 工单速查"])
     with t_media:
-        _tab1_media(svc)
+        _tab1_media()
     with t_text:
-        _tab2_text_voice(svc)
+        _tab2_text_voice()
     with t_look:
         _tab3_lookup()
 

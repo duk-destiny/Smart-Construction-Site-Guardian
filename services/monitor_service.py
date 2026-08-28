@@ -189,8 +189,8 @@ def stop_monitor() -> None:
 
 def ensure_monitor_started() -> RtspMonitor | None:
     """按 monitor.* 配置启动后台监控；未启用或无源时返回 None。"""
-    from core.config import ConfigLoader
-    conf = ConfigLoader().get("monitor")
+    from core.config import shared_config
+    conf = shared_config().get("monitor")
     if not isinstance(conf, dict) or not conf.get("enabled"):
         return None
     sources = [s for s in (conf.get("sources") or []) if s and s.strip()]

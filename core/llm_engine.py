@@ -18,6 +18,9 @@ import urllib.request
 import urllib.error
 
 from core.config import ConfigLoader
+from core.logging import get_logger
+
+log = get_logger(__name__)
 
 # 润色专用系统提示：强约束只依据给定信息、不得编造法规名称/编号（安全系统铁律）
 _SYSTEM = (
@@ -138,7 +141,8 @@ class LlmEngine:
                 return None
             obj = json.loads(raw[start:end + 1])
             return obj if isinstance(obj, dict) else None
-        except Exception:  # noqa: BLE001 分类失败静默交还规则层
+        except Exception as exc:  # noqa: BLE001 分类失败交还规则层，但留痕
+            log.warning(f"LLM ask_json 失败（交还规则层）: {type(exc).__name__}: {exc}")
             return None
 
     def warmup(self) -> None:

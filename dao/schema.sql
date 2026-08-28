@@ -1,5 +1,5 @@
 -- 智护工地 · 施工安全智能体 数据库 Schema（SQLite 3, WAL）
--- 8 表 + 索引 + 审计仅追加触发器 + 3 视图
+-- 12 表 + 索引 + 审计仅追加触发器 + 3 视图
 -- 全部使用 IF NOT EXISTS，保证 init_db() 幂等可重复执行
 -- 类型约定：时间用 TEXT(ISO8601)，布尔用 INTEGER(0/1)；外键需 PRAGMA foreign_keys=ON
 
@@ -104,6 +104,8 @@ CREATE TABLE IF NOT EXISTS detection_records (
     image_path  TEXT,
     source      TEXT,
     severity    TEXT,                     -- safe/warning/critical
+    track_id     TEXT,                    -- 同目标跨帧跟踪 ID（B3 追踪）
+    track_frames INTEGER,                 -- 该目标连续命中帧数
     created_at  TEXT NOT NULL
 );
 
@@ -147,6 +149,9 @@ CREATE TABLE IF NOT EXISTS alarm_events (
     scene_id    TEXT,
     cls         TEXT,
     conf        REAL,
+    image_path  TEXT,                     -- 告警证据截图（相对项目根）
+    source      TEXT,                     -- 来源（rtsp 源串/上传/巡检）
+    clause      TEXT,                     -- 异步回填的规范条款（RAG）
     status      TEXT NOT NULL DEFAULT 'new'
                 CHECK(status IN ('new','confirmed','false_alarm','resolved')),
     created_at  TEXT NOT NULL,
@@ -194,6 +199,8 @@ CREATE INDEX IF NOT EXISTS idx_detections_task   ON detections(task_id);
 CREATE INDEX IF NOT EXISTS idx_compliances_task  ON compliances(task_id);
 CREATE INDEX IF NOT EXISTS idx_risks_task        ON risks(task_id);
 CREATE INDEX IF NOT EXISTS idx_workorders_task   ON work_orders(task_id);
+CREATE INDEX IF NOT EXISTS idx_wo_assignee_status ON work_orders(assignee_id, status);
+CREATE INDEX IF NOT EXISTS idx_wo_status_deadline ON work_orders(status, deadline);
 CREATE INDEX IF NOT EXISTS idx_audit_user_time   ON audit_logs(user_id, created_at);
 CREATE INDEX IF NOT EXISTS idx_kbdocs_name       ON kb_docs(filename);
 CREATE INDEX IF NOT EXISTS idx_detrec_session     ON detection_records(session_id);
@@ -201,7 +208,9 @@ CREATE INDEX IF NOT EXISTS idx_detrec_time        ON detection_records(created_a
 CREATE INDEX IF NOT EXISTS idx_detrec_cls         ON detection_records(cls);
 CREATE INDEX IF NOT EXISTS idx_agent_runs_task    ON agent_runs(task_id, created_at);
 CREATE INDEX IF NOT EXISTS idx_feedback_time      ON feedback_samples(created_at);
+CREATE INDEX IF NOT EXISTS idx_feedback_status    ON feedback_samples(status);
 CREATE INDEX IF NOT EXISTS idx_alarm_status       ON alarm_events(status, created_at);
+CREATE INDEX IF NOT EXISTS idx_alarm_session_cls  ON alarm_events(session_id, cls, status);
 CREATE INDEX IF NOT EXISTS idx_notify_alarm       ON notification_logs(alarm_id, created_at);
 CREATE INDEX IF NOT EXISTS idx_model_name_active  ON model_registry(name, active);
 

@@ -188,31 +188,39 @@ class DispatchService:
         location = f"（来源 {alarm['source'] or 'rtsp'}）"
         desc = f"[实时告警] {desc_cn} {location}".strip()
 
-        tid = TaskDAO(conn).insert(
-            actor_user_id,
-            json.dumps({"scene": alarm["scene_id"],
-                        "report_type": "alarm", "alarm_id": alarm_id},
-                       ensure_ascii=False),
-            "completed", source="camera")
-        from agents.action_agent import ActionAgent
-        notice_template = ActionAgent()._template(desc, alarm["clause"] or "",
-                                                 risk_level)
-        requirement_line = next(
-            (line for line in notice_template.splitlines()
-             if line.startswith("整改要求")),
-            "整改要求：限期整改。").replace("整改要求：", "")
-        self.risks.insert(tid, risk_level, json.dumps([desc], ensure_ascii=False),
-                          "[]")
-        order_id = self.orders.insert(
-            task_id=tid, hazard_desc=desc, clause=alarm["clause"] or "",
-            requirement=requirement_line, risk_level=risk_level,
-            worker_notice=notice_template)
-        AlarmEventDAO(conn).update_status(alarm_id, "confirmed", actor_user_id)
-        self.audit.insert(actor_user_id, "alarm_to_order", json.dumps({
-            "alarm_id": alarm_id, "task_id": tid, "order_id": order_id,
-            "cls": cls, "risk_level": risk_level,
-        }, ensure_ascii=False))
-        return order_id
+        # Phase 1 事务化：五段写挂起逐段提交，末尾单次 commit；
+        # 中途失败整体回滚，避免"告警已 confirmed 却无工单"的悬空态
+        try:
+            tid = TaskDAO(conn).insert(
+                actor_user_id,
+                json.dumps({"scene": alarm["scene_id"],
+                            "report_type": "alarm", "alarm_id": alarm_id},
+                           ensure_ascii=False),
+                "completed", source="camera", commit=False)
+            from agents.action_agent import ActionAgent
+            notice_template = ActionAgent()._template(desc, alarm["clause"] or "",
+                                                     risk_level)
+            requirement_line = next(
+                (line for line in notice_template.splitlines()
+                 if line.startswith("整改要求")),
+                "整改要求：限期整改。").replace("整改要求：", "")
+            self.risks.insert(tid, risk_level, json.dumps([desc], ensure_ascii=False),
+                              "[]", commit=False)
+            order_id = self.orders.insert(
+                task_id=tid, hazard_desc=desc, clause=alarm["clause"] or "",
+                requirement=requirement_line, risk_level=risk_level,
+                worker_notice=notice_template, commit=False)
+            AlarmEventDAO(conn).update_status(alarm_id, "confirmed", actor_user_id,
+                                              commit=False)
+            self.audit.insert(actor_user_id, "alarm_to_order", json.dumps({
+                "alarm_id": alarm_id, "task_id": tid, "order_id": order_id,
+                "cls": cls, "risk_level": risk_level,
+            }, ensure_ascii=False), commit=False)
+            conn.commit()
+            return order_id
+        except Exception:
+            conn.rollback()
+            raise
 
     # ---------- 整改提交 ----------
     def submit_rectification(self, order_id: str, user_id: str | None,

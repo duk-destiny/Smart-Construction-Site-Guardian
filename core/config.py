@@ -103,3 +103,24 @@ class ConfigLoader:
                 return default
             node = node[part]
         return node
+
+
+# ---- 进程级共享实例（Phase 1）----
+# 热路径（实时帧合规、LLM 引擎构造等）此前各建 ConfigLoader 实例，
+# 同一 YAML 被反复解析；shared() 提供进程级缓存实例消除重复读盘。
+# 显式 path 的构造不受影响（测试注入用）；测试需隔离时用 reset_shared()。
+_SHARED: dict[str, "ConfigLoader"] = {}
+
+
+def shared_config(path: str = "config/config.yaml") -> "ConfigLoader":
+    """按 path 取进程级共享 ConfigLoader（首建后缓存）。"""
+    loader = _SHARED.get(path)
+    if loader is None:
+        loader = ConfigLoader(path)
+        _SHARED[path] = loader
+    return loader
+
+
+def reset_shared() -> None:
+    """清空共享实例（测试隔离用）。"""
+    _SHARED.clear()

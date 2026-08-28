@@ -38,8 +38,7 @@ theme.apply_theme()
 
 def _render_change_password() -> None:
     """顶栏本人改密表单（v0.8 账号治理）：验证原密码后更新。"""
-    from dao.db import get_conn
-    from services.auth_service import AuthService
+    from services.session_entry import change_own_password
 
     with st.form("topbar_change_pwd_form"):
         old_pwd = st.text_input("原密码", type="password")
@@ -50,9 +49,8 @@ def _render_change_password() -> None:
         if new_pwd != confirm:
             st.error("两次输入的新密码不一致")
             return
-        conn = get_conn()
-        res = AuthService(conn).change_password(
-            st.session_state.get("user_id"), old_pwd, new_pwd)
+        res = change_own_password(st.session_state.get("user_id"),
+                                  old_pwd, new_pwd)
         if res.get("ok"):
             st.session_state["pwd_warning"] = False
             st.success("密码已更新")
@@ -96,8 +94,8 @@ def main() -> None:
             from core.logging import get_logger
             _log = get_logger(__name__)
             try:
-                from ui.page_realtime import _prewarm_engine
-                _prewarm_engine()
+                from services import realtime_entry
+                realtime_entry.prewarm()
             except Exception as exc:  # noqa: BLE001 预热失败不阻断启动
                 _log.warning(f"YOLO 检测头预热失败: {exc}")
             # 1) RTSP 后台监控：幂等，未启用则秒返回

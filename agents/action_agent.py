@@ -158,5 +158,6 @@ class ActionAgent(AgentBase):
             )
             if polished:
                 self._wo_dao.update_notice(task_id, polished)
-        except Exception:
-            pass
+        except Exception as exc:  # noqa: BLE001 润色失败保留模板文案，但留痕
+            from core.logging import get_logger
+            get_logger(__name__).warning(f"工单 {task_id} 润色回填失败: {exc}")

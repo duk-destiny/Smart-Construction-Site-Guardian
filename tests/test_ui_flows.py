@@ -72,6 +72,7 @@ os.chdir({ROOT!r})
 import streamlit as st
 import ui.page_admin as page
 import services.notify_service as ns
+import dao.db as _db
 from dao.db import get_conn, init_db
 
 _ui_db = {str(db_file)!r}
@@ -81,9 +82,8 @@ def _conn(db_path=None):
     init_db(conn)
     return conn
 
-# 页面与推送服务使用同一个临时库
-page.get_conn = _conn
-page.init_db = init_db
+# 页面门面(scoped→dao.db.get_conn)与推送服务使用同一个临时库
+_db.DEFAULT_DB_PATH = _ui_db
 ns.get_conn = _conn
 ns.init_db = init_db
 ns.DEFAULT_DB_PATH = _ui_db   # 测试推送内部 get_conn(db_path or DEFAULT_DB_PATH) 也走临时库
@@ -136,6 +136,7 @@ os.chdir({ROOT!r})
 import streamlit as st
 import ui.page_admin as page
 import services.notify_service as ns
+import dao.db as _db
 from dao.db import get_conn, init_db
 
 _ui_db = {str(db_file)!r}
@@ -145,8 +146,7 @@ def _conn(db_path=None):
     init_db(conn)
     return conn
 
-page.get_conn = _conn
-page.init_db = init_db
+_db.DEFAULT_DB_PATH = _ui_db
 ns.get_conn = _conn
 ns.init_db = init_db
 ns.DEFAULT_DB_PATH = _ui_db   # 测试推送内部 get_conn(db_path or DEFAULT_DB_PATH) 也走临时库
@@ -209,13 +209,17 @@ page.render_realtime()
     assert any(b.label == "抓取全部源" for b in at.button)
 
 def test_admin_model_version_dropdown_switches_and_syncs_config(tmp_path):
-    """管理端「模型版本与回滚」下拉框：选历史版本→一键切换→回写 config + DB 翻转。"""
+    """管理端「模型版本与回滚」下拉框：选历史版本→一键切换→仅 DB 翻转（Phase 1）。
+
+    Phase 1 起模型切换状态唯一落 DB，不再运行时回写 config.yaml——本测试
+    断言 DB active 翻转，并确认配置文件未被改动。
+    """
     import shutil
     import sqlite3
     db_file = tmp_path / "hzz_model.db"
     cfg_copy = tmp_path / "config_copy.yaml"
-    # 复制真实 config 作为隔离写入目标（_sync_config_path 的正则才能命中 v2→v3）
     shutil.copy2(os.path.join(ROOT, "config", "config.yaml"), cfg_copy)
+    cfg_before = cfg_copy.read_text(encoding="utf-8")
 
     source = f"""
 import os, sys
@@ -223,30 +227,21 @@ sys.path.insert(0, {ROOT!r})
 os.chdir({ROOT!r})
 import streamlit as st
 import ui.page_admin as page
-import services.model_service as _ms
+import dao.db as _db
 from dao.db import get_conn, init_db
 from services.model_service import ModelService
 
 _ui_db = {str(db_file)!r}
-_cfg_copy = {str(cfg_copy)!r}
-
-# 隔离 config 写入：_sync_config_path 读/写都落到临时副本，不碰真实 config
-class _CL:
-    def __init__(self, path=None):
-        self._path = _cfg_copy
-_ms.ConfigLoader = _CL
 
 def _conn(db_path=None):
     conn = get_conn(db_path or _ui_db)
     init_db(conn)
     return conn
 
-page.get_conn = _conn
-page.init_db = init_db
+_db.DEFAULT_DB_PATH = _ui_db
 page._reload_running_engines = lambda: None  # 避免在 AppTest 进程加载 ONNX/torch
 
-# 预置两个 fire 版本：v2 活跃、v3 备选
-# 仅在首次注册：AppTest 每次 at.run() 都会重跑整段脚本，不守门会产生重复行
+# 预置两个 fire 版本：v2 活跃、v3 备选（仅首次注册，防重复行）
 conn = _conn()
 _ms_local = ModelService(conn)
 if not [m for m in _ms_local.list_models()
@@ -277,16 +272,15 @@ page.render_admin()
                 if "一键切换" in b.label and "fire" in b.label and "v3" in b.label), None)
     assert btn is not None, "选中非活跃版本后未出现一键切换按钮"
 
-    # 3) 点击切换 → 临时 config 同步成 v3 + DB 翻转
+    # 3) 点击切换 → DB 翻转，config 不回写
     btn.click()
     at.run(timeout=120)
     assert not at.exception, [str(e) for e in at.exception]
 
-    cfg_text = cfg_copy.read_text(encoding="utf-8")
-    assert "data/models/yolov8_fire_smoke_v3.onnx" in cfg_text, "config 未回写为 v3"
+    assert cfg_copy.read_text(encoding="utf-8") == cfg_before, \
+        "Phase 1：模型切换不应再运行时回写 config.yaml"
     conn = sqlite3.connect(str(db_file))
     conn.row_factory = sqlite3.Row
-    # 用 get_active 语义（active=1 + 最新）断言，避免重复行下 fetchone 命中旧行
     active_fire = conn.execute(
         "SELECT version, path FROM model_registry WHERE name='fire' AND active=1 "
         "ORDER BY created_at DESC LIMIT 1"

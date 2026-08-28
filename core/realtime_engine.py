@@ -50,6 +50,8 @@ class RealtimeEngine:
         self._build(scenes_list)
 
     def _build(self, scenes: list[str]) -> None:
+        from core.model_paths import active_weight_overrides, apply_overrides
+        overrides = active_weight_overrides()
         conf = self.cfg.get("infer.conf_thres", 0.45)
         iou = self.cfg.get("infer.iou_thres", 0.45)
         for sid in scenes:
@@ -59,7 +61,9 @@ class RealtimeEngine:
                 log.warning(f"跳过未知场景 {sid}: {e}")
                 continue
             scene_conf = scene.get("conf_thres", conf)
-            for spec in scene.get("yolo_weights", []) or []:
+            # Phase 1：模型切换状态唯一落 DB，构建时按族覆盖 config 路径
+            for spec in apply_overrides(scene.get("yolo_weights", []) or [],
+                                        overrides):
                 path = spec.get("path")
                 try:
                     eng = YoloEngine(conf_thres=scene_conf, iou_thres=iou,

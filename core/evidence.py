@@ -12,10 +12,12 @@ from datetime import datetime
 import cv2
 
 from core.logging import get_logger
+from core.paths import data_path, to_rel
 
 log = get_logger(__name__)
 
-EVIDENCE_DIR = os.path.join("data", "alarms")
+# 目录锚定 BASE_DIR（任意 cwd 启动不破）；DB/URL 仍存相对 posix 路径
+EVIDENCE_DIR = data_path("alarms")
 
 # 文件名安全字符白名单：字(Unicode)/数字/下划线/点/横线，其余一律压成下划线。
 # \w 在 str 模式下含中文，正常中文文件名不受影响。
@@ -54,13 +56,13 @@ def save_alarm_evidence(session_id: str | None, cls: str | None,
             return None
         with open(rel, "wb") as f:
             f.write(buf.tobytes())
-        return rel
+        return to_rel(rel)
     except Exception as exc:  # noqa: BLE001 证据留存失败不应中断告警，但留痕
         log.warning(f"告警证据截图保存失败: {exc}")
         return None
 
 
-RECTIFICATION_DIR = os.path.join("data", "rectifications")
+RECTIFICATION_DIR = data_path("rectifications")
 
 
 def save_rectification_photo(order_id: str, filename: str, blob: bytes) -> str | None:
@@ -79,7 +81,7 @@ def save_rectification_photo(order_id: str, filename: str, blob: bytes) -> str |
         rel = os.path.join(dir_, f"{ts}_{safe_name}")
         with open(rel, "wb") as f:
             f.write(blob)
-        return rel
+        return to_rel(rel)
     except Exception as exc:  # noqa: BLE001 照片留存失败不应中断整改提交，但留痕
         log.warning(f"整改照片保存失败: {exc}")
         return None

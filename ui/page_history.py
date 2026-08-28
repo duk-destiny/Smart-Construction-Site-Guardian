@@ -1,7 +1,8 @@
 """页面：检测历史与合规分析（B3/B4/B5/B6）。
 
 实时/上传检测记录的追踪、按日期筛选、合规率与类别命中统计（柱状图）、CSV 导出。
-查询结果使用 @st.cache_data 缓存，减少切页/重筛选时的加载时间。
+查询结果使用 @st.cache_data 缓存，减少切页/重筛选时的加载时间（缓存的是
+services.history_service 返回的 dict 列表，连接与 SQL 全在服务层）。
 
 注意：本页包含两个层级的数据——
 - 任务风险一览：来自 work_orders + risks（Agent 综合研判，值与报告页一致）
@@ -15,8 +16,7 @@ import io
 import streamlit as st
 from ui.page_helpers import safe_page
 
-from dao.db import get_conn, init_db
-from dao.models import DetectionRecordDAO
+from services import history_service
 
 _CN = {
     "spark": "火花（动火明火）", "smoke": "烟雾（火情）", "no_helmet": "未佩戴安全帽",
@@ -31,19 +31,13 @@ RISK_EMOJI = {"重大": "🔴", "较大": "🟠", "一般": "🟡", "低": "🟢
 @st.cache_data(ttl=300)
 def _stats_by_date(start_s: str | None, end_s: str | None) -> list[dict]:
     """按日聚合（缓存 5 分钟）。"""
-    conn = get_conn()
-    init_db(conn)
-    dao = DetectionRecordDAO(conn)
-    return [dict(r) for r in dao.stats_by_date(start_s, end_s)]
+    return history_service.stats_by_date(start_s, end_s)
 
 
 @st.cache_data(ttl=300)
 def _severity_breakdown(start_s: str | None, end_s: str | None) -> list[dict]:
     """类别命中分布（缓存 5 分钟）。"""
-    conn = get_conn()
-    init_db(conn)
-    dao = DetectionRecordDAO(conn)
-    return [dict(r) for r in dao.severity_breakdown(start_s, end_s)]
+    return history_service.severity_breakdown(start_s, end_s)
 
 
 @st.cache_data(ttl=300)
@@ -52,37 +46,14 @@ def _cached_query(
     severity: str | None, cls: str | None,
 ) -> list[dict]:
     """检测明细查询（缓存 5 分钟）。"""
-    conn = get_conn()
-    init_db(conn)
-    dao = DetectionRecordDAO(conn)
-    return [dict(r) for r in dao.query(start_s, end_s, severity=severity, cls=cls)]
+    return history_service.query_records(start_s, end_s, severity=severity,
+                                         cls=cls)
 
 
 @st.cache_data(ttl=300)
 def _task_risks(start_s: str | None = None, end_s: str | None = None) -> list[dict]:
     """任务级风险一览（缓存 5 分钟），与报告页同源。"""
-
-    conn = get_conn()
-    init_db(conn)
-    sql = """
-        SELECT w.task_id, w.hazard_desc, w.risk_level AS wo_risk_level,
-               r.risk_level AS auto_level,
-               r.override_level, r.override_reason,
-               r.reasons_json,
-               w.created_at
-        FROM work_orders w
-        LEFT JOIN risks r ON r.task_id = w.task_id
-        WHERE 1=1
-    """
-    params: list = []
-    if start_s:
-        sql += " AND w.created_at >= ?"
-        params.append(start_s)
-    if end_s:
-        sql += " AND w.created_at <= ?"
-        params.append(end_s + " 23:59:59")
-    sql += " ORDER BY w.created_at DESC"
-    return [dict(r) for r in conn.execute(sql, params).fetchall()]
+    return history_service.task_risks(start_s, end_s)
 
 
 @safe_page("检测历史与分析")

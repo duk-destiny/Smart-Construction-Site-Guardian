@@ -4,6 +4,9 @@
 → AI 通道连通（v0.8：云 LLM / 云 ASR 仅在已配置时渲染检查行，本地 Ollama 常驻检查）。
 无真实 key 时开启管理端「演示模式」即可走通回环，无需外部 mock 进程或改 config。
 
+Phase 0：DB/全链路/模型/视频源检查收口到 services.diag_service；AI 通道
+连通性检查经 services.enhance_service / core.asr_engine（自带连接管理）。
+
 改进点：
 - 逐项进度（st.status）：每跑完一项即时亮灯，运维能快速定位卡在哪一环；
 - data-testid 标记：每项结果行 + 总结带稳定锚点，Playwright/自检脚本精确定位；
@@ -14,41 +17,21 @@ from __future__ import annotations
 import re
 
 import streamlit as st
-
-from dao.db import DEFAULT_DB_PATH, get_conn, init_db
-from services.model_service import ModelService
-from services.notify_service import NotificationService
-from services.task_service import TaskService
 from ui.page_helpers import diag_row, safe_page
+
+from services import diag_service
 
 
 def _ok(flag: bool) -> str:
     return "✅" if flag else "❌"
 
 
-def _check_models() -> tuple[bool, str]:
-    try:
-        ms = ModelService(get_conn())
-        names = []
-        for name in ("fire", "ppe"):
-            m = ms.active_model(name)
-            if m:
-                row = dict(m) if not isinstance(m, dict) else m
-                names.append(f"{name}={row.get('version') or row.get('name') or '已加载'}")
-            else:
-                names.append(f"{name}=未注册")
-        return True, "；".join(names)
-    except Exception as exc:  # noqa: BLE001
-        return False, f"加载异常：{exc}"[:120]
-
-
 def _check_sources(sources: list[str]) -> tuple[bool, str]:
-    from core.video_source import check_source
     srcs = [s for s in (sources or []) if s and str(s).strip()] or ["demo://"]
     lines = []
     all_ok = True
     for src in srcs:
-        r = check_source(src)
+        r = diag_service.check_video_source(src)
         if not r["ok"]:
             all_ok = False
         lines.append(
@@ -58,7 +41,7 @@ def _check_sources(sources: list[str]) -> tuple[bool, str]:
     return all_ok, "；".join(lines)
 
 
-def _check_webhook(notify_svc: NotificationService) -> tuple[bool, str]:
+def _check_webhook(notify_svc) -> tuple[bool, str]:
     if notify_svc._demo_mode():
         return True, "演示模式（回环，不发真实 HTTP）"
     url = notify_svc.webhook_url()
@@ -68,40 +51,6 @@ def _check_webhook(notify_svc: NotificationService) -> tuple[bool, str]:
         return False, "notify.enabled=false"
     res = notify_svc.test_push()
     return res.get("ok", False), f"测试推送 {res.get('status')} ｜ {res.get('error') or ''}"
-
-
-def _check_db() -> tuple[bool, str]:
-    try:
-        conn = get_conn()
-        init_db(conn)
-        counts = {}
-        for t in ("alarm_events", "notification_logs", "task_records"):
-            try:
-                counts[t] = conn.execute(f"SELECT COUNT(*) FROM {t}").fetchone()[0]
-            except Exception:  # noqa: BLE001
-                counts[t] = "—"
-        return True, f"{DEFAULT_DB_PATH} ｜ " + " ｜ ".join(f"{k}={v}" for k, v in counts.items())
-    except Exception as exc:  # noqa: BLE001
-        return False, f"DB 异常：{exc}"[:120]
-
-
-def _check_fulllink(notify_svc: NotificationService) -> tuple[bool, str]:
-    try:
-        conn = get_conn()
-        init_db(conn)
-        ts = TaskService(conn)
-        aid = ts.create_alarm_event(
-            session_id="selftest", task_id=None, scene_id="hot_work",
-            cls="spark", conf=0.99, source="自检", force=True)
-        if not aid:
-            return False, "创建告警事件失败"
-        res = notify_svc.push_alarm(aid)
-        if res.get("ok"):
-            tag = "（模拟）" if notify_svc._demo_mode() else ""
-            return True, f"告警 {aid} -> 推送 {res.get('status')}{tag}"
-        return False, f"告警 {aid} -> 推送 {res.get('status')} ｜ {res.get('error')}"
-    except Exception as exc:  # noqa: BLE001
-        return False, f"全链路异常：{exc}"[:120]
 
 
 # ---------- v0.8 AI 通道连通性（可选增强，主链路零依赖）----------
@@ -165,11 +114,11 @@ def _build_checks(sources, notify_svc,
     if ai_channels is None:
         ai_channels = _ai_channels()
     checks = [
-        ("models", "模型加载", _check_models),
+        ("models", "模型加载", diag_service.check_models),
         ("sources", "视频源连通", lambda: _check_sources(sources)),
         ("webhook", "webhook/回环可达", lambda: _check_webhook(notify_svc)),
-        ("db", "DB 读写", _check_db),
-        ("fulllink", "假告警→推送全链路", lambda: _check_fulllink(notify_svc)),
+        ("db", "DB 读写", diag_service.check_db),
+        ("fulllink", "假告警→推送全链路", lambda: diag_service.check_fulllink(notify_svc)),
     ]
     # AI 通道（可选增强）：每个云 provider 一行（v0.8 多 base 接入）；
     # 未配置的通道整行不渲染（静默约定）；本地 Ollama 常驻检查
@@ -192,6 +141,7 @@ def render_diag() -> None:
 
     st.caption("一键自检整条接入链路。无真实 webhook 时可到管理端开启「演示模式」后再跑。")
     demo = bool(st.session_state.get("notify_demo", False))
+    from services.notify_service import NotificationService
     notify_svc = NotificationService(demo_mode=demo)
     st.caption(f"当前推送模式：{'演示（回环）' if notify_svc._demo_mode() else '真实通道'}")
 
@@ -206,8 +156,8 @@ def render_diag() -> None:
 
     sources: list[str] = []
     try:
-        from core.config import ConfigLoader
-        mconf = ConfigLoader().get("monitor") or {}
+        from core.config import shared_config
+        mconf = shared_config().get("monitor") or {}
         sources = [str(x).strip() for x in (mconf.get("sources") or []) if str(x).strip()]
     except Exception:  # noqa: BLE001
         sources = []

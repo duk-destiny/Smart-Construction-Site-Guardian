@@ -80,6 +80,14 @@ security:
   # false=仅展示「初始密码未修改」提醒，不阻断演示流程（默认，保住演示故事线）
   force_default_pwd_change: false
 
+# ================= 上传文件约束（Phase 1）=================
+# 服务端魔数校验 + 大小上限（MB）；图片类共用 max_image_mb，
+# 视频类共用 max_video_mb，PDF 用 max_pdf_mb。仅凭扩展名拒绝。
+upload:
+  max_image_mb: 20
+  max_video_mb: 200
+  max_pdf_mb: 20
+
 # ================= 告警外部推送（P0/P1）=================
 # 默认关闭；开启后，实时监测/后台轮询产生的高危告警会自动推送到 webhook。
 # channel 支持：wecom（企业微信机器人）/ dingtalk（钉钉机器人）/ generic（通用 JSON webhook）
