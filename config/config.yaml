@@ -74,9 +74,17 @@ compliance:
     vest: safe
     person: safe
 
+# ================= 账号安全（v0.8）=================
+security:
+  # true=初始密码账号登录后强制改密（生产建议开启）；
+  # false=仅展示「初始密码未修改」提醒，不阻断演示流程（默认，保住演示故事线）
+  force_default_pwd_change: false
+
 # ================= 告警外部推送（P0/P1）=================
 # 默认关闭；开启后，实时监测/后台轮询产生的高危告警会自动推送到 webhook。
 # channel 支持：wecom（企业微信机器人）/ dingtalk（钉钉机器人）/ generic（通用 JSON webhook）
+# v0.8：敏感值支持 ${ENV_VAR} / ${ENV_VAR:-默认值} 环境变量展开，
+# 例：webhook_url: ${WECOM_WEBHOOK}，避免明文提交进 git。
 notify:
   enabled: false
   demo_mode: false             # 演示模式：true 时跳过真实 HTTP，捕获 payload 到 data/mock_capture.jsonl（管理端可会话级开关）
@@ -113,18 +121,36 @@ dispatch:
 asr:
   enabled: false
   api_base: ""        # 例 https://api.openai.com/v1
-  api_key: ""
+  api_key: ""         # 建议用环境变量：${ASR_API_KEY}（v0.8 支持 ${ENV} 展开）
   model: "whisper-1"
   timeout_sec: 30
 
-# ================= AI 提取预填（v0.6 二期a · 双 Provider 降级链）=================
+# ================= AI 提取预填（v0.6 二期a · v0.8 多 Provider 升级）=================
 # 自由文本 → 四字段草稿预填（hazard_key/scene/description/location）。
-# provider=auto：云(需 cloud.api_key)失败自动落本地 Ollama；均败退手填表单。
+# v0.8：providers 列表即降级链序（自上而下首中即用，local 条目走本地 Ollama）；
+# total_deadline_sec 为全链总预算，防多家慢超时叠加。每家输出均过白名单，越界即弃试下一家。
+# 向后兼容：providers 缺省时由下方 provider/cloud 单槽合成等价链（cloud→local）。
 # 输出仅作预填草稿，人工确认后才建单；hazard_key 越白名单即弃。
 enhance:
   provider: auto
+  total_deadline_sec: 30
   cloud:
     api_base: ""        # OpenAI 兼容端点,如 https://api.openai.com/v1
-    api_key: ""
+    api_key: ""         # 建议用环境变量：${ENHANCE_API_KEY}（v0.8 支持 ${ENV} 展开）
     model: "gpt-4o-mini"
     timeout_sec: 20
+  # 多 base 接入示例（启用后优先生效，覆盖上方单槽）：
+  # providers:
+  #   - name: deepseek
+  #     api_base: https://api.deepseek.com/v1
+  #     api_key: ${DEEPSEEK_KEY}
+  #     model: deepseek-chat
+  #     timeout_sec: 15
+  #   - name: openai
+  #     api_base: https://api.openai.com/v1
+  #     api_key: ${OPENAI_KEY}
+  #     model: gpt-4o-mini
+  #     timeout_sec: 20
+  #   - name: local       # type 省略时按名推断；model 空则用 llm.model
+  #     type: local
+  #     model: qwen3:8b

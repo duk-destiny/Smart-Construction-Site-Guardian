@@ -25,7 +25,6 @@ ROOT = Path(__file__).resolve().parent.parent
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-import sqlite3
 
 from dao.db import get_conn, init_db
 from dao.models import RiskDAO, TaskDAO, UserDAO, WorkOrderDAO
@@ -88,7 +87,6 @@ def run_extraction() -> dict:
 
 def seed_intent_db(conn: sqlite3.Connection, seed_orders: list[dict]) -> None:
     """按数据集声明预置固定工单（最新序 1..N），使序数断言确定。"""
-    from dao.models import RiskDAO, TaskDAO, UserDAO
     users = UserDAO(conn)
     safety = users.insert("zhangsan", "hashed", "safety")
     lisi = users.insert("lisi", "hashed", "responsible")

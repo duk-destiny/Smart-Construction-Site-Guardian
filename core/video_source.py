@@ -13,12 +13,33 @@ from __future__ import annotations
 import threading
 from concurrent.futures import ThreadPoolExecutor
 from typing import Callable, Iterable
+from urllib.parse import urlsplit, urlunsplit
 
 import cv2
 import numpy as np
 
 _DEMO_TOKEN = "demo://"
 _DEMO_H, _DEMO_W = 480, 640
+
+
+def mask_source(source: str) -> str:
+    """打码 URL 型视频源中的凭据段 ``user:pass@`` → ``user:****@``，供 UI 展示。
+
+    仅用于展示层：数据库/内部链路保留原始 source 以便追查连通性。
+    非 URL 形态（本地文件路径、demo://）原样返回。
+    """
+    src = str(source or "")
+    try:
+        parts = urlsplit(src)
+        if parts.scheme and parts.username:
+            host = parts.hostname or ""
+            port = f":{parts.port}" if parts.port else ""
+            netloc = f"{parts.username}:****@{host}{port}"
+            return urlunsplit((parts.scheme, netloc, parts.path,
+                               parts.query, parts.fragment))
+    except ValueError:  # noqa: BLE001 畸形 URL 原样返回
+        pass
+    return src
 
 
 class VideoSource:

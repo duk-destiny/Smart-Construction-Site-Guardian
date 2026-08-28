@@ -149,7 +149,7 @@ def main() -> None:
 
     print(f"演示库已生成：{DEMO_DB}")
     print(f"演示数据：{SEED_JSON}")
-    print(f"账号：safety/demo1234（安全员），admin/admin1234（管理员）")
+    print("账号：safety/demo1234（安全员），admin/admin1234（管理员）")
     print(f"工单数：{len(rows)}（重大/较大/一般/低 四级覆盖）")
     conn.close()
 

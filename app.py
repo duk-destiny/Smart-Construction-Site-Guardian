@@ -19,6 +19,7 @@ import streamlit as st
 import ui.page_agents as page_agents
 import ui.page_admin as page_admin
 import ui.page_history as page_history
+import ui.page_lab as page_lab
 import ui.page_login as page_login
 import ui.page_my_orders as page_my_orders
 import ui.page_realtime as page_realtime
@@ -35,14 +36,40 @@ st.set_page_config(
 theme.apply_theme()
 
 
+def _render_change_password() -> None:
+    """顶栏本人改密表单（v0.8 账号治理）：验证原密码后更新。"""
+    from dao.db import get_conn
+    from services.auth_service import AuthService
+
+    with st.form("topbar_change_pwd_form"):
+        old_pwd = st.text_input("原密码", type="password")
+        new_pwd = st.text_input("新密码（至少 8 位）", type="password")
+        confirm = st.text_input("确认新密码", type="password")
+        ok = st.form_submit_button("提交修改", use_container_width=True)
+    if ok:
+        if new_pwd != confirm:
+            st.error("两次输入的新密码不一致")
+            return
+        conn = get_conn()
+        res = AuthService(conn).change_password(
+            st.session_state.get("user_id"), old_pwd, new_pwd)
+        if res.get("ok"):
+            st.session_state["pwd_warning"] = False
+            st.success("密码已更新")
+        else:
+            st.error(res.get("error", "修改失败"))
+
+
 def main() -> None:
     # 首次启动自举：建库 + 种子默认账号，保证 clone 后开箱即登录
+    # v0.8：失败不再静默——记 warning 日志，避免后续登录页报错无从排查
     try:
         from core.bootstrap import ensure_initialized, ensure_models
         ensure_initialized()
         ensure_models()
-    except Exception:
-        pass
+    except Exception as exc:  # noqa: BLE001 自举失败不阻断进程，但必须留痕
+        from core.logging import get_logger
+        get_logger(__name__).warning(f"启动自举失败（建库/种子账号）: {exc}")
 
     st.session_state.setdefault("role", None)
 
@@ -66,29 +93,31 @@ def main() -> None:
             # 从根本上消除 torch+onnxruntime 同进程原生段错误。
             # 0) YOLO 双场景检测头预热（v0.6）：首请求不再付首次建会话的 1-3s，
             #    预热失败由首请求按需重试（_get_engine 模块级单例兜底）
+            from core.logging import get_logger
+            _log = get_logger(__name__)
             try:
                 from ui.page_realtime import _prewarm_engine
                 _prewarm_engine()
-            except Exception:
-                pass
+            except Exception as exc:  # noqa: BLE001 预热失败不阻断启动
+                _log.warning(f"YOLO 检测头预热失败: {exc}")
             # 1) RTSP 后台监控：幂等，未启用则秒返回
             try:
                 from services import monitor_service
                 monitor_service.ensure_monitor_started()
-            except Exception:
-                pass
+            except Exception as exc:  # noqa: BLE001
+                _log.warning(f"后台监控启动失败: {exc}")
             # 2) LLM warmup：ollama 独立进程 keep_alive 常驻，best-effort
             try:
                 from core.llm_engine import LlmEngine as _Llm
                 _Llm().warmup()
-            except Exception:
-                pass
+            except Exception as exc:  # noqa: BLE001
+                _log.warning(f"LLM 预热失败（润色将降级模板）: {exc}")
             # 3) BGE 向量模型：验证可在守护线程安全加载（CUDA 禁用 + torch 单线程配置下）
             try:
                 from core.rag_engine import RagEngine
                 RagEngine.preload()
-            except Exception:
-                pass
+            except Exception as exc:  # noqa: BLE001
+                _log.warning(f"BGE 预热失败（RAG 将降级跳过）: {exc}")
 
         import threading as _threading
         _threading.Thread(target=_background_prewarm, daemon=True).start()
@@ -107,6 +136,7 @@ def main() -> None:
             "upload": st.Page(page_upload.render_upload, title="统一上报", icon="📤"),
             "realtime": st.Page(page_realtime.render_realtime, title="实时摄像头监测", icon="📷"),
             "agents": st.Page(page_agents.render_agents, title="多Agent研判", icon="🤖"),
+            "lab": st.Page(page_lab.render_lab, title="Agent 测试场", icon="🧪"),
             "report": st.Page(page_report.render_report, title="工单/改判/导出", icon="📋"),
             "history": st.Page(page_history.render_history, title="检测历史与分析", icon="📊"),
         }
@@ -122,19 +152,24 @@ def main() -> None:
         st.switch_page(page_map[target_page])
 
     # 用户状态与退出：渲染在 pg.run() 之前，确保始终位于页面内容顶部
+    if st.session_state.get("pwd_warning"):
+        st.warning("⚠️ 当前账号仍在使用初始密码，请点右上角「🔑 修改密码」尽快更换。")
     _, right, _ = st.columns([1, 2, 1])
     with right:
         with st.container():
-            c1, c2 = st.columns([3, 1])
+            c1, c2, c3 = st.columns([3, 1, 1])
             c1.caption(f"👤 {username}（{role}）")
             if c2.button("🚪 退出", use_container_width=True, key="_logout_top"):
                 for k in ("role", "user_id", "username", "current_task_id",
                           "permit_info", "_result", "_ran", "_rt_last",
                           "_rt_frames", "_rt_violations", "_realtime_session",
                           "_ran_async", "_sync_ran", "t2_desc", "t2_desc_raw",
-                          "t2_hazard", "t2_area", "t2_scene"):
+                          "t2_hazard", "t2_area", "t2_scene", "pwd_warning",
+                          "_pending_pwd_user"):
                     st.session_state.pop(k, None)
                 st.rerun()
+            with c3.popover("🔑 修改密码", use_container_width=True):
+                _render_change_password()
 
     pg.run()
 

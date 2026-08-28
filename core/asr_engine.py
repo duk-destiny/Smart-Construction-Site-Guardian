@@ -10,8 +10,11 @@ False，UI 层根本不渲染语音入口——不提示、不灰显、无任何
 """
 from __future__ import annotations
 
+import io
 import json
+import time
 import uuid
+import wave
 
 import urllib.error
 import urllib.request
@@ -38,6 +41,63 @@ class AsrEngine:
     def available(self) -> bool:
         """未配置即 False：UI 据此完全不渲染语音入口（静默）。"""
         return bool(self.enabled and self.api_base and self.api_key)
+
+    # ---------- 通道连通性自检（v0.8）----------
+    @staticmethod
+    def _tiny_wav(seconds: float = 0.5) -> bytes:
+        """内存合成 0.5s 8kHz 单声道静音 wav，作连通性检查的极小音频。"""
+        buf = io.BytesIO()
+        with wave.open(buf, "wb") as wf:
+            wf.setnchannels(1)
+            wf.setsampwidth(2)
+            wf.setframerate(8000)
+            wf.writeframes(b"\x00\x00" * int(8000 * seconds))
+        return buf.getvalue()
+
+    def check_connectivity(self, timeout: float | None = None) -> dict:
+        """云 ASR 通道连通性自检：极小静音 wav 端到端走一次转写。
+
+        验证 端点+key+model 三件套（区别于仅探活的 /models GET）；
+        返回 {ok, status(ok/unconfigured/error), detail, cost_ms}，
+        供系统自检页与演示前一键确认 key 有效。
+        """
+        result: dict = {"ok": False, "status": "error",
+                        "detail": "", "cost_ms": 0}
+        if not self.available():
+            result["status"] = "unconfigured"
+            result["detail"] = "未配置（asr.enabled/api_base/api_key）"
+            return result
+        try:
+            body, ctype = self.build_multipart(
+                self._tiny_wav(), "check.wav",
+                {"model": self.model, "language": "zh"})
+            req = urllib.request.Request(
+                f"{self.api_base}/audio/transcriptions", data=body,
+                headers={"Authorization": f"Bearer {self.api_key}",
+                         "Content-Type": ctype},
+                method="POST")
+            t0 = time.monotonic()
+            with urllib.request.urlopen(
+                    req, timeout=timeout or min(self.timeout, 15.0)) as resp:
+                resp.read()
+            result.update(
+                ok=True, status="ok", cost_ms=int((time.monotonic() - t0) * 1000),
+                detail=f"{self.model} 转写端到端可达")
+        except urllib.error.HTTPError as exc:
+            if exc.code in (401, 403):
+                result["detail"] = f"key 无效或无权限（HTTP {exc.code}）"
+            elif exc.code == 404:
+                result["detail"] = ("端点路径不对（HTTP 404，"
+                                    "确认 api_base 含 /v1）")
+            elif exc.code == 400:
+                result["detail"] = ("请求被拒（HTTP 400）：该服务对静音/极短"
+                                    "音频有限制，key 鉴权大概率有效，建议"
+                                    "用真实录音再验一次")
+            else:
+                result["detail"] = f"服务端拒绝（HTTP {exc.code}）"
+        except Exception as exc:  # noqa: BLE001 网络/超时等可读呈现
+            result["detail"] = f"不可达：{type(exc).__name__}: {exc}"[:120]
+        return result
 
     @staticmethod
     def build_multipart(data: bytes, filename: str,

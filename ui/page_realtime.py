@@ -17,7 +17,7 @@ import streamlit as st
 from ui.page_helpers import safe_page
 
 from core.realtime_engine import RealtimeEngine
-from core.video_source import MultiSourceMonitor
+from core.video_source import MultiSourceMonitor, mask_source
 from dao.db import get_conn, init_db
 from dao.models import DetectionRecordDAO
 from services.task_service import TaskService
@@ -167,8 +167,8 @@ def render_realtime() -> None:
                                         source=r.get("source"),
                                         annotated_bgr=r.get("annotated"),
                                     )
-                                except Exception:
-                                    pass
+                                except Exception as exc:  # noqa: BLE001 单条告警失败不中断本轮
+                                    log.warning(f"实时告警触发失败（{r.get('source')}）: {exc}")
                 finally:
                     if alarm_conn is not None:
                         try:
@@ -202,7 +202,8 @@ def render_realtime() -> None:
             m3.metric("产生告警", mstatus["alarms"])
             st.caption(f"间隔 {mstatus['interval_sec']:.0f}s ｜ 冷却 {mstatus['cooldown_sec']:.0f}s ｜ 源数 {len(mstatus['sources'])}")
             if mstatus["sources"]:
-                st.code("\n".join(mstatus["sources"]))
+                # v0.8：展示层打码 RTSP 凭据（数据库/内部链路仍存原始 source）
+                st.code("\n".join(mask_source(s) for s in mstatus["sources"]))
             if mstatus["last_error"]:
                 st.error(mstatus["last_error"])
             if st.button("停止后台轮询", key="mon_stop"):
@@ -215,7 +216,7 @@ def render_realtime() -> None:
                 for _src in (mstatus["sources"] or ["demo://"]):
                     _r = check_source(_src)
                     _flag = "✅" if _r["ok"] else "❌"
-                    st.caption(f"{_flag} {_src} ｜ {_r['width']}×{_r['height']} ｜ {_r['fps']:.1f}fps" + (f" ｜ {_r['error']}" if _r['error'] else ""))
+                    st.caption(f"{_flag} {mask_source(_src)} ｜ {_r['width']}×{_r['height']} ｜ {_r['fps']:.1f}fps" + (f" ｜ {_r['error']}" if _r['error'] else ""))
     _show_rtsp_results()
 
     img = st.camera_input("现场画面", key="realtime_cam")
@@ -345,7 +346,7 @@ def _show_rtsp_results() -> None:
     st.divider()
     st.subheader("多路视频源结果")
     for r in results:
-        st.caption(f"源 {r['index'] + 1}：{r['source']}")
+        st.caption(f"源 {r['index'] + 1}：{mask_source(str(r['source']))}")
         if not r.get("ok"):
             st.warning("读取失败，请检查 RTSP/文件路径后重试")
             continue

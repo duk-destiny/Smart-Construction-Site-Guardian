@@ -47,7 +47,8 @@ def _hours_between(later: str, earlier: str) -> float:
 class DispatchService:
     """派发 / 整改提交 / 验收 / 逾期巡检。"""
 
-    def __init__(self, conn: sqlite3.Connection, rules: list[dict] | None = None) -> None:
+    def __init__(self, conn: sqlite3.Connection, rules: list[dict] | None = None,
+                 notifier=None) -> None:
         self.conn = conn
         self.users = UserDAO(conn)
         from dao.models import RiskDAO
@@ -55,6 +56,8 @@ class DispatchService:
         self.orders = WorkOrderDAO(conn)
         self.audit = AuditDAO(conn)
         self.permissions = PermissionService(conn)
+        # v0.8 派发提醒：注入 fake 供测试（同步调用）；None=真实服务（daemon 异步）
+        self._notifier = notifier
         if rules is None:
             from core.config import ConfigLoader
             conf = ConfigLoader().get("dispatch") or {}
@@ -126,7 +129,29 @@ class DispatchService:
             "order_id": order["id"], "task_id": task_id,
             "assignee": username, "deadline": deadline,
         }, ensure_ascii=False))
+        # v0.8 派发即推送责任人：不等逾期，派单当下即送达（notify 未启用自动 skipped）
+        self._notify_dispatch(order["id"], username, order["hazard_desc"],
+                              deadline, order["risk_level"])
         return order["id"]
+
+    def _notify_dispatch(self, order_id: str, assignee: str | None,
+                         hazard: str, deadline: str, risk_level: str) -> None:
+        """派发提醒推送：注入 notifier（测试）走同步；真实服务走 daemon 线程不阻塞 UI。"""
+        try:
+            if self._notifier is not None:
+                self._notifier.push_dispatch(order_id, assignee, hazard,
+                                             deadline, risk_level)
+                return
+            import threading
+            from services.notify_service import NotificationService
+            svc = NotificationService()
+            threading.Thread(
+                target=svc.push_dispatch,
+                args=(order_id, assignee, hazard, deadline, risk_level),
+                daemon=True).start()
+        except Exception as exc:  # noqa: BLE001 提醒失败不影响派发，但留痕
+            from core.logging import get_logger
+            get_logger(__name__).warning(f"工单 {order_id} 派发提醒推送失败: {exc}")
 
     # ---------- 告警→工单桥（轻链路产物进派发闭环）----------
     def convert_alarm_to_order(self, alarm_id: str,

@@ -11,7 +11,31 @@ from datetime import datetime
 
 import cv2
 
+from core.logging import get_logger
+
+log = get_logger(__name__)
+
 EVIDENCE_DIR = os.path.join("data", "alarms")
+
+# 文件名安全字符白名单：字(Unicode)/数字/下划线/点/横线，其余一律压成下划线。
+# \w 在 str 模式下含中文，正常中文文件名不受影响。
+_UNSAFE_NAME = re.compile(r"[^\w\-.]+", re.UNICODE)
+
+
+def sanitize_filename(name: str | None, fallback: str = "file",
+                      max_len: int = 64) -> str:
+    """把用户可控文件名压成安全文件名：取 basename → 剔危险字符 → 限长。
+
+    防两类路径穿越（v0.8）：
+    - ``../`` 序列逃出目标目录；
+    - 绝对路径/盘符经 os.path.join 直接覆盖前缀（Linux 下 ``/etc/x`` 即整路径替换）。
+    空名/纯点等退化输入返回 fallback；超长截断。
+    """
+    base = os.path.basename(str(name or "").replace("\\", "/")).strip()
+    safe = _UNSAFE_NAME.sub("_", base).strip("._ ")
+    if not safe:
+        safe = fallback
+    return safe[:max_len]
 
 
 def save_alarm_evidence(session_id: str | None, cls: str | None,
@@ -21,8 +45,8 @@ def save_alarm_evidence(session_id: str | None, cls: str | None,
         if annotated_bgr is None or annotated_bgr.size == 0:
             return None
         os.makedirs(EVIDENCE_DIR, exist_ok=True)
-        safe_session = re.sub(r"[^\w\-.]+", "_", str(session_id or "rt"))[:24]
-        safe_cls = re.sub(r"[^\w\-.]+", "_", str(cls or "alarm"))[:24]
+        safe_session = sanitize_filename(session_id or "rt", fallback="rt", max_len=24)
+        safe_cls = sanitize_filename(cls or "alarm", fallback="alarm", max_len=24)
         ts = datetime.now().strftime("%Y%m%d_%H%M%S_%f")[:-3]
         rel = os.path.join(EVIDENCE_DIR, f"{safe_session}_{safe_cls}_{ts}.jpg")
         ok, buf = cv2.imencode(".jpg", annotated_bgr)
@@ -31,7 +55,8 @@ def save_alarm_evidence(session_id: str | None, cls: str | None,
         with open(rel, "wb") as f:
             f.write(buf.tobytes())
         return rel
-    except Exception:  # noqa: BLE001 证据留存失败不应中断告警
+    except Exception as exc:  # noqa: BLE001 证据留存失败不应中断告警，但留痕
+        log.warning(f"告警证据截图保存失败: {exc}")
         return None
 
 
@@ -46,8 +71,8 @@ def save_rectification_photo(order_id: str, filename: str, blob: bytes) -> str |
     try:
         if not blob:
             return None
-        safe_order = re.sub(r"[^\w\-.]+", "_", str(order_id or "wo"))[:24]
-        safe_name = re.sub(r"[^\w\-.]+", "_", os.path.basename(filename or "img.jpg"))
+        safe_order = sanitize_filename(order_id or "wo", fallback="wo", max_len=24)
+        safe_name = sanitize_filename(filename or "img.jpg", fallback="img.jpg")
         dir_ = os.path.join(RECTIFICATION_DIR, safe_order)
         os.makedirs(dir_, exist_ok=True)
         ts = datetime.now().strftime("%Y%m%d_%H%M%S_%f")[:-3]
@@ -55,5 +80,6 @@ def save_rectification_photo(order_id: str, filename: str, blob: bytes) -> str |
         with open(rel, "wb") as f:
             f.write(blob)
         return rel
-    except Exception:  # noqa: BLE001 照片留存失败不应中断整改提交
+    except Exception as exc:  # noqa: BLE001 照片留存失败不应中断整改提交，但留痕
+        log.warning(f"整改照片保存失败: {exc}")
         return None

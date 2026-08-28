@@ -60,9 +60,16 @@ def _tab1_media(svc: TaskService) -> None:
                               permit_info)
         if uploaded:
             import os
+            from core.evidence import sanitize_filename
+            # v0.8：文件名消毒 + 大小上限（Streamlit 默认 200MB，这里按业务再收紧）
+            if uploaded.size > 200 * 1024 * 1024:
+                st.error("文件超过 200MB 上限，请压缩或分段上传")
+                return
             save_dir = "data/uploads"
             os.makedirs(save_dir, exist_ok=True)
-            path = os.path.join(save_dir, f"{tid}_{uploaded.name}")
+            path = os.path.join(
+                save_dir,
+                f"{tid}_{sanitize_filename(uploaded.name, fallback='media')}")
             with open(path, "wb") as f:
                 f.write(uploaded.getbuffer())
             st.session_state["uploaded_path"] = path
@@ -93,12 +100,13 @@ def _tab2_text_voice(svc: TaskService) -> None:
                             index=0, key="t2_scene")
     options = _hazard_options()
 
-    # —— AI 提取预填（v0.6）：双 Provider 均未配置时整块静默；输出仅草稿 ——
+    # —— AI 提取预填（v0.6）：Provider 链（v0.8 多 base）均未配置时整块静默 ——
     from services.enhance_service import EnhanceEngine
     _enh = EnhanceEngine()
     _prov = _enh.available()
     if _prov:
-        _tag = "⛅ 云端" if _prov == "cloud" else "📦 本地"
+        _tag = (f"📦 {_prov}" if _prov == "local" or "local" in _prov.lower()
+                else f"⛅ {_prov}")
         if st.button(f"⚡ AI 提取预填（{_tag}）", key="btn_ai_extract",
                      help="把自然语言拆成类别/位置等字段填入下方，"
                            "提交前请人工确认；结果不影响定级。"):
@@ -197,7 +205,7 @@ def _tab3_lookup() -> None:
     route = router.route(text)
     from services.dispatch_service import _now_str
     if route.tier == "llm":
-        st.caption(f"🤖 已理解（本地模型）")
+        st.caption("🤖 已理解（本地模型）")
 
     if route.action == "order_detail" and route.order_id:
         card = router.detail_view(route.order_id)

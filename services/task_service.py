@@ -14,7 +14,10 @@ from dao.models import (
     TaskDAO, RiskDAO, DetectionDAO, ComplianceDAO, WorkOrderDAO,
     AgentRunDAO, FeedbackDAO, AlarmEventDAO, NotificationLogDAO,
 )
+from core.logging import get_logger
 from services.permission_service import PermissionService
+
+log = get_logger(__name__)
 
 
 class TaskService:
@@ -22,6 +25,8 @@ class TaskService:
 
     # 内存进度：task_id -> {agent: {status, cost_ms}}
     _progress: dict[str, dict] = {}
+    # 任务属主登记（v0.8）：task_id -> user_id，进度/结果轮询按属主隔离
+    _task_owners: dict[str, str] = {}
     # 测试注入口：后台异步研判的 Orchestrator 类（None=真实实现）
     _ORCH_FACTORY = None
 
@@ -62,6 +67,7 @@ class TaskService:
         tid = self.tasks.insert(user_id, json.dumps(permit_info, ensure_ascii=False),
                                 "running", source=source)
         TaskService._progress[tid] = {}
+        TaskService._task_owners[tid] = user_id or ""
         return tid
 
     # ---------- v0.6 上传链路异步化 ----------
@@ -78,6 +84,9 @@ class TaskService:
         """
         self.permissions.require(user_id, "upload")
         if TaskService._async_running.get(task_id):
+            return False
+        # v0.8：属主校验——非本任务属主不可发起后台研判（防跨会话操纵他人任务）
+        if not self._is_owner(task_id, user_id or ""):
             return False
         TaskService._async_running[task_id] = True
         svc_ref = self
@@ -100,6 +109,7 @@ class TaskService:
                                        wo.get("requirement", ""),
                                        wo.get("deadline", ""))
             except Exception as exc:  # noqa: BLE001 失败也要落可读结果
+                log.warning(f"后台研判任务 {task_id} 失败: {type(exc).__name__}: {exc}")
                 TaskService._async_results[task_id] = {
                     "status": "failed", "error": f"{type(exc).__name__}: {exc}"}
             finally:
@@ -108,8 +118,15 @@ class TaskService:
         threading.Thread(target=_worker, daemon=True).start()
         return True
 
-    def pop_async_result(self, task_id: str) -> dict | None:
-        """页面轮询：取走完成结果（取后即清，避免驻留）。"""
+    def pop_async_result(self, task_id: str,
+                         user_id: str | None = None) -> dict | None:
+        """页面轮询：取走完成结果（取后即清，避免驻留）。
+
+        v0.8：已登记属主的任务校验 user_id，非属主取不到结果（返回 None）；
+        user_id=None 视为内部/兼容调用，保持旧行为。
+        """
+        if user_id and not self._is_owner(task_id, user_id):
+            return None
         return TaskService._async_results.pop(task_id, None)
 
     def create_text_hazard(self, user_id: str | None, description: str,
@@ -139,6 +156,7 @@ class TaskService:
                        "report_type": "text"}
         tid = self.tasks.insert(user_id, json.dumps(permit_info, ensure_ascii=False),
                                 "completed", source="text")
+        TaskService._task_owners[tid] = user_id or ""
         # 复用处置 Agent 的等级话术模板，保持工单文案口径一致
         from agents.action_agent import ActionAgent
         agent = ActionAgent()
@@ -181,9 +199,21 @@ class TaskService:
         prog = TaskService._progress.setdefault(task_id, {})
         prog[agent] = {"status": status, "cost_ms": cost_ms}
 
-    def get_progress(self, task_id: str) -> dict:
-        """返回 {agent: {status, cost_ms}}。"""
+    def get_progress(self, task_id: str, user_id: str | None = None) -> dict:
+        """返回 {agent: {status, cost_ms}}。
+
+        v0.8：已登记属主的任务校验 user_id，非属主视角返回空（防跨会话窥探）；
+        user_id=None 视为内部/兼容调用，保持旧行为。
+        """
+        if user_id and not self._is_owner(task_id, user_id):
+            return {}
         return dict(TaskService._progress.get(task_id, {}))
+
+    @staticmethod
+    def _is_owner(task_id: str, user_id: str) -> bool:
+        """属主判定：未登记（旧数据/告警转单等链路）视为公开。"""
+        owner = TaskService._task_owners.get(task_id)
+        return owner is None or owner == user_id
 
     def list_agent_runs(self, task_id: str) -> list:
         """返回任务级 Agent 运行证据链。"""
@@ -346,8 +376,8 @@ class TaskService:
                 clause = (f"第{no}条 {text}".strip()) if no else text
                 if clause:
                     self.alarms.update_clause(alarm_id, clause)
-            except Exception:  # noqa: BLE001 条款挂载失败不影响告警
-                pass
+            except Exception as exc:  # noqa: BLE001 条款挂载失败不影响告警，但留痕
+                log.warning(f"告警 {alarm_id} 条款挂载失败: {exc}")
 
         threading.Thread(target=_worker, daemon=True).start()
 

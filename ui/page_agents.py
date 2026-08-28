@@ -67,12 +67,12 @@ def render_agents() -> None:
     def _poll_async() -> None:
         if st.session_state.get("_result"):
             return
-        done = ts.pop_async_result(task_id)
+        done = ts.pop_async_result(task_id, st.session_state.get("user_id"))
         if done:
             st.session_state["_result"] = done
             st.session_state["_ran"] = True
             st.rerun(scope="app")
-        prog = ts.get_progress(task_id)
+        prog = ts.get_progress(task_id, st.session_state.get("user_id"))
         if prog or st.session_state.get("_ran_async"):
             st.caption("⏳ 后台研判进行中…（完成后自动刷新结果）")
 
@@ -111,7 +111,7 @@ def render_agents() -> None:
                       subtitle=f"检出目标 {len(dets)} 项")
 
     # 顶部进度条
-    prog = ts.get_progress(task_id)
+    prog = ts.get_progress(task_id, st.session_state.get("user_id"))
     cols = st.columns(len(_AGENT_TITLE))
     for i, (agent, title) in enumerate(_AGENT_TITLE.items()):
         info = prog.get(agent, {})

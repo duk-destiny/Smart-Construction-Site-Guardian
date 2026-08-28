@@ -21,12 +21,13 @@ class UserDAO:
     def __init__(self, conn: sqlite3.Connection) -> None:
         self.conn = conn
 
-    def insert(self, username: str, pwd_hash: str, role: str) -> str:
+    def insert(self, username: str, pwd_hash: str, role: str,
+               must_change_password: int = 0) -> str:
         uid = _new_id("u")
         self.conn.execute(
-            "INSERT INTO users(id,username,pwd_hash,role,created_at) "
-            "VALUES(?,?,?,?,datetime('now'))",
-            (uid, username, pwd_hash, role))
+            "INSERT INTO users(id,username,pwd_hash,role,must_change_password,created_at) "
+            "VALUES(?,?,?,?,?,datetime('now'))",
+            (uid, username, pwd_hash, role, int(must_change_password)))
         self.conn.commit()
         return uid
 
@@ -39,9 +40,35 @@ class UserDAO:
         return self.conn.execute(
             "SELECT * FROM users WHERE role=? ORDER BY username", (role,)).fetchall()
 
+    def list_all(self) -> list:
+        """全量用户（v0.8 管理端用户治理），按角色与用户名稳定排序。"""
+        return self.conn.execute(
+            "SELECT * FROM users ORDER BY role, username").fetchall()
+
     def get_by_id(self, user_id: str):
         return self.conn.execute(
             "SELECT * FROM users WHERE id=?", (user_id,)).fetchone()
+
+    def update_password(self, user_id: str, pwd_hash: str) -> None:
+        """更新密码哈希并清除「初始密码未改」标记（v0.8）。"""
+        self.conn.execute(
+            "UPDATE users SET pwd_hash=?, must_change_password=0 WHERE id=?",
+            (pwd_hash, user_id))
+        self.conn.commit()
+
+    def set_must_change_password(self, user_id: str, flag: int = 1) -> None:
+        """设置/清除初始密码标记（v0.8 管理员重置密码后强制对方改密）。"""
+        self.conn.execute(
+            "UPDATE users SET must_change_password=? WHERE id=?",
+            (int(flag), user_id))
+        self.conn.commit()
+
+    def set_disabled(self, user_id: str, disabled: bool) -> None:
+        """停用/启用账号（v0.8）。登录与权限校验均拒绝 disabled=1。"""
+        self.conn.execute(
+            "UPDATE users SET disabled=? WHERE id=?",
+            (1 if disabled else 0, user_id))
+        self.conn.commit()
 
 
 class TaskDAO:
@@ -251,6 +278,34 @@ class AuditDAO:
             "VALUES(?,?,?,datetime('now'))", (user_id, action, detail_json))
         self.conn.commit()
         return cur.lastrowid
+
+    def list_range(self, start: str | None = None, end: str | None = None,
+                   limit: int = 100_000) -> list:
+        """按日期范围取审计流水（含用户名联查），供导出/归档（v0.8）。
+
+        start/end 均为 'YYYY-MM-DD'；end 含当日（< end + 1 天）。
+        """
+        sql = ("SELECT a.id, a.user_id, u.username, a.action, "
+               "a.detail_json, a.created_at "
+               "FROM audit_logs a LEFT JOIN users u ON u.id = a.user_id "
+               "WHERE 1=1")
+        params: list = []
+        if start:
+            sql += " AND a.created_at >= ?"
+            params.append(start)
+        if end:
+            sql += " AND a.created_at < date(?, '+1 day')"
+            params.append(end)
+        sql += " ORDER BY a.id ASC LIMIT ?"
+        params.append(int(limit))
+        return self.conn.execute(sql, params).fetchall()
+
+    def count_before(self, before: str) -> int:
+        """统计 created_at < before（'YYYY-MM-DD'，不含当日）的行数。"""
+        row = self.conn.execute(
+            "SELECT COUNT(*) AS cnt FROM audit_logs WHERE created_at < ?",
+            (before,)).fetchone()
+        return int(row["cnt"]) if row else 0
 
 
 class KbDocDAO:

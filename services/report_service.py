@@ -46,7 +46,7 @@ class WeeklyReportService:
                    "SUM(CASE WHEN frame_status='合规' THEN 1 ELSE 0 END) AS ok "
                    "FROM detection_records")
         if params:
-            det_sql += f" WHERE created_at >= ? AND created_at <= ?"
+            det_sql += " WHERE created_at >= ? AND created_at <= ?"
         det = self.conn.execute(det_sql, params).fetchone()
 
         top_sql = ("SELECT cls, COUNT(*) AS cnt FROM detection_records "
@@ -76,9 +76,6 @@ class WeeklyReportService:
 
         # 当前存量视角：所有未销项工单按截止时间对照报告期末尾判逾期
         as_of = _day_end(end or start or "")
-        open_now = self.conn.execute(
-            "SELECT assignee_id, deadline FROM work_orders WHERE status='open'"
-        ).fetchall()
         overdue_ids = {
             r["id"] for r in self.conn.execute(
                 "SELECT id, assignee_id FROM work_orders "

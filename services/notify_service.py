@@ -221,24 +221,7 @@ class NotificationService:
             "created_at": time.strftime("%Y-%m-%d %H:%M:%S"),
             "image_path": None,
         }
-        conn = self._get_conn()
-        init_db(conn)
-        logs = NotificationLogDAO(conn)
-        log_channel = self._log_channel()
-        demo = self._demo_mode()
-        if not demo and (not self.enabled() or not self.webhook_url()):
-            logs.insert("al_test", log_channel, "skipped",
-                        "推送未启用或未配置 webhook_url")
-            return {"ok": False, "status": "skipped",
-                    "error": "推送未启用或未配置 webhook_url"}
-        try:
-            self._post(self.build_payload(sample))
-            logs.insert("al_test", log_channel, "sent", None)
-            return {"ok": True, "status": "sent"}
-        except Exception as exc:  # noqa: BLE001
-            err = str(exc)[:200]
-            logs.insert("al_test", log_channel, "failed", err)
-            return {"ok": False, "status": "failed", "error": err}
+        return self._push_sample(sample)
 
     def _post(self, payload: dict) -> None:
         if self._demo_mode():
@@ -281,7 +264,37 @@ class NotificationService:
             f"工单 {order_id}｜责任人 {assignee or '未派发'}｜"
             f"逾期 {overdue_hours:.0f}h（截止 {deadline or '—'}）")
         sample["source"] = (hazard or "")[:60]
+        return self._push_sample(sample)
 
+    def push_dispatch(self, order_id: str, assignee: str | None,
+                      hazard: str, deadline: str | None,
+                      risk_level: str = "") -> dict:
+        """派发即时提醒（v0.8）：工单派给责任人时即推一条，不等逾期。
+
+        复用催办的软引用 `wo_<order_id>` 留痕与同一 webhook 通道；
+        notify 未启用时自动 skipped（留痕），不影响派发主链路。
+        """
+        sample = {
+            "id": f"wo_{order_id}",
+            "cls": "📮 新工单派发提醒",
+            "conf": None,
+            "scene_id": "工单闭环",
+            "source": "工单派发",
+            "created_at": time.strftime("%Y-%m-%d %H:%M:%S"),
+            "image_path": None,
+        }
+        sample["scene_id"] = (
+            f"工单 {order_id}｜责任人 {assignee or '未派发'}｜"
+            f"{('风险 ' + risk_level) if risk_level else '待定级'}｜"
+            f"整改截止 {deadline or '—'}")
+        sample["source"] = (hazard or "")[:60]
+        return self._push_sample(sample)
+
+    def _push_sample(self, sample: dict) -> dict:
+        """把一条软引用告警样本走完整推送管线：启用检查 → POST → 留痕。
+
+        push_overdue / push_dispatch / test_push 共用；未启用时 skipped 留痕。
+        """
         conn = self._get_conn()
         init_db(conn)
         logs = NotificationLogDAO(conn)
@@ -290,7 +303,8 @@ class NotificationService:
         if not demo and (not self.enabled() or not self.webhook_url()):
             logs.insert(sample["id"], log_channel, "skipped",
                         "推送未启用或未配置 webhook_url")
-            return {"ok": False, "status": "skipped"}
+            return {"ok": False, "status": "skipped",
+                    "error": "推送未启用或未配置 webhook_url"}
         try:
             self._post(self.build_payload(sample))
             logs.insert(sample["id"], log_channel, "sent", None)

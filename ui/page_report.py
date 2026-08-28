@@ -9,7 +9,6 @@ from ui.page_helpers import safe_page
 from dao.db import get_conn, init_db
 from dao.models import UserDAO, WorkOrderDAO, RiskDAO
 from core.compliance import evaluate
-from core.yolo_engine import WHITELIST
 from services.audit_service import AuditService
 from services.dispatch_service import DispatchService, RISK_DEADLINE_HOURS
 from services.export_service import ExportService

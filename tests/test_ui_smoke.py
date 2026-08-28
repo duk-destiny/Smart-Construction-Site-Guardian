@@ -14,6 +14,7 @@ def test_pages_importable_and_have_render():
         "ui.page_login": "render_login",
         "ui.page_upload": "render_upload",
         "ui.page_agents": "render_agents",
+        "ui.page_lab": "render_lab",
         "ui.page_report": "render_report",
         "ui.page_admin": "render_admin",
         "ui.page_realtime": "render_realtime",

@@ -68,16 +68,25 @@ class LlmEngine:
 
         走 /api/chat（system+user），qwen3 显式 think=false，keep_alive 常驻防冷启。
         """
+        return self.chat(_SYSTEM, prompt, num_predict=self._num_predict)
+
+    def chat(self, system: str, user: str,
+             num_predict: int | None = None) -> str | None:
+        """通用单轮 /api/chat（Agent 测试场按 base 对比润色用）。
+
+        不可用/超时/异常/空输出一律返回 None；调用方自行降级。
+        """
         if not self._enabled:
             return None
         body = {
             "model": self.model,
             "stream": False,
             "messages": [
-                {"role": "system", "content": _SYSTEM},
-                {"role": "user", "content": prompt},
+                {"role": "system", "content": system},
+                {"role": "user", "content": user},
             ],
-            "options": {"num_predict": self._num_predict, "temperature": self._temperature},
+            "options": {"num_predict": int(num_predict or self._num_predict),
+                        "temperature": self._temperature},
             "keep_alive": self._keep_alive,
         }
         if self._think is not None:

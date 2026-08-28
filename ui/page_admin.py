@@ -10,6 +10,7 @@ from ui.page_helpers import safe_page
 
 from dao.db import get_conn, init_db
 from dao.models import UserDAO
+from services.auth_service import AuthService
 from services.audit_service import AuditService
 from services.dispatch_service import DispatchService
 from services.kb_admin import KbAdmin
@@ -54,8 +55,14 @@ def render_admin() -> None:
     st.subheader("导入规范 PDF")
     pdf = st.file_uploader("选择规范 PDF", type=["pdf"])
     if pdf and st.button("解析入库"):
+        # v0.8：文件名消毒 + 大小上限，防 ../ 或绝对路径写出 data/kb
+        from core.evidence import sanitize_filename
+        if pdf.size > 50 * 1024 * 1024:
+            st.error("PDF 超过 50MB 上限，请压缩后重试")
+            return
         os.makedirs("data/kb", exist_ok=True)
-        path = os.path.join("data/kb", pdf.name)
+        path = os.path.join("data/kb",
+                            sanitize_filename(pdf.name, fallback="spec.pdf"))
         with open(path, "wb") as f:
             f.write(pdf.getbuffer())
         conn = get_conn()
@@ -67,6 +74,87 @@ def render_admin() -> None:
                                      {"filename": pdf.name, "chunks": res["chunks"]})
         else:
             st.error(res.get("error", "导入失败"))
+
+    st.divider()
+    st.subheader("用户管理（v0.8）")
+    conn = get_conn()
+    init_db(conn)
+    _auth = AuthService(conn)
+    _users = UserDAO(conn).list_all()
+    if _users:
+        st.dataframe([{
+            "用户名": u["username"], "角色": u["role"],
+            "初始密码未改": "⚠️ 是" if u["must_change_password"] else "否",
+            "状态": "🚫 已停用" if u["disabled"] else "✅ 正常",
+            "创建时间": (u["created_at"] or "")[:19],
+        } for u in _users], use_container_width=True)
+    else:
+        st.caption("暂无用户")
+
+    with st.expander("➕ 新建用户"):
+        with st.form("user_create_form"):
+            _nu_name = st.text_input("用户名（2-32 字符）")
+            _nu_pwd = st.text_input("初始密码（至少 8 位，首登建议强制修改）",
+                                    type="password")
+            _nu_role = st.selectbox("角色",
+                                    ["responsible", "safety", "admin"],
+                                    format_func=lambda r: {
+                                        "responsible": "responsible · 整改责任人",
+                                        "safety": "safety · 安全员",
+                                        "admin": "admin · 管理员"}.get(r, r))
+            _nu_must = st.checkbox("标记初始密码未改（登录后提醒/强制修改）",
+                                   value=True)
+            if st.form_submit_button("创建用户", use_container_width=True):
+                _res = _auth.create_user(st.session_state.get("user_id"),
+                                         _nu_name, _nu_pwd, _nu_role,
+                                         must_change_password=_nu_must)
+                if _res.get("ok"):
+                    st.success(f"用户 {_nu_name.strip()} 创建成功")
+                    st.rerun()
+                else:
+                    st.error(_res.get("error", "创建失败"))
+
+    _uc1, _uc2 = st.columns(2)
+    with _uc1:
+        with st.expander("🔑 重置密码"):
+            _tgt_name = st.selectbox("选择用户",
+                                     [u["username"] for u in _users] or ["—"],
+                                     key="user_reset_pick")
+            _new_pwd = st.text_input("新密码（至少 8 位）", type="password",
+                                     key="user_reset_pwd")
+            if st.button("重置并要求对方下次登录改密", key="user_reset_btn"):
+                _row = next((u for u in _users
+                             if u["username"] == _tgt_name), None)
+                if _row is None:
+                    st.error("未找到该用户")
+                else:
+                    _res = _auth.admin_reset_password(
+                        st.session_state.get("user_id"), _row["id"], _new_pwd)
+                    if _res.get("ok"):
+                        st.success(f"已重置 {_tgt_name} 的密码")
+                    else:
+                        st.error(_res.get("error", "重置失败"))
+    with _uc2:
+        with st.expander("🚫 停用 / ✅ 启用"):
+            _tgt2_name = st.selectbox("选择用户",
+                                      [u["username"] for u in _users] or ["—"],
+                                      key="user_dis_pick")
+            _row2 = next((u for u in _users
+                          if u["username"] == _tgt2_name), None)
+            _is_dis = bool(_row2 and _row2["disabled"])
+            if st.button("🚫 停用该账号" if not _is_dis else "✅ 启用该账号",
+                         key="user_dis_btn"):
+                if _row2 is None:
+                    st.error("未找到该用户")
+                else:
+                    _res = _auth.set_user_disabled(
+                        st.session_state.get("user_id"), _row2["id"],
+                        not _is_dis)
+                    if _res.get("ok"):
+                        st.success("已更新账号状态")
+                        st.rerun()
+                    else:
+                        st.error(_res.get("error", "操作失败"))
 
     st.divider()
     st.subheader("全量隐患记录")
@@ -89,6 +177,27 @@ def render_admin() -> None:
         st.dataframe([dict(r) for r in logs])
     else:
         st.caption("暂无日志")
+    with st.expander("⬇️ 导出审计流水 CSV（归档快照，库内仍仅追加不可删改）"):
+        _ac1, _ac2 = st.columns(2)
+        _a_start = _ac1.date_input("起始日期（留空=全量）", value=None,
+                                   key="audit_exp_start")
+        _a_end = _ac2.date_input("结束日期（含当日，留空=全量）", value=None,
+                                 key="audit_exp_end")
+        if st.button("生成审计 CSV", key="audit_exp_btn",
+                     use_container_width=True):
+            _csv_text, _n = AuditService(conn).export_csv(
+                start=_a_start.isoformat() if _a_start else None,
+                end=_a_end.isoformat() if _a_end else None)
+            if _n == 0:
+                st.caption("该区间无审计记录")
+            else:
+                st.download_button(
+                    f"下载审计 CSV（{_n} 行）", _csv_text,
+                    file_name=(f"audit_{_a_start or 'all'}_"
+                               f"{_a_end or 'all'}.csv"),
+                    mime="text/csv", key="audit_exp_dl")
+    st.caption("生产留存：cron 挂 scripts/audit_maintenance.py 定期归档"
+               "（--retention-days N，加 --delete 才删档，删前自动留 purge 凭证）。")
 
     st.divider()
     st.subheader("人工纠偏反馈样本")

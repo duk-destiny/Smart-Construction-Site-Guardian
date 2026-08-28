@@ -15,9 +15,8 @@ import io
 import streamlit as st
 from ui.page_helpers import safe_page
 
-from core.compliance import LEVEL_LABEL
 from dao.db import get_conn, init_db
-from dao.models import DetectionRecordDAO, WorkOrderDAO
+from dao.models import DetectionRecordDAO
 
 _CN = {
     "spark": "火花（动火明火）", "smoke": "烟雾（火情）", "no_helmet": "未佩戴安全帽",
@@ -62,7 +61,6 @@ def _cached_query(
 @st.cache_data(ttl=300)
 def _task_risks(start_s: str | None = None, end_s: str | None = None) -> list[dict]:
     """任务级风险一览（缓存 5 分钟），与报告页同源。"""
-    import sqlite3
 
     conn = get_conn()
     init_db(conn)

@@ -49,6 +49,11 @@ _MIGRATIONS: dict[str, list[tuple[str, str]]] = {
     "tasks": [
         ("source", "TEXT NOT NULL DEFAULT 'upload'"),
     ],
+    # v0.8 账号治理：初始密码标记 + 停用标记（老库自动 ALTER 补列）
+    "users": [
+        ("must_change_password", "INTEGER NOT NULL DEFAULT 0"),
+        ("disabled", "INTEGER NOT NULL DEFAULT 0"),
+    ],
 }
 
 def get_conn(db_path: str = DEFAULT_DB_PATH) -> sqlite3.Connection:

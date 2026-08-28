@@ -6,6 +6,87 @@
 
 ---
 
+## [v0.8] — 2026-08-28
+
+### 新增：安全收口 + 账号治理 + 运维闭环（三阶段一次交付）
+
+**P0 · 安全收口**
+
+- **文件名穿越修复（P0-1）**：新增 `core/evidence.sanitize_filename()` 统一
+  文件名消毒（basename → 危险字符压制 → 限长，中文文件名不受影响），
+  修复管理端 PDF 导入（`page_admin.py`，原实现遇 `/abs` 绝对路径经
+  os.path.join 可整路径覆盖前缀）与影像上传（`page_upload.py`）两处
+  路径穿越面；上传加显式大小上限（影像 200MB / PDF 50MB）。
+- **账号治理（P0-2）**：`AuthService` 新增建用户 / 本人改密 / 管理员重置
+  （重置后强制对方改密）/ 停用启用四件套，全部写审计；RBAC 新增
+  `manage_users` 动作（仅 admin）；users 表新增 `must_change_password` 与
+  `disabled` 列（老库自动 ALTER，schema 同步）——停用在登录与
+  `check_permission` 双侧即时生效；守护约束：不能停用自己、最后一名可用
+  管理员不可停用。种子默认账号带初始密码标记，`security.force_default_pwd_change`
+  门控二态：true=首登强制改密，false（默认）=顶栏常驻提醒不阻断演示；
+  顶栏新增「🔑 修改密码」入口，管理端新增「用户管理」区块（列表/建号/
+  重置/停启）。全系统此前无任何改密与建用户入口的缺口就此补齐。
+- **密钥环境变量展开（P0-3）**：`ConfigLoader` 支持全部字符串值
+  `${ENV_VAR}` / `${ENV_VAR:-默认值}` 展开，`notify.webhook_url`、
+  `asr.api_key`、`enhance.cloud.api_key` 可经环境注入不必明文进 git；
+  未定义且无默认值的占位保持原样（漏配一眼可见）。
+- **CI 门禁（P0-4）**：新增 `ruff.toml` 最小门禁（E9+F：语法错误/未定义名/
+  未使用导入），CI 加 ruff（阻断）与 pip-audit（`continue-on-error` 观察）
+  两步；本次顺带清理 23 处死代码（未使用导入/死赋值/空 f-string）。
+
+**P1 · 工程健壮性**
+
+- 吞异常留痕：启动自举（`app.py`）、预热线程四段、模型注册种子、
+  证据截图/整改照片落盘、告警条款挂载、实时告警触发等关键静默点补
+  warning 日志（降级语义不变，排障不再黑盒）；
+- RTSP 凭据打码：`core/video_source.mask_source()`（`user:pass@` →
+  `user:****@`），实时页三处展示点接入，数据库/内部链路仍存原始 source；
+- 登录失败限速字典加容量上限（FIFO 淘汰，防任意用户名灌内存）；
+- 异步研判进度按属主隔离：`_task_owners` 登记 + `get_progress` /
+  `pop_async_result` / `start_async_run` 属主校验，非属主视角不可见
+  （不传 user_id 保持旧行为，兼容内部调用）；
+- README 新增「生产部署建议」：默认账号治理、密钥环境注入、HTTPS 反代、
+  WAL 三件备份、审计留存 cron、上传限制。
+
+**P2 · 功能迭代**
+
+- **派发即推送责任人**：`NotificationService.push_dispatch`（复用催办
+  `wo_<id>` 软引用留痕与同一 webhook 通道），`DispatchService.dispatch_order`
+  派单当下即推送——注入 notifier（测试）走同步、真实服务走 daemon 线程
+  不阻塞 UI；notify 未启用自动 skipped 留痕，不影响派发主链路；
+  `test_push`/`push_overdue`/`push_dispatch` 三路收拢为 `_push_sample`
+  单一管线；
+- **多 Provider 接入（enhance 多 base）**：`enhance.providers` 列表
+  （{name, type(cloud|local), api_base, api_key, model, timeout_sec}），
+  **链序即降级序**、逐家过白名单、`total_deadline_sec=30` 全链总预算
+  防多家慢超时叠加；`providers` 缺省时由 legacy `provider/cloud` 单槽
+  合成等价链零破坏；`LlmEngine.chat()` 通用单轮对话；上传页预填按钮
+  标注实际命中的 provider 名；
+- **Agent 测试场**（`ui/page_lab.py`，admin/safety 专属）：视觉/规范/
+  融合/处置润色四个单 Agent 试跑 + 整链干跑（与研判页同一 Orchestrator，
+  **不传 work_order_dao、不调 save_result、不写审计**——干跑不入库铁律，
+  演示台账零污染）；处置润色可按所选 base 对比输出；白名单/severity
+  纪律照走，测试场不是后门；
+- **AI 通道连通性自检**：`EnhanceEngine.check_cloud()`（最小 chat 调用
+  一次验证 端点+key+模型）与 `AsrEngine.check_connectivity()`（内存合成
+  0.5s 静音 wav 端到端走一次转写）；系统自检页新增「云 LLM 通道 / 云 ASR
+  通道 / 本地 Ollama」三行——云通道仅已配置时渲染（延续静默约定，未配置
+  不报红），401/403→key 无效、404→端点/模型名排查提示，演示前一键确认
+  key 有效；页顶 caption 常驻显示各 AI 通道配置状态；
+- **审计导出与受控留存**：`AuditService.export_csv`（区间筛选，只读不碰
+  仅追加约束）+ 管理端「审计流水 CSV」下载；`scripts/audit_maintenance.py`
+  cron 归档入口——默认只导出不删除（C4 语义默认不破），`--delete` 走
+  受控路径：行数校验一致 → 先写 `audit_archive` purge 凭证 → 摘除禁删
+  触发器 → 删除 → 原样重建触发器，删档行为可审计可追溯。
+
+### 测试与验证
+
+- 全量 **237 passed**（基线 189 + 新增 48：文件名消毒/ENV 展开/账号治理/
+  派发推送/审计导出与受控删档/进度隔离/凭据打码/AI 通道自检/多 Provider
+  链与测试场）；ruff 全绿；
+- 真实库副本验证：老库 ALTER 迁移幂等、既有账号不受补种影响、
+  `audit_maintenance.py` 导出/删档端到端跑通。
+
 ## [v0.7] — 2026-08-28
 
 ### 新增：🟢 计划内清尾三件

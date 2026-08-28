@@ -9,7 +9,10 @@ from __future__ import annotations
 
 import bcrypt
 
+from core.logging import get_logger
 from dao.db import get_conn, init_db
+
+log = get_logger(__name__)
 
 # 默认账号（演示用）：admin 全权限；safety 上传研判受限；
 # responsible 为整改责任人（v0.2 工单闭环的接收端）。
@@ -22,7 +25,12 @@ _DEFAULT_USERS = (
 
 
 def ensure_initialized() -> None:
-    """建库 + 按用户补种默认账号。幂等：存在的用户（含改过密码的）一律跳过。"""
+    """建库 + 按用户补种默认账号。幂等：存在的用户（含改过密码的）一律跳过。
+
+    v0.8：种子账号带 must_change_password=1（初始密码未改标记）——
+    登录后 UI 据此展示改密提醒，或在 security.force_default_pwd_change=true
+    时强制首登改密；改密即清标记，老演示库升级不受影响（缺列自动 ALTER）。
+    """
     conn = get_conn()
     try:
         init_db(conn)
@@ -34,8 +42,9 @@ def ensure_initialized() -> None:
             pwd_hash = bcrypt.hashpw(
                 pwd.encode("utf-8"), bcrypt.gensalt()).decode("utf-8")
             conn.execute(
-                "INSERT INTO users(id, username, pwd_hash, role, created_at) "
-                "VALUES (?, ?, ?, ?, datetime('now'))",
+                "INSERT INTO users(id, username, pwd_hash, role, "
+                "must_change_password, created_at) "
+                "VALUES (?, ?, ?, ?, 1, datetime('now'))",
                 ("u_" + username, username, pwd_hash, role))
         conn.commit()
     finally:
@@ -103,8 +112,8 @@ def _ensure_models() -> None:
             conn.commit()
         finally:
             conn.close()
-    except Exception:
-        pass
+    except Exception as exc:  # noqa: BLE001 模型注册失败不阻断启动，但留痕
+        log.warning(f"模型注册表种子失败: {exc}")
 
 
 def ensure_models() -> None:

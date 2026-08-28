@@ -22,5 +22,16 @@ jobs:
           sudo apt-get install -y --no-install-recommends fonts-noto-cjk
       - name: Install dependencies
         run: pip install --disable-pip-version-check --only-binary :all: -r requirements.txt
+      - name: Lint (ruff)
+        run: |
+          pip install ruff
+          ruff check agents core dao services ui scripts app.py
+      - name: Dependency audit (pip-audit)
+        # v0.8：依赖漏洞扫描。已知锁死版本可能存在无升级可用的 advisory，
+        # 先以 continue-on-error 观察运行，出现告警后逐项评估 --ignore-vuln 收口。
+        continue-on-error: true
+        run: |
+          pip install pip-audit
+          pip-audit -r requirements.txt --skip-editable
       - name: Run tests
         run: python scripts/run_tests.py

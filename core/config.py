@@ -3,13 +3,42 @@
 依赖方向：core 为最底层，不依赖 services/agents/ui（见代码规范 §3）。
 所有模型路径、知识库路径、风险矩阵、抽帧参数、LLM 开关均经此模块读取，
 禁止在业务代码中硬编码（代码规范 §6）。
+v0.8：字符串值支持 ${ENV_VAR} / ${ENV_VAR:-默认值} 环境变量展开——
+API key、webhook 等敏感值可经环境注入，不必明文写进入 git 的 config.yaml；
+未定义且无默认值的占位保持原样（便于日志中一眼看出漏配）。
 """
 from __future__ import annotations
 
 import os
+import re
 from typing import Any
 
 import yaml
+
+# ${VAR} 或 ${VAR:-default}；VAR 名与 shell 同约束（字母/下划线开头）
+_ENV_PATTERN = re.compile(r"\$\{([A-Za-z_][A-Za-z0-9_]*)(?::-([^}]*))?\}")
+
+
+def _expand_env_str(text: str) -> str:
+    """对单个字符串做环境变量展开；未定义且无默认值的占位保持原样。"""
+    def _sub(m: re.Match) -> str:
+        val = os.environ.get(m.group(1))
+        if val is not None:
+            return val
+        default = m.group(2)
+        return default if default is not None else m.group(0)
+    return _ENV_PATTERN.sub(_sub, text)
+
+
+def _expand_env(node: Any) -> Any:
+    """递归展开配置树中所有字符串值里的 ${ENV} 占位。"""
+    if isinstance(node, dict):
+        return {k: _expand_env(v) for k, v in node.items()}
+    if isinstance(node, list):
+        return [_expand_env(v) for v in node]
+    if isinstance(node, str):
+        return _expand_env_str(node)
+    return node
 
 
 class ConfigError(Exception):
@@ -24,12 +53,16 @@ class ConfigLoader:
         self._cache: dict[str, Any] | None = None
 
     def load(self) -> dict[str, Any]:
-        """读取并缓存全局配置；文件缺失或 YAML 非法时抛 ConfigError。"""
+        """读取并缓存全局配置；文件缺失或 YAML 非法时抛 ConfigError。
+
+        加载后对全部字符串值做一次 ${ENV_VAR} 环境变量展开（v0.8），
+        敏感值（api_key/webhook_url）可经环境注入而无需写入配置文件。
+        """
         if self._cache is None:
             if not os.path.exists(self._path):
                 raise ConfigError(f"配置文件不存在: {self._path}")
             with open(self._path, encoding="utf-8") as f:
-                self._cache = yaml.safe_load(f)
+                self._cache = _expand_env(yaml.safe_load(f))
             self._validate(self._cache)
         return self._cache
 

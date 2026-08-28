@@ -237,8 +237,9 @@ docker compose run --rm app python -m pytest tests -q --tb=short -p no:cacheprov
 | `llm` | 本地 LLM 开关、Ollama 地址、模型名 |
 | `scenes.*` | 各场景检测头列表 + 知识库集合 + 风险矩阵 |
 | `compliance.severity` | 隐患键 → safe/warning/critical 分级 |
-| `notify` | 外部推送开关/通道/webhook/冷却 |
+| `notify` | 外部推送开关/通道/webhook/冷却（支持 `${ENV}` 展开） |
 | `monitor` | 后台 RTSP 轮询开关/采样间隔/源列表 |
+| `security` | v0.8 账号安全门控（`force_default_pwd_change`） |
 
 场景化后优先读 `scenes.<scene>.yolo_weights`，单模型兜底读 `models.yolo_onnx`。
 
@@ -430,6 +431,28 @@ python scripts/evaluate_models.py --version v3
 - **PPE 权重版本**：仅随包提供后续训练更强的 v3（活跃）/ v4（备用）；v2 因压缩包体积限制不放入，如需可由 scripts/export_ppe_onnx.py 重新导出；火情 v2 随包提供。
 - 首次启动自动建库 + 种子默认账号（`core/bootstrap.py`）；知识库向量库 data/kb/chroma/ 已随包提供。仅当 BGE 模型目录缺失时才需运行 `setup_models.py` 联网下载。实时监测态不依赖知识库。
 - LLM 润色走 ollama `qwen3:8b`（独立进程，异步润色不进主链路）；app 启动后台预热一次 + 每次 `keep_alive=30m` 常驻，规避 5.2GB 模型反复冷启；断网/不可用自动降级为模板工单。
+
+### 生产部署建议（v0.8）
+
+> 以下为演示之外对内网/小规模生产部署的最低安全配置清单。
+
+1. **修改默认账号**：`admin/admin123`、`safety/demo1234`、`lisi/demo1234`
+   仅供演示。登录后经顶栏「🔑 修改密码」更换；管理端「用户管理」可建号 /
+   重置密码 / 停用账号。生产建议在 `config/config.yaml` 置
+   `security.force_default_pwd_change: true`，初始密码账号登录后强制改密。
+2. **密钥经环境注入**：`notify.webhook_url`、`asr.api_key`、
+   `enhance.cloud.api_key` 支持写 `${ENV_VAR}`（可带默认值
+   `${VAR:-default}`），避免明文提交进 git。
+3. **HTTPS 反向代理**：Streamlit 自身不带 TLS，前置 nginx/caddy 终结
+   HTTPS；此时把 `--server.address` 收回 `127.0.0.1`，仅由反代对外。
+   Docker 端口映射建议 `-p 127.0.0.1:8501:8501`。
+4. **数据备份**：SQLite 运行于 WAL 模式，备份需三件同拷：
+   `data/app.db` + `app.db-wal` + `app.db-shm`（或先 `PRAGMA wal_checkpoint(TRUNCATE)`）。
+5. **审计留存**：cron 挂 `scripts/audit_maintenance.py --retention-days 365`
+   定期导出归档 CSV；只有显式追加 `--delete` 才删档，删前自动写
+   `audit_archive` 凭证并原样重建禁删触发器。
+6. **上传限制**：影像上传 200MB / 规范 PDF 50MB 上限（代码内校验），
+   也可加配 `.streamlit/config.toml` 的 `server.maxUploadSize` 双保险。
 
 ## 技术栈
 

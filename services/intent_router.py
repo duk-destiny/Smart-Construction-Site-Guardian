@@ -116,7 +116,6 @@ class IntentRouter:
     # ---------- 主入口 ----------
     def route(self, text: str) -> RouteResult:
         x = self.extract(text)
-        hits_queryish = x["hash_ids"] or x["nums"] or x["status"] or x["query_hint"]
         confirmed, amb_num = self._collect_order_refs(x)
 
         if amb_num:

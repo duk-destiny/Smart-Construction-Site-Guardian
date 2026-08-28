@@ -4,12 +4,16 @@
 -- 类型约定：时间用 TEXT(ISO8601)，布尔用 INTEGER(0/1)；外键需 PRAGMA foreign_keys=ON
 
 -- 用户表（v0.2 起支持第三角色 responsible=整改责任人）
+-- v0.8 账号治理：must_change_password=初始密码未改标记（首登强制改密门控用）；
+-- disabled=停用标记（1=停用，登录与权限校验均拒绝，立即生效）
 CREATE TABLE IF NOT EXISTS users (
-    id         TEXT PRIMARY KEY,
-    username   TEXT NOT NULL UNIQUE,
-    pwd_hash   TEXT NOT NULL,
-    role       TEXT NOT NULL CHECK(role IN ('safety','admin','responsible')),
-    created_at TEXT NOT NULL
+    id                   TEXT PRIMARY KEY,
+    username             TEXT NOT NULL UNIQUE,
+    pwd_hash             TEXT NOT NULL,
+    role                 TEXT NOT NULL CHECK(role IN ('safety','admin','responsible')),
+    must_change_password INTEGER NOT NULL DEFAULT 0,
+    disabled             INTEGER NOT NULL DEFAULT 0,
+    created_at           TEXT NOT NULL
 );
 
 -- 任务表（一次检测任务；source 标记输入来源 camera/upload/text）

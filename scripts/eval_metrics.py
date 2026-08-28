@@ -68,8 +68,8 @@ def eval_detection():
         "dual_parallel_ms_per_frame": both_ms,
         "serial_sum_ms": fire_ms + ppe_ms,
     }
-    print(f"| 检测头 | 单帧延迟 |")
-    print(f"| --- | ---: |")
+    print("| 检测头 | 单帧延迟 |")
+    print("| --- | ---: |")
     print(f"| 火情 YOLOv8 | {fire_ms} ms |")
     print(f"| PPE YOLOv8 | {ppe_ms} ms |")
     print(f"| 双头并行（取最大） | {both_ms} ms |")
@@ -132,8 +132,8 @@ def eval_rag():
         "queried": queried,
         "samples": sample_results,
     }
-    print(f"| RAG 指标 | 值 |")
-    print(f"| --- | ---: |")
+    print("| RAG 指标 | 值 |")
+    print("| --- | ---: |")
     print(f"| 知识库条目数 | {total} |")
     print(f"| 召回率@5（chunk 派生查询） | {recall} |")
     print(f"| 平均查询延迟 | {avg_ms} ms |")
@@ -158,4 +158,4 @@ if __name__ == "__main__":
     os.makedirs("data/eval", exist_ok=True)
     with open("data/eval/metrics.json", "w", encoding="utf-8") as f:
         json.dump(OUT, f, ensure_ascii=False, indent=2)
-    print(f"\n已写入 data/eval/metrics.json")
+    print("\n已写入 data/eval/metrics.json")
