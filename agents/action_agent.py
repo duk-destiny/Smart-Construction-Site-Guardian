@@ -4,10 +4,13 @@ worker_notice = LlmEngine.polish（可选，异步不计时）或模板降级拼
 """
 from __future__ import annotations
 
-import threading
+from concurrent.futures import ThreadPoolExecutor
 
 from agents.base import AgentBase, AgentMessage
 from core.llm_engine import LlmEngine
+
+# 润色后台线程池：LLM 调用耗时但并发量低，2 worker 足够消化
+_POLISH_POOL = ThreadPoolExecutor(max_workers=2)
 
 # 按风险等级动态生成整改要求话术（降级路径）
 # 避免低风险场景仍套用"立即停止作业"等过度严厉的固定模板
@@ -131,11 +134,10 @@ class ActionAgent(AgentBase):
         """
         if self._wo_dao is None or not self._llm.available() or not task_id:
             return
-        threading.Thread(
-            target=self._polish_async,
-            args=(task_id, hazard_desc, clause_text, requirement, deadline),
-            daemon=True,
-        ).start()
+        _POLISH_POOL.submit(
+            self._polish_async,
+            task_id, hazard_desc, clause_text, requirement, deadline,
+        )
 
     def _polish_async(
         self,

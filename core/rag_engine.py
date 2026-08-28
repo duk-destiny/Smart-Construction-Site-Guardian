@@ -13,6 +13,7 @@ import json
 import os
 import subprocess
 import sys
+import atexit
 import threading
 from pathlib import Path
 
@@ -22,6 +23,11 @@ log = get_logger(__name__)
 
 # BGE 默认权重路径（与 config.yaml: bge_dir 一致）
 _DEFAULT_BGE = "data/models/BAAI--bge-small-zh-v1.5/snapshots/master"
+
+# BGE-small-zh 最大 512 token，中文约 1.5-2 token/字；留余量取 400 字为分块上限，
+# 重叠 80 字避免语义在边界被截断。
+_MAX_CHUNK_CHARS = 400
+_CHUNK_OVERLAP = 80
 
 # 进程级单例：BGE 模型（None=未加载 / SentenceTransformer / False=加载失败）
 _MODEL = None
@@ -59,20 +65,33 @@ class _BgeProxy:
         )
         self._lock = threading.Lock()
         self._seq = 0
-        # 等待就绪信号（子进程加载 BGE 完成后首发）
-        ready = self._recv()
+        atexit.register(self._cleanup)
+        ready = self._recv(timeout=60)
         if not ready or not ready.get("ok"):
             self._cleanup()
             raise RuntimeError(f"BGE worker 启动失败: {ready}")
 
-    def _recv(self) -> dict | None:
-        line = self._proc.stdout.readline()
-        if not line:
+    def _recv(self, timeout: float = 30) -> dict | None:
+        """读一行 JSON，超时返回 None（Windows 兼容：线程中转，select 不支持 pipe）。"""
+        result: list[dict | None] = [None]
+        done = threading.Event()
+
+        def _reader():
+            try:
+                line = self._proc.stdout.readline()
+                if line:
+                    result[0] = json.loads(line)
+            except Exception:
+                pass
+            finally:
+                done.set()
+
+        t = threading.Thread(target=_reader, daemon=True)
+        t.start()
+        done.wait(timeout=timeout)
+        if not done.is_set():
             return None
-        try:
-            return json.loads(line)
-        except Exception:
-            return None
+        return result[0]
 
     def encode(self, text, normalize_embeddings: bool = True):
         import numpy as np
@@ -86,7 +105,7 @@ class _BgeProxy:
                    "texts": texts, "normalize": normalize_embeddings}
             self._proc.stdin.write(json.dumps(req) + "\n")
             self._proc.stdin.flush()
-            resp = self._recv()
+            resp = self._recv(timeout=30)
         if not resp or not resp.get("ok"):
             raise RuntimeError(f"BGE encode 失败: {resp}")
         arr = np.array(resp["embeddings"], dtype=np.float32)
@@ -118,16 +137,19 @@ class RagEngine:
 
     @staticmethod
     def _load_model():
-        """懒加载 BGE 子进程代理（进程级单例，所有线程/实例共享）。"""
+        """懒加载 BGE 子进程代理（进程级单例，所有线程/实例共享）。
+
+        加载失败时重置为 None，下次调用重试（避免一次性失败永久降级）。
+        """
         global _MODEL
         with _MODEL_LOCK:
             if _MODEL is None or (_MODEL is not False and not _MODEL.alive):
                 try:
                     _MODEL = _BgeProxy()
                 except Exception as e:
-                    log.warning(f"BGE 子进程启动失败: {e}")
-                    _MODEL = False  # type: ignore[assignment]
-        return _MODEL if _MODEL is not False else None
+                    log.warning(f"BGE 子进程启动失败（下次重试）: {e}")
+                    _MODEL = None  # type: ignore[assignment]
+        return _MODEL if _MODEL is not False and _MODEL is not None else None
 
     @classmethod
     def preload(cls, collection_name: str = "kb_hot_work",
@@ -143,7 +165,10 @@ class RagEngine:
 
     @staticmethod
     def _ensure_collection(collection_name: str, chroma_dir: str):
-        """懒加载/复用 Chroma 集合（进程级缓存，按 chroma_dir+name 隔离）。"""
+        """懒加载/复用 Chroma 集合（进程级缓存，按 chroma_dir+name 隔离）。
+
+        加载失败时重置为 None，下次调用重试。
+        """
         key = f"{chroma_dir}::{collection_name}"
         with _COLLECTION_LOCK:
             col = _COLLECTIONS.get(key)
@@ -158,14 +183,27 @@ class RagEngine:
                     )
                     _COLLECTIONS[key] = col
                 except Exception as e:
-                    log.warning(f"Chroma 加载失败: {e}")
-                    _COLLECTIONS[key] = False  # type: ignore[assignment]
-                    col = False  # type: ignore[assignment]
-            return col if col is not False else None
+                    log.warning(f"Chroma 加载失败（下次重试）: {e}")
+            return _COLLECTIONS.get(key)
 
     def _get_collection(self):
         """复用进程级 Chroma 集合缓存。"""
         return RagEngine._ensure_collection(self._collection_name, self._chroma_dir)
+
+    @staticmethod
+    def _chunk_text(text: str) -> list[str]:
+        """将超长条款按 _MAX_CHUNK_CHARS 分块，块间重叠 _CHUNK_OVERLAP 字。"""
+        if len(text) <= _MAX_CHUNK_CHARS:
+            return [text]
+        chunks: list[str] = []
+        start = 0
+        while start < len(text):
+            end = min(start + _MAX_CHUNK_CHARS, len(text))
+            chunks.append(text[start:end])
+            if end >= len(text):
+                break
+            start = end - _CHUNK_OVERLAP
+        return chunks
 
     def build(self, pdf_paths: list[str]) -> int:
         """从 PDF 列表构建知识库，返回入库条款数。
@@ -205,16 +243,23 @@ class RagEngine:
         metadatas: list[dict[str, str]] = []
         documents: list[str] = []
 
-        # 批量向量化：一次 IPC 编码全部条款，避免逐条往返
-        texts = [c["clause_text"] for c in all_clauses]
+        # 长条款分块：避免 BGE 静默截断超过 512 token 的条款
+        expanded: list[tuple[str, str]] = []  # (clause_no, chunk_text)
+        for c in all_clauses:
+            chunks = self._chunk_text(c["clause_text"])
+            for j, chunk in enumerate(chunks):
+                no = c["clause_no"] if len(chunks) == 1 else f"{c['clause_no']}_p{j+1}"
+                expanded.append((no, chunk))
+
+        texts = [t for _, t in expanded]
         with _ENCODE_LOCK:
             import numpy as _np
             embs = _np.asarray(model.encode(texts, normalize_embeddings=True)).tolist()
-        for i, c in enumerate(all_clauses):
+        for i, (no, text) in enumerate(expanded):
             ids.append(f"clause_{i}")
             embeddings.append(embs[i])
-            metadatas.append({"clause_no": c["clause_no"]})
-            documents.append(c["clause_text"])
+            metadatas.append({"clause_no": no})
+            documents.append(text)
 
         if embeddings:
             col.add(ids=ids, embeddings=embeddings, metadatas=metadatas, documents=documents)
@@ -244,15 +289,22 @@ class RagEngine:
         metadatas = []
         documents = []
 
-        texts = [c["clause_text"] for c in all_clauses]
+        expanded: list[tuple[str, str]] = []
+        for c in all_clauses:
+            chunks = self._chunk_text(c["clause_text"])
+            for j, chunk in enumerate(chunks):
+                no = c["clause_no"] if len(chunks) == 1 else f"{c['clause_no']}_p{j+1}"
+                expanded.append((no, chunk))
+
+        texts = [t for _, t in expanded]
         with _ENCODE_LOCK:
             import numpy as _np
             embs = _np.asarray(model.encode(texts, normalize_embeddings=True)).tolist()
-        for i, c in enumerate(all_clauses):
+        for i, (no, text) in enumerate(expanded):
             ids.append(f"clause_{existing + i}")
             embeddings.append(embs[i])
-            metadatas.append({"clause_no": c["clause_no"]})
-            documents.append(c["clause_text"])
+            metadatas.append({"clause_no": no})
+            documents.append(text)
 
         if embeddings:
             col.add(ids=ids, embeddings=embeddings, metadatas=metadatas, documents=documents)

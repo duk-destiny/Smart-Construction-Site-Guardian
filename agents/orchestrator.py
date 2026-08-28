@@ -23,6 +23,9 @@ from core.video_utils import VideoUtils
 # 超时预算（秒，C3 主链路 ≤8s）
 _TIMEOUT_VISION = 3.0
 _TIMEOUT_RULE = 4.0
+_TIMEOUT_FUSION = 2.0
+_TIMEOUT_REVIEW = 1.5
+_TIMEOUT_ACTION = 1.5
 
 
 class Orchestrator:
@@ -138,38 +141,44 @@ class Orchestrator:
 
         # 融合
         self._push(task_id, "fusion", "running")
-        fmsg = self.fusion.run(AgentMessage(
-            task_id=task_id, agent="fusion", status="pending",
-            payload={
-                "detections": vout.payload.get("detections", []) if vout.status == "success" else [],
-                "compliance": rout.payload.get("compliance", []) if rout.status == "success" else [],
-            }, error=None, cost_ms=0))
+        with ThreadPoolExecutor(max_workers=1) as ex:
+            ff = ex.submit(self.fusion.run, AgentMessage(
+                task_id=task_id, agent="fusion", status="pending",
+                payload={
+                    "detections": vout.payload.get("detections", []) if vout.status == "success" else [],
+                    "compliance": rout.payload.get("compliance", []) if rout.status == "success" else [],
+                }, error=None, cost_ms=0))
+            fmsg = self._safe(ff, _TIMEOUT_FUSION, "fusion", task_id=task_id)
         self._push(task_id, "fusion", fmsg.status, fmsg.cost_ms)
 
         # 复核：高风险或证据不足的结果标记人工复核
         self._push(task_id, "review", "running")
-        rvmsg = self.review.run(AgentMessage(
-            task_id=task_id, agent="review", status="pending",
-            payload={
-                "detections": vout.payload.get("detections", []) if vout.status == "success" else [],
-                "compliance": rout.payload.get("compliance", []) if rout.status == "success" else [],
-                "risk_level": fmsg.payload.get("risk_level", "一般"),
-                "filtered_fp": fmsg.payload.get("filtered_fp", []),
-            }, error=None, cost_ms=0))
+        with ThreadPoolExecutor(max_workers=1) as ex:
+            frv = ex.submit(self.review.run, AgentMessage(
+                task_id=task_id, agent="review", status="pending",
+                payload={
+                    "detections": vout.payload.get("detections", []) if vout.status == "success" else [],
+                    "compliance": rout.payload.get("compliance", []) if rout.status == "success" else [],
+                    "risk_level": fmsg.payload.get("risk_level", "一般"),
+                    "filtered_fp": fmsg.payload.get("filtered_fp", []),
+                }, error=None, cost_ms=0))
+            rvmsg = self._safe(frv, _TIMEOUT_REVIEW, "review", task_id=task_id)
         self._push(task_id, "review", rvmsg.status, rvmsg.cost_ms)
 
         # 闭环处置
         self._push(task_id, "action", "running")
-        amsg = self.action.run(AgentMessage(
-            task_id=task_id, agent="action", status="pending",
-            payload={
-                "risk_level": fmsg.payload.get("risk_level", "一般"),
-                "reasons": fmsg.payload.get("reasons", []),
-                "compliance": rout.payload.get("compliance", []) if rout.status == "success" else [],
-                "training_tips": rout.payload.get("training_tips", []) if rout.status == "success" else [],
-                "needs_review": rvmsg.payload.get("needs_review", False),
-                "review_reasons": rvmsg.payload.get("review_reasons", []),
-            }, error=None, cost_ms=0))
+        with ThreadPoolExecutor(max_workers=1) as ex:
+            fa = ex.submit(self.action.run, AgentMessage(
+                task_id=task_id, agent="action", status="pending",
+                payload={
+                    "risk_level": fmsg.payload.get("risk_level", "一般"),
+                    "reasons": fmsg.payload.get("reasons", []),
+                    "compliance": rout.payload.get("compliance", []) if rout.status == "success" else [],
+                    "training_tips": rout.payload.get("training_tips", []) if rout.status == "success" else [],
+                    "needs_review": rvmsg.payload.get("needs_review", False),
+                    "review_reasons": rvmsg.payload.get("review_reasons", []),
+                }, error=None, cost_ms=0))
+            amsg = self._safe(fa, _TIMEOUT_ACTION, "action", task_id=task_id)
         self._push(task_id, "action", amsg.status, amsg.cost_ms)
 
         # 整体降级/失败判定：failed > degraded > success

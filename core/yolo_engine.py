@@ -10,6 +10,8 @@ from __future__ import annotations
 
 import ast
 import os
+import threading
+from collections import OrderedDict
 
 import cv2
 import numpy as np
@@ -58,11 +60,14 @@ def _parse_names(meta_str: str | None) -> list[str] | None:
 
 # 进程级 ONNX 会话缓存：按 (绝对路径, intra_op上限) 复用 InferenceSession，
 # 避免离线任务链每任务重载同一权重（RealtimeEngine / VisionAgent / 自检页共享）。
-_SESSIONS: dict[tuple[str, int], "ort.InferenceSession"] = {}
+# LRU 逐出上限 8 槽，防止长期运行累积过多会话占用内存。
+_SESSIONS: OrderedDict[tuple[str, int], "ort.InferenceSession"] = OrderedDict()
+_SESSION_LOCK = threading.Lock()
+_MAX_SESSIONS = 8
 
 
 def _get_session(onnx_path: str, intra_op_threads: int | None) -> "ort.InferenceSession":
-    """按 (绝对路径, intra_op上限) 缓存并复用 InferenceSession。
+    """按 (绝对路径, intra_op上限) 缓存并复用 InferenceSession（线程安全 LRU）。
 
     多个 YoloEngine 实例加载同一权重时共享同一 InferenceSession（run() 线程安全），
     省去每任务重读磁盘+重建会话的开销；不同 intra_op 上限视为不同会话（封顶是
@@ -70,14 +75,20 @@ def _get_session(onnx_path: str, intra_op_threads: int | None) -> "ort.Inference
     """
     cap = int(intra_op_threads) if intra_op_threads and intra_op_threads > 0 else 0
     key = (os.path.abspath(onnx_path), cap)
-    sess = _SESSIONS.get(key)
-    if sess is None:
+    with _SESSION_LOCK:
+        sess = _SESSIONS.get(key)
+        if sess is not None:
+            _SESSIONS.move_to_end(key)
+            return sess
         so = ort.SessionOptions()
         if cap > 0:
             so.intra_op_num_threads = cap
         sess = ort.InferenceSession(
             onnx_path, so, providers=["CPUExecutionProvider"])
         _SESSIONS[key] = sess
+        _SESSIONS.move_to_end(key)
+        while len(_SESSIONS) > _MAX_SESSIONS:
+            _SESSIONS.popitem(last=False)
     return sess
 
 
