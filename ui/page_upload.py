@@ -13,6 +13,8 @@ from __future__ import annotations
 import streamlit as st
 from ui.page_helpers import safe_page
 
+# 白名单（情况1·纯展示常量）：仅作隐患下拉的选项过滤/中文标签，
+# 不执行合规判定、不做业务计算；合规研判一律经服务层。
 from core.compliance import SEVERITY
 from core.yolo_engine import WHITELIST_CN
 from services import lookup_service, task_entry

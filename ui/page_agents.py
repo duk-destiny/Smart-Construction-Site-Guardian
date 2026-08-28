@@ -10,8 +10,7 @@ import json
 import streamlit as st
 from ui.page_helpers import safe_page
 
-from core.compliance import evaluate  # 纯函数展示辅助（横幅渲染），白名单
-from services import task_entry
+from services import task_entry  # 合规研判经 task_entry.evaluate_compliance（分层收口）
 
 _STATUS_COLOR = {
     "success": "🟢", "degraded": "🟡", "failed": "🔴",
@@ -94,7 +93,7 @@ def render_agents() -> None:
     vision_payload = payload.get("vision", {})
     vp = vision_payload.get("payload", {}) if isinstance(vision_payload, dict) else {}
     dets = vp.get("detections", []) if isinstance(vp, dict) else []
-    comp = evaluate(dets)
+    comp = task_entry.evaluate_compliance(dets)
     risk_level = payload.get("risk_level") or result.get("risk_level")
     from ui.components import compliance_banner
     compliance_banner(comp, risk_level=risk_level,

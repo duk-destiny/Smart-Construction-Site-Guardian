@@ -18,7 +18,6 @@ import numpy as np
 import streamlit as st
 from ui.page_helpers import safe_page
 
-from core.compliance import SEVERITY  # 纯常量映射（展示分级），白名单
 from services import history_service, realtime_entry
 from ui.components import compliance_banner, severity_summary
 from core.logging import get_logger
@@ -54,10 +53,6 @@ def _persist(session_id: str, frame_status: str, dets: list[dict]) -> None:
     history_service.record_frame(session_id, frame_status, dets, mode="realtime")
 
 
-def _sev_of(cls: str | None) -> str:
-    return SEVERITY.get(cls, "warning")
-
-
 @safe_page("实时摄像头监测")
 def render_realtime() -> None:
     st.title("📷 实时摄像头监测")
@@ -90,35 +85,25 @@ def render_realtime() -> None:
             else:
                 results = realtime_entry.MultiSourceMonitor(sources).grab_all(engine.analyze, engine.draw)
                 st.session_state["_rtsp_results"] = results
-                alarm_errors: list[str] = []
-                try:
-                    for r in results:
-                        if not r.get("ok"):
-                            continue
-                        comp_r = r["compliance"]
-                        dets_r = r["detections"] or []
-                        _persist(st.session_state["_realtime_session"],
-                                 comp_r["status"], dets_r)
-                        if comp_r.get("level") == "critical" and dets_r:
-                            crit = [d for d in dets_r if _sev_of(d.get("cls")) == "critical"] or [dets_r[0]]
-                            for d in crit[:1]:
-                                try:
-                                    # Phase 0：告警链路（建告警→证据→推送→条款挂载）
-                                    # 全在服务层，连接自持
-                                    history_service.raise_realtime_alarm(
-                                        session_id=st.session_state.get("_realtime_session"),
-                                        scene_id=d.get("scene"),
-                                        cls=d.get("cls"),
-                                        conf=d.get("conf"),
-                                        source=r.get("source"),
-                                        annotated_bgr=r.get("annotated"),
-                                    )
-                                except Exception as exc:  # noqa: BLE001 单条告警失败不中断本轮
-                                    log.warning(f"实时告警触发失败（{r.get('source')}）: {exc}")
-                                    alarm_errors.append(str(exc))
-                finally:
-                    if alarm_errors:
-                        st.caption(f"本轮 {len(alarm_errors)} 条告警触发失败，详见服务端日志")
+                for r in results:
+                    if not r.get("ok"):
+                        continue
+                    comp_r = r["compliance"]
+                    dets_r = r["detections"] or []
+                    _persist(st.session_state["_realtime_session"],
+                             comp_r["status"], dets_r)
+                    if comp_r.get("level") == "critical" and dets_r:
+                        try:
+                            # Phase 0：高危项选取（severity 查表）与告警
+                            # 链路（建告警→证据→推送→条款挂载）全在服务层
+                            history_service.raise_critical_alarm(
+                                session_id=st.session_state.get("_realtime_session"),
+                                dets=dets_r,
+                                source=r.get("source"),
+                                annotated_bgr=r.get("annotated"),
+                            )
+                        except Exception as exc:  # noqa: BLE001 单条告警失败不中断本轮
+                            log.warning(f"实时告警触发失败（{r.get('source')}）: {exc}")
                 st.success(f"已抓取 {sum(1 for r in results if r.get('ok'))} 路源")
     with st.expander("后台自动轮询监控"):
         import services.monitor_service as mon_svc
@@ -196,20 +181,17 @@ def render_realtime() -> None:
     _show_last()
 
     # 告警生命周期：高危帧创建告警事件 → 证据截图留存 → 异步外部推送
+    # （高危项选取 = severity 查表，属合规业务判定，收口在服务层）
     if comp["level"] == "critical" and dets:
-        crit = [d for d in dets if _sev_of(d.get("cls")) == "critical"] or [dets[0]]
-        for d in crit[:1]:
-            try:
-                history_service.raise_realtime_alarm(
-                    session_id=st.session_state.get("_realtime_session"),
-                    scene_id=d.get("scene"),
-                    cls=d.get("cls"),
-                    conf=d.get("conf"),
-                    source="camera",
-                    annotated_bgr=annotated,
-                )
-            except Exception as exc:  # noqa: BLE001 告警失败不中断监测，但留痕
-                log.warning(f"实时告警触发失败（camera）: {exc}")
+        try:
+            history_service.raise_critical_alarm(
+                session_id=st.session_state.get("_realtime_session"),
+                dets=dets,
+                source="camera",
+                annotated_bgr=annotated,
+            )
+        except Exception as exc:  # noqa: BLE001 告警失败不中断监测，但留痕
+            log.warning(f"实时告警触发失败（camera）: {exc}")
 
     # 不合规：声音警报（A2）+ Toast（B2）
     now = time.time()

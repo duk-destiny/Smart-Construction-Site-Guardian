@@ -21,9 +21,14 @@
   `diag_service` / `lab_service` / `realtime_entry` / `admin_console`）；
 - 10 个 UI 页全部去 `get_conn/init_db/dao` 直连，连接生命周期统一由
   `services.db.scoped()` 托管；grep 验证 `ui/` 零 `from dao`；
-- 白名单（纯展示/常量）：`core.compliance` 纯函数、`core.yolo_engine`
-  常量、`core.logging`、`core.config.shared_config`（只读配置）、
-  `core.evidence.sanitize_filename`（纯函数）。
+- 白名单分情况裁定：`core.compliance.evaluate`（page_agents/report）与
+  实时页 severity 高危项选取属**业务计算**，不定为白名单——分别下沉为
+  `services.task_entry.evaluate_compliance()` 与
+  `services.history_service.raise_critical_alarm()`；保留白名单仅限
+  纯展示/常量（`ui/components` 纯视图、`core.yolo_engine.WHITELIST*`、
+  page_upload 隐患下拉用的 `SEVERITY`、`core.logging`、
+  `core.config.shared_config` 只读、`core.evidence.sanitize_filename`），
+  各点位已带 `# 白名单（情况1）` 标记注释，塞业务逻辑前必须先下沉。
 
 **Phase 1 · 安全**
 

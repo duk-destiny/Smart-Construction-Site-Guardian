@@ -136,6 +136,17 @@ def agent_runs(task_id: str) -> list[dict]:
         return [dict(r) for r in TaskService(conn).list_agent_runs(task_id)]
 
 
+def evaluate_compliance(detections: list[dict]) -> dict:
+    """三级合规研判（core.compliance.evaluate 转发）。
+
+    「合规/警告/不合规」判定属 core 业务计算（severity 查表），按分层
+    纪律由服务层转发，UI 不直接 import core——页面拿到结果后仅作横幅
+    渲染（ui.components.compliance_banner 为纯视图转换）。
+    """
+    from core.compliance import evaluate
+    return evaluate(detections or [])
+
+
 # ---------- 语音转写（可选增强）----------
 
 def asr_available() -> bool:

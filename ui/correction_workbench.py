@@ -6,6 +6,8 @@ import os
 import cv2
 import streamlit as st
 
+# 白名单（情况1·纯展示常量）：仅作纠偏控件的下拉选项与框上标签，
+# 不执行合规判定、不做业务计算。
 from core.yolo_engine import WHITELIST, WHITELIST_CN
 
 

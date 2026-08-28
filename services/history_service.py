@@ -97,3 +97,24 @@ def raise_realtime_alarm(session_id: str, scene_id: str | None,
         return TaskService(conn).raise_alarm(
             session_id=session_id, scene_id=scene_id, cls=cls, conf=conf,
             source=source, annotated_bgr=annotated_bgr, force=force)
+
+
+def raise_critical_alarm(session_id: str, dets: list[dict],
+                         source: str | None = None,
+                         annotated_bgr=None) -> str | None:
+    """从一帧检测结果中选取最高危项触发告警（Phase 0 分层收口）。
+
+    「哪些检测项算 critical」是合规业务判定（severity 查表），收口在服务层；
+    UI 只递检测列表，不再 import core.compliance。场景取自选中检测项自身
+    （引擎打标 d["scene"]）。无检测项返回 None。
+    """
+    from core.compliance import SEVERITY
+    if not dets:
+        return None
+    crit = [d for d in dets
+            if SEVERITY.get(d.get("cls"), "warning") == "critical"] or [dets[0]]
+    d = crit[0]
+    return raise_realtime_alarm(
+        session_id=session_id, scene_id=d.get("scene"),
+        cls=d.get("cls"), conf=d.get("conf"),
+        source=source, annotated_bgr=annotated_bgr)

@@ -1,8 +1,9 @@
 """页面4：工单预览 / 改判 / 导出 / 历史记录（page_report）。
 
-Phase 0：派发/改判/导出/历史/检测明细全部经 services.order_service 与
-services.lookup_service，本页零 get_conn/DAO；core.compliance.evaluate
-为纯函数展示辅助（横幅渲染），列入白名单。
+Phase 0：派发/改判/导出/历史/检测明细全部经 services.order_service /
+services.lookup_service / services.task_entry，本页零 get_conn/DAO/core；
+三级合规研判经 task_entry.evaluate_compliance（业务计算在服务层），
+横幅渲染（ui.components.compliance_banner）为纯视图转换。
 """
 from __future__ import annotations
 
@@ -11,8 +12,7 @@ import json
 import streamlit as st
 from ui.page_helpers import safe_page
 
-from core.compliance import evaluate  # 纯函数展示辅助（横幅渲染），白名单
-from services import lookup_service, order_service
+from services import lookup_service, order_service, task_entry
 from services.permission_service import PermissionError as ServicePermissionError
 from ui.components import compliance_banner
 from ui.correction_workbench import render_target_corrections
@@ -102,7 +102,7 @@ def _show_work_order(payload: dict, task_id: str) -> None:
     vision_payload = payload.get("vision", {})
     vp = vision_payload.get("payload", {}) if isinstance(vision_payload, dict) else {}
     dets = vp.get("detections", []) if isinstance(vp, dict) else []
-    comp = evaluate(dets)
+    comp = task_entry.evaluate_compliance(dets)
     compliance_banner(comp, risk_level=payload.get("risk_level"),
                       subtitle=f"检出目标 {len(dets)} 项")
 
@@ -121,7 +121,6 @@ def _show_work_order(payload: dict, task_id: str) -> None:
     _render_dispatch_panel(task_id, payload.get("risk_level"))
 
     with st.expander("Agent 证据链"):
-        from services import task_entry
         runs = task_entry.agent_runs(task_id)
         if not runs:
             st.caption("暂无 Agent 运行记录")

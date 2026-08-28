@@ -13,6 +13,8 @@ from __future__ import annotations
 import streamlit as st
 from ui.page_helpers import safe_page
 
+# 白名单（情况1·只读展示配置）：仅读 security.force_default_pwd_change 开关，
+# 无连接、无业务计算。
 from core.config import shared_config
 from services.session_entry import authenticate, change_own_password
 

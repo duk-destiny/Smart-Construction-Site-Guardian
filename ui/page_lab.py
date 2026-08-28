@@ -17,6 +17,7 @@ import json
 import streamlit as st
 from ui.page_helpers import safe_page
 
+# 白名单（情况1·纯函数）：仅做测试场图片文件名消毒（无业务计算）。
 from core.evidence import sanitize_filename
 from services import lab_service
 

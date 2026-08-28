@@ -167,6 +167,9 @@ hzz-fire-safety/
 > Windows 用户可直接运行 `./run_app.ps1`，脚本自动创建 `.venv313` 虚拟环境、安装依赖并启动应用；以下为手动步骤。
 
 ```bash
+# -1.（fresh clone 必须）生成本地配置：真实 config.yaml 已不入 git（Phase 1）
+cp config/config.example.yaml config/config.yaml
+
 # 0. 创建虚拟环境（推荐 Python 3.13）
 python -m venv .venv313
 

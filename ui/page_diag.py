@@ -156,6 +156,7 @@ def render_diag() -> None:
 
     sources: list[str] = []
     try:
+        # 白名单（情况1·只读展示配置）：仅读 monitor.sources 供自检展示。
         from core.config import shared_config
         mconf = shared_config().get("monitor") or {}
         sources = [str(x).strip() for x in (mconf.get("sources") or []) if str(x).strip()]
