@@ -191,6 +191,12 @@ streamlit run app.py --server.address 0.0.0.0 --server.port 8501
 # 4b. 启动 FastAPI 接口层（Phase 2 前后端分离；Swagger 文档 /docs，健康检查 /healthz）
 python -m uvicorn api.main:app --host 0.0.0.0 --port 8000
 
+# 4c. React 前端（Phase 3）：开发模式（Vite dev server，代理 /api 到 8000）
+cd frontend && npm install && npm run dev        # http://localhost:5173
+#    生产构建：npm run build → frontend/dist 由 FastAPI 静态托管，单进程单端口 8000
+#    前端测试：npm run test（Vitest 组件冒烟）；
+#    浏览器关键流程冒烟：python scripts/api_browser_smoke.py（需先 npm run build）
+
 # 5. 全量单元/集成测试
 python scripts/run_tests.py
 
@@ -214,6 +220,13 @@ v0.2 升级的老演示库也会自动补齐责任人而不动既有密码）：
 `responsible` 责任人账号仅见 **我的整改单 🧰**。
 
 实时摄像头页面使用 `st.camera_input` 零依赖轮询方案：点击捕获帧即检测并展示，开启「连续监控」后自动刷新等待下一帧；**声音警报仅在实时监测态、且不合规时触发**。页面同时支持多路 RTSP / 本地视频源按帧抓取。
+
+## 两套入口（Streamlit 回退保留）
+
+| 入口 | 启动 | 地址 | 说明 |
+| --- | --- | --- | --- |
+| **React 前端（主推）** | `uvicorn api.main:app --port 8000`（frontend/dist 存在自动托管） | http://localhost:8000 | 单进程单端口；移动端可用（责任人整改单响应式） |
+| Streamlit 经典版（回退） | `streamlit run app.py --server.port 8501` | http://localhost:8501 | 保留至 React 版稳定一个迭代周期后下线 |
 
 ## API 服务（Phase 2 前后端分离）
 

@@ -147,6 +147,22 @@ def evaluate_compliance(detections: list[dict]) -> dict:
     return evaluate(detections or [])
 
 
+def hazard_options() -> list[dict]:
+    """隐患键下拉选项（API/前端用）：key + 中文名 + severity，高危置顶。
+
+    「哪些键可选、怎么排序」是合规业务常量（severity 查表 + 白名单中文名），
+    按白名单裁定口径由服务层转发；safe 正向信号不构成上报项，不下发。
+    """
+    from core.compliance import SEVERITY
+    from core.yolo_engine import WHITELIST_CN
+    items = [{"key": k, "label": WHITELIST_CN.get(k, k), "severity": v}
+             for k, v in SEVERITY.items()
+             if k != "none" and v in ("critical", "warning")]
+    items.sort(key=lambda it: (0 if it["severity"] == "critical" else 1,
+                               it["label"]))
+    return items
+
+
 # ---------- 语音转写（可选增强）----------
 
 def asr_available() -> bool:

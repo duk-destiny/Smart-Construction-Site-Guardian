@@ -115,6 +115,50 @@ data/exports 内）；`lookup_service.task_detection_detail` 增量附带 task/r
   （魔数不符 / 扩展名与内容不一致 / 超限，注入 0MB 配置）+ 下载防穿越 +
   WS 鉴权 + CORS 开关；临时库逐例隔离，`API_PREWARM=0` 关预热。
 
+### 重构：前后端分离 · Phase 3（React 前端）
+
+> 依据 `docs/前后端分离重构提示词.md` Phase 3 执行；`frontend/dist` 构建产物
+> 由 FastAPI 静态托管，单进程单端口；Streamlit 保留为回退入口。
+
+**前端主体（frontend/，React 18 + TypeScript + Vite + AntD 5）**
+
+- 基线：react-router-dom v6 角色路由守卫（responsible 仅「我的整改单」；
+  admin 独占管理端；首登 must_change_password 强制改密页不可绕过）；
+  axios 拦截器（Bearer 注入 / 401 清登录态跳登录 / 403·4xx 统一 message）；
+  echarts 按需封装；无 Redux 等重型状态库；全中文 locale；
+- 页面对齐 Streamlit 功能面：登录 / 强制改密 / 统一上报（影像研判+作业票表单、
+  文字建单（隐患下拉由 /tasks/capabilities 下发高危置顶）、对话式只读查询）/
+  多 Agent 研判（进度 1.5s 轮询 + Steps + 结果面板 + agent_runs 证据链 Timeline）/
+  工单闭环（台账行抽屉派发/改判/导出、待验收照片预览+通过驳回、逾期表）/
+  历史分析（日期筛选 + 合规率趋势/类别分布图表 + 任务风险表）/ 实时监测
+  （Phase 4 前告警只读占位 + 误报/转工单）/ 我的整改单（**手机响应式卡片**，
+  拍照/传图提交、驳回原因、倒计时标签）/ 管理端（用户/模型/知识库/推送/自检/
+  审计/纠偏七区块）；
+- 构建产物零 CDN 引用（离线可用的验收底线），echarts/antd 全本地打包。
+
+**后端小增补（Phase 3 使能，均带测试）**
+
+- `api/routers/history.py`：历史分析四端点（明细/按日聚合/类别分布/任务风险，
+  复用 history_service，admin+safety）；
+- `api/routers/media.py` + `services/media_service.py`：媒体安全下发
+  （防穿越 + 扩展名白名单；认证放宽 Bearer 头或 ?token= 二选一——`<img>`
+  无法带 header，仅内网部署语义，代码注释标明）；
+- `/tasks/capabilities` 增发 `hazard_options`（severity 查表 + 白名单中文名，
+  服务层转发口径与 Phase 0 白名单裁定一致）；
+- SPA 深链路 fallback：/assets 挂载 + 未知 GET 回 index.html（防穿越校验，
+  API 路由先注册不受影响）。
+
+**测试**
+
+- `tests/test_api.py` +4 例（33 例）：history 四端点及 responsible 403、
+  媒体下发与越界/坏扩展名/未登录拒绝、SPA fallback（深链路回 index.html、
+  真实文件直出、API 不受影响）、capabilities 含隐患选项；
+- Vitest 组件冒烟 5 例（标签映射/登录页渲染/token 注入/401 清登录态；
+  Node 25 实验 localStorage 与 jsdom 冲突、matchMedia 缺失均已在 setup 垫平）；
+- Playwright 关键流程冒烟（`scripts/api_browser_smoke.py`）：临时库起 uvicorn
+  → chromium 走查 登录→强制改密→文字上报→查结果→拍照提交整改→验收销项
+  全链路 PASS。
+
 ## [v0.8] — 2026-08-28
 
 ### 新增：安全收口 + 账号治理 + 运维闭环（三阶段一次交付）

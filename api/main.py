@@ -21,12 +21,13 @@ os.environ.setdefault("TOKENIZERS_PARALLELISM", "false")
 from contextlib import asynccontextmanager
 from pathlib import Path
 
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
+from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
-from api.routers import admin, alarms, auth, orders, reports, tasks, ws
+from api.routers import (admin, alarms, auth, history, media, orders,
+                         reports, tasks, ws)
 from core.config import ConfigError, shared_config  # 白名单（情况1）：只读配置
 from core.logging import get_logger      # 白名单（情况1）：日志
 from services.permission_service import PermissionError as ServicePermissionError
@@ -127,6 +128,36 @@ def _maybe_cors(app: FastAPI) -> None:
     log.info("开发模式 CORS 已放行 http://localhost:5173")
 
 
+def _mount_frontend(app: FastAPI) -> None:
+    """frontend/dist 存在才托管（Phase 3 产物；单进程单端口部署）。
+
+    /assets 直出带指纹的构建产物；其余 GET 路径：命中 dist 内真实文件则
+    直出（favicon 等），否则回 index.html——SPA history 路由深链路可用。
+    API 路由先注册先匹配，不受此兜底影响；防穿越：解析结果必须仍在 dist 内。
+    """
+    if not _DIST.is_dir():
+        return
+    assets = _DIST / "assets"
+    if assets.is_dir():
+        app.mount("/assets", StaticFiles(directory=str(assets)),
+                  name="assets")
+
+    dist_root = str(_DIST.resolve())
+    index = _DIST / "index.html"
+
+    @app.get("/{full_path:path}", include_in_schema=False)
+    async def spa(full_path: str) -> FileResponse:
+        # API 未匹配路径不回 index.html（保持 404 语义，防前端兜底吞掉
+        # API 层的路径错误/穿越探测）；SPA 路由不会以 /api 开头
+        if full_path == "api" or full_path.startswith("api/"):
+            raise HTTPException(status_code=404, detail="Not Found")
+        if full_path:
+            candidate = (_DIST / full_path).resolve()
+            if candidate.is_file() and str(candidate).startswith(dist_root):
+                return FileResponse(candidate)
+        return FileResponse(index)
+
+
 def create_app() -> FastAPI:
     app = FastAPI(
         title="智护工地 API",
@@ -144,13 +175,12 @@ def create_app() -> FastAPI:
         return {"status": "ok", "app": "zhihu-gongdi-api",
                 "version": app.version}
 
-    for mod in (auth, tasks, alarms, orders, reports, admin, ws):
+    for mod in (auth, tasks, alarms, orders, reports, admin, history,
+                media, ws):
         app.include_router(mod.router, prefix=_API_PREFIX)
 
-    # 前端构建产物存在才挂载（Phase 3 产物；单进程单端口部署）
-    if _DIST.is_dir():
-        app.mount("/", StaticFiles(directory=str(_DIST), html=True),
-                  name="frontend")
+    # 前端构建产物存在才挂载（Phase 3 产物；SPA fallback 含在内）
+    _mount_frontend(app)
     return app
 
 

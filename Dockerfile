@@ -19,6 +19,7 @@ COPY requirements.txt .
 RUN pip install --no-cache-dir --only-binary :all: -r requirements.txt
 
 COPY agents/ api/ config/ core/ dao/ services/ ui/ scripts/ app.py requirements.txt ./
+COPY frontend/dist ./frontend/dist/
 
 # 非 root 运行（uid 1000 兼容常见宿主用户；Docker Desktop 绑定挂载默认可写，
 # Linux 宿主若 data 目录非 1000 属主需先 chown -R 1000:1000 ./data）

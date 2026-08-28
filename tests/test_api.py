@@ -690,3 +690,97 @@ def test_load_export_file_rejects_traversal(tmp_path, monkeypatch):
         es.load_export_file("..")
     with pytest.raises(FileNotFoundError):
         es.load_export_file("missing.pdf")
+
+
+# ---------- Phase 3 增补：历史路由 / 媒体下发 / SPA fallback ----------
+
+@pytest.mark.asyncio
+async def test_history_endpoints(client):
+    token = await _staff_token(client)
+    for path in ("/api/history/records", "/api/history/stats-by-date",
+                 "/api/history/severity-breakdown", "/api/history/task-risks"):
+        r = await client.get(path, headers=_auth(token))
+        assert r.status_code == 200, f"{path}: {r.text}"
+    # responsible 不可读历史分析
+    resp_token = await _login(client, RESP)
+    r = await client.get("/api/history/records", headers=_auth(resp_token))
+    assert r.status_code == 403
+
+
+@pytest.mark.asyncio
+async def test_media_serving_and_guards(app_env, client, monkeypatch, tmp_path):
+    """媒体端点：data/ 内图片可取；越界/坏扩展名 400；缺失 404；未登录 401。"""
+    import services.media_service as media_service
+
+    fake_data = tmp_path / "data"
+    (fake_data / "uploads").mkdir(parents=True)
+    (fake_data / "uploads" / "shot.png").write_bytes(_png())
+    monkeypatch.setattr(media_service, "BASE_DIR", tmp_path)
+    monkeypatch.setattr(media_service, "DATA_DIR", fake_data)
+
+    token = await _staff_token(client)
+    ok = await client.get("/api/media/data/uploads/shot.png",
+                          headers=_auth(token))
+    assert ok.status_code == 200
+    assert ok.headers["content-type"].startswith("image/png")
+
+    # <img> 无法带 header：查询参数 token 亦可认证
+    from urllib.parse import quote as _q
+    qtok = await client.get(f"/api/media/data/uploads/shot.png?token={_q(token)}")
+    assert qtok.status_code == 200
+
+    assert (await client.get("/api/media/data/uploads/missing.png",
+                             headers=_auth(token))).status_code == 404
+    bad = await client.get("/api/media/data/uploads/../app.db",
+                           headers=_auth(token))
+    assert bad.status_code in (400, 404)
+    bad_ext = await client.get("/api/media/data/uploads/x.exe",
+                               headers=_auth(token))
+    assert bad_ext.status_code == 400
+    assert (await client.get(
+        "/api/media/data/uploads/shot.png")).status_code == 401
+
+
+@pytest.mark.asyncio
+async def test_spa_fallback_when_dist_present(app_env, monkeypatch, tmp_path):
+    """dist 存在时：未知 GET 路径回 index.html（深链路），真实文件直出。"""
+    import api.main as api_main
+
+    dist = tmp_path / "dist"
+    (dist / "assets").mkdir(parents=True)
+    (dist / "index.html").write_text("<html>zhg-spa</html>", encoding="utf-8")
+    (dist / "favicon.ico").write_bytes(b"ico")
+    (dist / "assets" / "index-abc123.js").write_text("console.log(1)",
+                                                     encoding="utf-8")
+    monkeypatch.setattr(api_main, "_DIST", dist)
+
+    app = api_main.create_app()
+    async with AsyncClient(transport=ASGITransport(app=app),
+                           base_url="http://testserver") as c:
+        assert (await c.get("/healthz")).status_code == 200  # API 不受影响
+        deep = await c.get("/orders/123")                    # 深链路
+        assert deep.status_code == 200
+        assert "zhg-spa" in deep.text
+        fav = await c.get("/favicon.ico")                    # 真实文件直出
+        assert fav.status_code == 200
+        assert fav.content == b"ico"
+        asset = await c.get("/assets/index-abc123.js")       # assets 挂载
+        assert asset.status_code == 200
+        # /api 未匹配路径保持 404 语义（不被 SPA 兜底吞掉）
+        api_miss = await c.get("/api/nonexistent")
+        assert api_miss.status_code == 404
+        assert "zhg-spa" not in api_miss.text
+
+
+@pytest.mark.asyncio
+async def test_capabilities_includes_hazard_options(client):
+    token = await _staff_token(client)
+    r = await client.get("/api/tasks/capabilities", headers=_auth(token))
+    body = r.json()
+    assert r.status_code == 200
+    keys = [it["key"] for it in body["hazard_options"]]
+    assert "no_helmet" in keys and "spark" in keys
+    assert all(k != "none" for k in keys)
+    # safe 正向信号不作为上报项下发
+    assert all(it["severity"] in ("critical", "warning")
+               for it in body["hazard_options"])

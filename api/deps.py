@@ -123,3 +123,23 @@ def require_roles(*roles: str):
         return user
 
     return _dep
+
+
+def media_auth(request: Request, token: str = "") -> None:
+    """媒体下发的放宽认证：Bearer 头 **或** 查询参数 token 二选一。
+
+    背景：<img> 标签无法自定义 header，前端媒体 URL 以 ?token= 携带 JWT
+    （仅限内网单机部署；URL 可能进访问日志，生产外网暴露面不要开此端点）。
+    复核逻辑与 get_current_user 一致（停用即失效）。
+    """
+    auth = request.headers.get("Authorization", "")
+    payload = None
+    if auth.startswith("Bearer "):
+        payload = try_decode(auth[len("Bearer "):].strip())
+    elif token:
+        payload = try_decode(token)
+    if payload is None:
+        raise HTTPException(status_code=401, detail="缺少认证信息，请先登录")
+    brief = session_entry.user_brief(payload.get("sub"))
+    if brief is None or brief["disabled"]:
+        raise HTTPException(status_code=401, detail="账号不存在或已停用")

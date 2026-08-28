@@ -24,11 +24,12 @@ _capabilities = require_roles("admin", "safety")
 
 @router.get("/capabilities")
 def capabilities(user: CurrentUser = Depends(_capabilities)) -> dict:
-    """前端能力开关：语音/AI 预填可用性（未配置时入口静默不渲染）。"""
+    """前端能力开关：语音/AI 预填可用性 + 隐患键下拉选项（高危置顶）。"""
     from services.enhance_service import EnhanceEngine
     return {
         "asr_available": task_entry.asr_available(),
         "enhance_available": bool(EnhanceEngine().available()),
+        "hazard_options": task_entry.hazard_options(),
     }
 
 
