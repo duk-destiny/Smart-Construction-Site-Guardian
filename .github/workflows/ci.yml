@@ -26,8 +26,10 @@ jobs:
         run: |
           pip install --disable-pip-version-check --only-binary :all: -r requirements.txt
       - name: Lint (ruff)
+        # 锁版与本地一致(0.15.20),避免云端新规则造成行为漂移;
+        # --only-binary :all: 防 setup.py 执行(S8541/S8544)
         run: |
-          pip install ruff
+          pip install --disable-pip-version-check --only-binary :all: ruff==0.15.20
           ruff check agents api core dao services ui scripts app.py
       # Phase 1 配置出库后真实 config.yaml 不入 git：CI 用 example 引导
       # （fresh clone 与本仓库测试均假设 config/config.yaml 存在）
@@ -38,7 +40,7 @@ jobs:
         # 先以 continue-on-error 观察运行，出现告警后逐项评估 --ignore-vuln 收口。
         continue-on-error: true
         run: |
-          pip install pip-audit
+          pip install --disable-pip-version-check --only-binary :all: pip-audit==2.10.1
           pip-audit -r requirements.txt --skip-editable
       - name: Run tests
         run: python scripts/run_tests.py
