@@ -40,8 +40,13 @@
   pytest 9.1.1 冲突，云端全新解析必炸，本地增量安装掩盖）；③两个测试的
   环境依赖（AppTest 实时页桩点迁移至 Phase 0 后的真实缝隙、TOCTOU 用例
   改每线程独立连接）；④周报测试日期改动态（硬编码区间跨天即挂）；
-- SonarCloud 质量门禁（第三方集成）仍报 New Code 可靠性/安全性评级不达标，
-  与本项目测试 CI 相互独立，处理与否待定；
+- **SonarCloud 质量门禁收口（E→A，gate OK）**：API 拉取 32 项未解决
+  BUG/VULNERABILITY 逐条分诊——4 项 CI 真修（安装步骤锁版 ruff==0.15.20 /
+  pip-audit==2.10.1 + --only-binary :all: 防 setup.py 执行）；10 项误报
+  API 标记（fpdf2>=2.7 cell/multi_cell 的 text 形参合法，Sonar 签名未收录）；
+  18 项标记不适用并附理由（本地训练/导出脚本 weights_only=False 已留痕、
+  评测洗牌固定种子、离线运维 CLI 的操作员参数非 LLM/远程可控、前端存储对象
+  为自有 API 显式构造、传递依赖锁版记 backlog）；token 建议撤销；
 - 回退预案：Streamlit 经典版保留可运行，至 React 版稳定一个迭代周期后下线；
 - 已知边界（记 backlog，不阻断打版）：BGE 转 ONNX、OCR 扫描件入库、
   INT8 量化版本达标后的线上切换、答辩材料同步 React 功能面。
