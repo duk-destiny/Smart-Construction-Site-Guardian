@@ -125,3 +125,9 @@ docs/*.png
 /创意材料.html
 /痛点调研.html
 /realtime-subtitle.log
+
+# ===== E2E 验收测试运行产物（临时库/截图/阶段 id）=====
+# __pycache__ 已在 Python 段全局忽略，此处不重复
+data/tmp_e2e_test.db*
+tests/e2e/shots/
+tests/e2e/phase2_ids.txt
