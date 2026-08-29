@@ -84,6 +84,14 @@ export async function overrideTask(taskId: string, newLevel: string, reason: str
   return r.data
 }
 
+export async function enhanceExtract(text: string) {
+  const r = await api.post('/tasks/enhance-extract', { text })
+  return r.data as {
+    description: string; hazard_key: string;
+    location?: string | null; scene_id?: string
+  }
+}
+
 export async function queryChat(text: string) {
   const r = await api.post('/tasks/query-chat', { text })
   return r.data as ChatRoute

@@ -51,9 +51,17 @@ api.interceptors.response.use(
       if (!location.pathname.startsWith('/login')) {
         message.warning(detail)
         location.href = '/login'
+      } else {
+        // 登录页上的 401 = 账号密码错误，必须给用户可见反馈
+        message.error(detail)
       }
     } else {
-      message.error(detail)
+      // 任务轮询（/tasks/{id}/result|progress）的 404 属正常态（结果未就绪），静默不提示；仍 reject 由调用方处理
+      const url: string = error?.config?.url || ''
+      const method: string = (error?.config?.method || '').toUpperCase()
+      const isTaskPoll404 =
+        status === 404 && method === 'GET' && /\/tasks\/[^/]+\/(result|progress)$/.test(url)
+      if (!isTaskPoll404) message.error(detail)
     }
     return Promise.reject(new Error(detail))
   },

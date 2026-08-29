@@ -210,8 +210,8 @@ class WorkOrderDAO:
         self.conn.commit()
 
     # ---------- v0.2 工单闭环：派发 → 整改 → 验收 ----------
-    # status 流转：open → submitted → closed；rejected 退回 open 可再提交。
-    # 「逾期」为派生状态（deadline < now 且 status='open'），不入库。
+    # status 流转：open → submitted → closed；驳回置 rejected，再提交/改派回 open。
+    # 「逾期」为派生状态（deadline < now 且 status IN ('open','rejected')），不入库。
 
     def get(self, order_id: str):
         return self.conn.execute(
@@ -236,7 +236,7 @@ class WorkOrderDAO:
 
     def set_reviewed(self, order_id: str, approved: bool, reviewer_id: str,
                      reason: str = "") -> None:
-        """验收：通过→closed（留验收人与时间）；驳回→退回 open 留驳回原因可再改。"""
+        """验收：通过→closed（留验收人与时间）；驳回→rejected 留驳回原因可再改。"""
         if approved:
             self.conn.execute(
                 "UPDATE work_orders SET status='closed', approved_by=?, "
@@ -244,7 +244,7 @@ class WorkOrderDAO:
                 (reviewer_id, order_id))
         else:
             self.conn.execute(
-                "UPDATE work_orders SET status='open', review_reason=?, "
+                "UPDATE work_orders SET status='rejected', review_reason=?, "
                 "approved_by=NULL, approved_at=NULL, closed_at=NULL WHERE id=?",
                 (reason, order_id))
         self.conn.commit()
@@ -264,7 +264,7 @@ class WorkOrderDAO:
             (status, limit)).fetchall()
 
     def list_overdue(self, as_of: str,
-                     statuses: tuple[str, ...] = ("open",)) -> list:
+                     statuses: tuple[str, ...] = ("open", "rejected")) -> list:
         """逾期未销项工单（deadline 非空且早于 as_of）。"""
         placeholders = ",".join("?" for _ in statuses)
         return self.conn.execute(

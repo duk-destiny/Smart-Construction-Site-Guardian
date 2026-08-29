@@ -132,7 +132,7 @@ class ActionAgent(AgentBase):
 
         必须在 work_orders.insert 之后触发，保证 update_notice 命中已有行。
         """
-        if self._wo_dao is None or not self._llm.available() or not task_id:
+        if not self._llm.available() or not task_id:
             return
         _POLISH_POOL.submit(
             self._polish_async,
@@ -147,9 +147,13 @@ class ActionAgent(AgentBase):
         requirement: str,
         deadline: str,
     ) -> None:
-        """后台线程润色，完成后回填工单（不阻塞主流程）。"""
-        if self._wo_dao is None:
-            return
+        """后台线程润色，完成后回填工单（不阻塞主流程）。
+
+        注入 DAO 的路径仅供测试/自定义持久化；生产路径不注入——
+        调用方传入的 DAO 绑定请求作用域连接，润色返回前连接已随请求
+        结束关闭（"Cannot operate on a closed database"），回填必须
+        在本线程内自持连接完成。
+        """
         try:
             clause_display = clause_text or "本次未匹配到具体规范条款"
             polished = self._llm.polish(
@@ -159,7 +163,17 @@ class ActionAgent(AgentBase):
                 f"请严格依据以上信息组织语言，不要编造未给出的内容。"
             )
             if polished:
-                self._wo_dao.update_notice(task_id, polished)
+                if self._wo_dao is not None:
+                    self._wo_dao.update_notice(task_id, polished)
+                else:
+                    from dao.db import get_conn, init_db
+                    from dao.models import WorkOrderDAO
+                    conn = get_conn()
+                    try:
+                        init_db(conn)
+                        WorkOrderDAO(conn).update_notice(task_id, polished)
+                    finally:
+                        conn.close()
         except Exception as exc:  # noqa: BLE001 润色失败保留模板文案，但留痕
             from core.logging import get_logger
             get_logger(__name__).warning(f"工单 {task_id} 润色回填失败: {exc}")

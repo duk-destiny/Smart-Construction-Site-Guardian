@@ -1,18 +1,26 @@
-/** 管理端（admin-only）：用户治理 / 模型切换 / 知识库 / 推送通道 / 自检 / 审计 / 纠偏样本。
- *
- * 与 Streamlit page_admin 功能面对齐；哈希/密钥不出 API（后端已裁剪）。
- */
 import { useCallback, useEffect, useState } from 'react'
 import {
-  App as AntApp, Button, Card, Descriptions, Form, Image, Input, Modal,
-  Popconfirm, Select, Space, Table, Tabs, Tag, Upload,
+  App as AntApp, Button, Descriptions, Form, Image, Input, Modal,
+  Popconfirm, Select, Space, Table, Tag, Upload,
 } from 'antd'
 import { DownloadOutlined, ReloadOutlined, UploadOutlined } from '@ant-design/icons'
+import { motion } from 'framer-motion'
 import dayjs from 'dayjs'
 import * as ep from '../api/endpoints'
 import { downloadFile } from '../api/client'
 import { mediaUrl } from '../shared/media'
 import type { ModelRow, UserRow } from '../api/types'
+import PageHeader from '../components/PageHeader'
+
+const TAB_ITEMS = [
+  { key: 'users', label: '用户治理', icon: '👥' },
+  { key: 'models', label: '模型版本', icon: '🧠' },
+  { key: 'kb', label: '知识库', icon: '📚' },
+  { key: 'notify', label: '推送通道', icon: '📡' },
+  { key: 'selfcheck', label: '系统自检', icon: '🔍' },
+  { key: 'audit', label: '审计日志', icon: '📋' },
+  { key: 'feedback', label: '纠偏样本', icon: '🔧' },
+]
 
 function UsersTab() {
   const { message } = AntApp.useApp()
@@ -50,7 +58,7 @@ function UsersTab() {
 
   return (
     <>
-      <Button type="primary" style={{ marginBottom: 12 }}
+      <Button type="primary" style={{ marginBottom: 16, borderRadius: 10 }}
         onClick={() => setCreating(true)}>＋ 新建用户</Button>
       <Table<UserRow> size="small" rowKey="id" dataSource={rows}
         pagination={{ pageSize: 8 }}
@@ -138,7 +146,7 @@ function ModelsTab() {
                 <Button size="small">切换</Button>
               </Popconfirm> },
         ]} />
-      <Descriptions size="small" column={2} style={{ marginTop: 12 }} title="当前活跃版本">
+      <Descriptions size="small" column={2} style={{ marginTop: 16 }} title="当前活跃版本">
         <Descriptions.Item label="fire">{data.active.fire?.version || '未注册'}</Descriptions.Item>
         <Descriptions.Item label="ppe">{data.active.ppe?.version || '未注册'}</Descriptions.Item>
       </Descriptions>
@@ -168,9 +176,9 @@ function KbTab() {
           }
           return false
         }}>
-        <Button icon={<UploadOutlined />} loading={importing}>导入规范 PDF</Button>
+        <Button icon={<UploadOutlined />} loading={importing} style={{ borderRadius: 10 }}>导入规范 PDF</Button>
       </Upload>
-      <Table size="small" rowKey="id" style={{ marginTop: 12 }} dataSource={rows}
+      <Table size="small" rowKey="id" style={{ marginTop: 16 }} dataSource={rows}
         columns={[
           { title: '文档', dataIndex: 'filename' },
           { title: '语义块', dataIndex: 'chunk_count', width: 90 },
@@ -206,7 +214,7 @@ function NotifyTab() {
           {status.webhook_configured ? <Tag color="success">已配置</Tag> : <Tag color="warning">未配置</Tag>}
         </Descriptions.Item>
       </Descriptions>}
-      <Space style={{ margin: '12px 0' }}>
+      <Space style={{ margin: '16px 0' }}>
         <Button type="primary" loading={testing} onClick={async () => {
           setTesting(true)
           try {
@@ -221,7 +229,12 @@ function NotifyTab() {
           void ep.listMockCapture().then(setCapture)}>刷新捕获</Button>
       </Space>
       {capture.length > 0 && (
-        <pre style={{ maxHeight: 220, overflow: 'auto', background: '#fafafa', padding: 8, fontSize: 12 }}>
+        <pre style={{
+          maxHeight: 220, overflow: 'auto', padding: 16, fontSize: 12,
+          background: 'rgba(0,0,0,0.3)', borderRadius: 10,
+          border: '1px solid rgba(255,255,255,0.06)',
+          fontFamily: 'var(--font-mono)', color: 'rgba(255,255,255,0.6)',
+        }}>
           {JSON.stringify(capture, null, 2)}
         </pre>
       )}
@@ -237,9 +250,9 @@ function SelfCheckTab() {
       <Button type="primary" loading={loading} onClick={async () => {
         setLoading(true)
         try { setItems(await ep.selfCheck()) } finally { setLoading(false) }
-      }}>运行系统自检</Button>
+      }} style={{ borderRadius: 10 }}>运行系统自检</Button>
       {items && (
-        <Table size="small" style={{ marginTop: 12 }} rowKey="item"
+        <Table size="small" style={{ marginTop: 16 }} rowKey="item"
           dataSource={items.items} pagination={false}
           columns={[
             { title: '检查项', dataIndex: 'item', width: 160 },
@@ -258,7 +271,7 @@ function AuditTab() {
   useEffect(() => { void ep.listAudit().then(setRows) }, [])
   return (
     <>
-      <Button icon={<DownloadOutlined />} style={{ marginBottom: 12 }}
+      <Button icon={<DownloadOutlined />} style={{ marginBottom: 16, borderRadius: 10 }}
         onClick={() => void downloadFile('/admin/audit/export', 'audit.csv')}>
         导出审计 CSV
       </Button>
@@ -284,8 +297,8 @@ function FeedbackTab() {
 
   return (
     <>
-      <Space style={{ marginBottom: 12 }}>
-        <Button icon={<DownloadOutlined />}
+      <Space style={{ marginBottom: 16 }}>
+        <Button icon={<DownloadOutlined />} style={{ borderRadius: 10 }}
           onClick={() => void downloadFile('/admin/feedback/export', 'feedback.csv')}>
           导出纠偏 CSV
         </Button>
@@ -321,18 +334,61 @@ function FeedbackTab() {
   )
 }
 
+const TAB_CONTENT: Record<string, () => React.JSX.Element | null> = {
+  users: UsersTab,
+  models: ModelsTab,
+  kb: KbTab,
+  notify: NotifyTab,
+  selfcheck: SelfCheckTab,
+  audit: AuditTab,
+  feedback: FeedbackTab,
+}
+
 export default function Admin() {
+  const [activeTab, setActiveTab] = useState('users')
+  const ActiveComponent = TAB_CONTENT[activeTab]
+
   return (
-    <Card title="⚙️ 管理端（仅管理员）">
-      <Tabs items={[
-        { key: 'users', label: '用户治理', children: <UsersTab /> },
-        { key: 'models', label: '模型版本', children: <ModelsTab /> },
-        { key: 'kb', label: '知识库', children: <KbTab /> },
-        { key: 'notify', label: '推送通道', children: <NotifyTab /> },
-        { key: 'selfcheck', label: '系统自检', children: <SelfCheckTab /> },
-        { key: 'audit', label: '审计日志', children: <AuditTab /> },
-        { key: 'feedback', label: '纠偏样本', children: <FeedbackTab /> },
-      ]} />
-    </Card>
+    <>
+      <PageHeader title="管理端" subtitle="用户治理 · 模型版本 · 知识库 · 推送 · 自检 · 审计 · 纠偏" />
+      <div style={{ display: 'flex', gap: 24 }}>
+        <div className="admin-tabnav" style={{ width: 180, flexShrink: 0 }}>
+          {TAB_ITEMS.map((t) => (
+            <motion.div key={t.key}
+              whileHover={{ x: 4 }}
+              onClick={() => setActiveTab(t.key)}
+              className="admin-tab"
+              style={{
+                padding: '12px 16px',
+                marginBottom: 4,
+                borderRadius: 12,
+                cursor: 'pointer',
+                background: activeTab === t.key ? 'rgba(200,16,46,0.08)' : 'transparent',
+                border: `1px solid ${activeTab === t.key ? 'rgba(200,16,46,0.2)' : 'transparent'}`,
+                color: activeTab === t.key ? '#fff' : 'rgba(255,255,255,0.4)',
+                fontWeight: activeTab === t.key ? 600 : 400,
+                fontSize: 13,
+                transition: 'background 0.2s, border-color 0.2s, color 0.2s',
+                display: 'flex',
+                alignItems: 'center',
+                gap: 10,
+              }}>
+              <span style={{ fontSize: 15 }}>{t.icon}</span>
+              {t.label}
+            </motion.div>
+          ))}
+        </div>
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <motion.div
+            key={activeTab}
+            initial={{ opacity: 0, y: 8 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.25 }}
+          >
+            <ActiveComponent />
+          </motion.div>
+        </div>
+      </div>
+    </>
   )
 }

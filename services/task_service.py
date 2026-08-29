@@ -118,8 +118,7 @@ class TaskService:
                 with scoped() as conn:
                     svc = TaskService(conn)
                     orch = cls(progress_cb=self.update_progress,
-                               scene_id=scene_id,
-                               work_order_dao=svc.work_orders)
+                               scene_id=scene_id)
                     result = orch.execute(task_id, images=images,
                                           permit_info=permit_info)
                     svc.save_result(task_id, result.payload)

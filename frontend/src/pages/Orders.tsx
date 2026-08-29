@@ -1,12 +1,7 @@
-/** 工单闭环页（admin/safety）：台账 / 待验收 / 逾期 三视图。
- *
- * 台账行展开 → 派发面板（责任人下拉=接口下发候选+规则建议）+ 人工改判 +
- * 导出 Excel；待验收含整改照片预览（/api/media 带 token）与通过/驳回。
- */
 import { useCallback, useEffect, useState } from 'react'
 import {
-  App as AntApp, Button, Card, Descriptions, Drawer, Form, Input, InputNumber,
-  Modal, Popconfirm, Select, Space, Table, Tabs, Tag, Typography, Image,
+  App as AntApp, Button, Descriptions, Drawer, Form, Input, InputNumber,
+  Modal, Popconfirm, Select, Space, Table, Tag, Typography, Image,
 } from 'antd'
 import { DownloadOutlined } from '@ant-design/icons'
 import dayjs from 'dayjs'
@@ -15,6 +10,7 @@ import { downloadFile } from '../api/client'
 import { mediaUrl } from '../shared/media'
 import type { DispatchPanel, OrderRow } from '../api/types'
 import { OrderStatusTag, RiskTag } from '../components/Tags'
+import PageHeader from '../components/PageHeader'
 
 const RISK_OPTIONS = ['重大', '较大', '一般', '低'].map((v) => ({ value: v }))
 
@@ -161,9 +157,9 @@ function LedgerTab({ refreshKey }: { refreshKey: number }) {
           { title: '来源', dataIndex: 'source', width: 90,
             render: (s: string) => ({ camera: '📷', upload: '📤', text: '📝' }[s] || s) },
           { title: '截止', dataIndex: 'deadline', width: 170,
-            render: (d: string) => d && dayjs(d).format('MM-DD HH:mm') },
+            render: (d: string) => d && <span className="mono">{dayjs(d).format('MM-DD HH:mm')}</span> },
           { title: '创建', dataIndex: 'created_at', width: 170,
-            render: (d: string) => d && dayjs(d).format('MM-DD HH:mm') },
+            render: (d: string) => d && <span className="mono">{dayjs(d).format('MM-DD HH:mm')}</span> },
         ]} />
       <Drawer title={`工单 ${selected?.id ?? ''}`} open={!!selected}
         width={520} onClose={() => setSelected(null)}>
@@ -226,7 +222,7 @@ function ReviewTab({ refreshKey, onChanged }: {
               <p><b>整改说明：</b>{r.submitted_note || '—'}</p>
               <Image.PreviewGroup>
                 {(r.submitted_img_paths || []).map((p) => (
-                  <Image key={p} width={120} height={90} style={{ objectFit: 'cover', marginRight: 8 }}
+                  <Image key={p} width={120} height={90} style={{ objectFit: 'cover', marginRight: 8, borderRadius: 6 }}
                     src={mediaUrl(p)} />
                 ))}
               </Image.PreviewGroup>
@@ -238,7 +234,7 @@ function ReviewTab({ refreshKey, onChanged }: {
           { title: '责任人', dataIndex: 'assignee_name', width: 110 },
           { title: '隐患描述', dataIndex: 'hazard_desc', ellipsis: true },
           { title: '提交时间', dataIndex: 'created_at', width: 170,
-            render: (d: string) => d && dayjs(d).format('MM-DD HH:mm') },
+            render: (d: string) => d && <span className="mono">{dayjs(d).format('MM-DD HH:mm')}</span> },
           { title: '操作', width: 170, render: (_, r) => (
             <Space>
               <Popconfirm title="确认通过并销项该工单？"
@@ -276,24 +272,50 @@ function OverdueTab({ refreshKey }: { refreshKey: number }) {
         { title: '等级', dataIndex: 'risk_level', width: 90,
           render: (l: string) => <RiskTag level={l} /> },
         { title: '责任人', dataIndex: 'assignee_id', width: 110 },
-        { title: '截止', dataIndex: 'deadline', width: 170 },
+        { title: '截止', dataIndex: 'deadline', width: 170,
+          render: (d: string) => <span className="mono">{d}</span> },
       ]} />
   )
 }
 
+const TAB_ITEMS = [
+  { key: 'ledger', label: '台账与派发' },
+  { key: 'review', label: '待验收' },
+  { key: 'overdue', label: '逾期' },
+]
+
 export default function Orders() {
+  const [activeTab, setActiveTab] = useState('ledger')
   const [refreshKey, setRefreshKey] = useState(0)
   const bump = () => setRefreshKey((k) => k + 1)
+
   return (
-    <Card title="📋 工单 / 派发 / 验收">
-      <Tabs items={[
-        { key: 'ledger', label: '台账与派发',
-          children: <LedgerTab refreshKey={refreshKey} /> },
-        { key: 'review', label: '待验收',
-          children: <ReviewTab refreshKey={refreshKey} onChanged={bump} /> },
-        { key: 'overdue', label: '逾期',
-          children: <OverdueTab refreshKey={refreshKey} /> },
-      ]} />
-    </Card>
+    <>
+      <PageHeader title="工单闭环" subtitle="派发 · 验收 · 逾期跟踪" />
+      <div style={{ display: 'flex', gap: 24 }}>
+        <div style={{ width: 160, flexShrink: 0 }}>
+          {TAB_ITEMS.map((t) => (
+            <div key={t.key}
+              onClick={() => setActiveTab(t.key)}
+              style={{
+                padding: '12px 16px', marginBottom: 4, borderRadius: 10,
+                cursor: 'pointer',
+                background: activeTab === t.key ? 'rgba(200,16,46,0.08)' : 'transparent',
+                border: `1px solid ${activeTab === t.key ? 'rgba(200,16,46,0.2)' : 'transparent'}`,
+                color: activeTab === t.key ? '#fff' : 'rgba(255,255,255,0.4)',
+                fontWeight: activeTab === t.key ? 600 : 400,
+                fontSize: 13, transition: 'all 0.2s',
+              }}>
+              {t.label}
+            </div>
+          ))}
+        </div>
+        <div style={{ flex: 1, minWidth: 0 }}>
+          {activeTab === 'ledger' && <LedgerTab refreshKey={refreshKey} />}
+          {activeTab === 'review' && <ReviewTab refreshKey={refreshKey} onChanged={bump} />}
+          {activeTab === 'overdue' && <OverdueTab refreshKey={refreshKey} />}
+        </div>
+      </div>
+    </>
   )
 }

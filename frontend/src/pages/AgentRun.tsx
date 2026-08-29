@@ -1,23 +1,25 @@
-/** 多 Agent 研判页：进度轮询（1.5s）→ 结果面板 → Agent 证据链分步展示。
- *
- * 文字单（无视觉链路）直接显示工单卡；影像单在 auto_run 后轮询
- * progress/result；完成态展示各 Agent 耗时与输出摘要（agent_runs）。
- */
 import { useCallback, useEffect, useRef, useState } from 'react'
 import {
-  Alert, App as AntApp, Button, Card, Descriptions, Result, Space, Spin,
-  Steps, Tag, Timeline, Typography,
+  Alert, App as AntApp, Button, Descriptions, Space, Spin, Tag, Typography,
 } from 'antd'
+import { motion, AnimatePresence } from 'framer-motion'
 import { useParams } from 'react-router-dom'
 import * as ep from '../api/endpoints'
 import type { AgentRunRow, TaskDetail } from '../api/types'
 import { RiskTag } from '../components/Tags'
+import PageHeader from '../components/PageHeader'
 
 const AGENT_CN: Record<string, string> = {
-  vision: '👁 视觉检测', rule: '📜 规范合规', fusion: '⚖️ 融合定级',
-  action: '📋 处置工单', review: '🔍 人工复核',
-  llm_assist: '🧠 LLM 辅助研判（低置信度）',
+  vision: '视觉检测', rule: '规范合规', fusion: '融合定级',
+  action: '处置工单', review: '人工复核',
+  llm_assist: 'LLM 辅助研判',
 }
+
+const AGENT_ICONS: Record<string, string> = {
+  vision: '👁', rule: '📜', fusion: '⚖️', action: '📋', review: '🔍', llm_assist: '🧠',
+}
+
+const AGENT_ORDER = ['vision', 'rule', 'fusion', 'action']
 
 interface RunResult {
   status: string
@@ -35,7 +37,10 @@ function payloadRisk(payload?: Record<string, unknown>): string {
 function payloadWorkOrder(payload?: Record<string, unknown>): Record<string, string> {
   if (!payload) return {}
   const action = payload['action'] as Record<string, unknown> | undefined
-  return ((action?.['work_order'] || {}) as Record<string, string>)
+  const actionPayload = action?.['payload'] as Record<string, unknown> | undefined
+  const wo = actionPayload?.['work_order'] || action?.['work_order']
+    || payload['work_order'] || {}
+  return wo as Record<string, string>
 }
 
 export default function AgentRun() {
@@ -46,18 +51,14 @@ export default function AgentRun() {
   const [runs, setRuns] = useState<AgentRunRow[]>([])
   const [detail, setDetail] = useState<TaskDetail | null>(null)
   const [starting, setStarting] = useState(false)
+  // 乐观渲染：后端热态下研判可能在首个轮询 tick 前就完成，先置位保证进度块可见
+  const [optimistic, setOptimistic] = useState(false)
   const timer = useRef<ReturnType<typeof setInterval>>()
 
   const finish = useCallback(async () => {
-    try {
-      setResult(await ep.getResult(taskId))
-    } catch { /* 404 即未就绪 */ }
-    try {
-      setRuns(await ep.getAgentRuns(taskId))
-    } catch { /* 文字单无运行链路 */ }
-    try {
-      setDetail(await ep.getTaskDetail(taskId))
-    } catch { /* 任务不存在 */ }
+    try { setResult(await ep.getResult(taskId)) } catch { /* 404 */ }
+    try { setRuns(await ep.getAgentRuns(taskId)) } catch { /* 文字单无视觉链路 */ }
+    try { setDetail(await ep.getTaskDetail(taskId)) } catch { /* 任务不存在 */ }
   }, [taskId])
 
   useEffect(() => {
@@ -70,17 +71,18 @@ export default function AgentRun() {
         const res = await ep.getResult(taskId)
         if (!cancelled && res) {
           setResult(res)
+          setOptimistic(false)
           clearInterval(timer.current)
           await finish()
         }
       } catch { /* 轮询 404 属正常态 */ }
     }
+    // 结果是取走即删语义：回看已消费任务时轮询永远等不到 result，
+    // 证据链/风险信息必须在挂载时主动加载一次
+    void finish()
     void tick()
     timer.current = setInterval(tick, 1500)
-    return () => {
-      cancelled = true
-      clearInterval(timer.current)
-    }
+    return () => { cancelled = true; clearInterval(timer.current) }
   }, [taskId, finish])
 
   async function startRun() {
@@ -88,6 +90,7 @@ export default function AgentRun() {
     try {
       await ep.startRun(taskId, { permit_info: {}, scene_id: 'hot_work' })
       message.info('后台研判已启动')
+      setOptimistic(true)
     } finally {
       setStarting(false)
     }
@@ -97,85 +100,170 @@ export default function AgentRun() {
   const anyRunning = entries.some(([, v]) => v.status === "running")
   const wo = payloadWorkOrder(result?.payload)
 
-  const stepIndex = (() => {
-    if (result) return AGENT_ORDER.length
-    const done = entries.filter(([, v]) => v.status !== "running").length
-    return Math.min(done, AGENT_ORDER.length - 1)
-  })()
-
   return (
-    <Card title={`🤖 多 Agent 研判 · ${taskId || '（无任务）'}`}>
+    <>
+      <PageHeader
+        title="多 Agent 研判"
+        subtitle={taskId ? `任务 ${taskId.slice(0, 16)}...` : '影像智能分析链路'}
+      />
+
       {!taskId && <Alert type="info" message="请从「统一上报 → 影像研判」发起任务" />}
 
       {taskId && !result && (entries.length === 0 || !anyRunning) && (
-        // 无进度=尚未研判;有进度但无进行中 agent 且无结果=上一轮已完成
-        // 但结果已被取走/丢失（二次访问页面）——两种情况都应可重新发起
-        <div style={{ textAlign: 'center', padding: '24px 0' }}>
+        <div style={{ textAlign: 'center', padding: '40px 0' }}>
           {entries.length > 0 && (
             <Alert style={{ maxWidth: 520, margin: '0 auto 16px' }}
               type="warning"
               message="上一轮研判结果已被取走或已过期，可重新发起研判" />
           )}
-          <Button type="primary" loading={starting} onClick={startRun}>
+          <Button type="primary" loading={starting} onClick={startRun}
+            style={{
+              height: 44, paddingInline: 32, borderRadius: 12, fontWeight: 600,
+              background: 'linear-gradient(135deg, #c8102e 0%, #9b0a22 100%)',
+            }}>
             开始 / 重试多 Agent 研判
           </Button>
         </div>
       )}
 
-      {taskId && !result && anyRunning && (
-        <div style={{ textAlign: 'center', padding: '24px 0' }}>
-          <Spin style={{ marginBottom: 16 }} />
-          <Steps size="small" direction="horizontal"
-            current={stepIndex}
-            items={AGENT_ORDER.map((a) => ({
-              title: AGENT_CN[a] || a,
-              status: progress[a]?.status === 'running' ? 'process' as const
-                : progress[a] ? 'finish' as const : 'wait' as const,
-            }))} />
-          <Typography.Text type="secondary">
-            后台研判进行中，页面每 1.5 秒自动轮询进度…
-          </Typography.Text>
+      {taskId && !result && (anyRunning || optimistic) && (
+        <div style={{ padding: '32px 0' }}>
+          <div style={{ textAlign: 'center', marginBottom: 32 }}>
+            <Spin style={{ marginBottom: 16 }} />
+            <Typography.Text type="secondary">
+              后台研判进行中，每 1.5 秒自动轮询…
+            </Typography.Text>
+          </div>
+          <div style={{
+            display: 'flex', gap: 12, justifyContent: 'center', flexWrap: 'wrap',
+          }}>
+            {AGENT_ORDER.map((agent, i) => {
+              const p = progress[agent]
+              const isRunning = p?.status === 'running'
+              const isDone = p && p.status !== 'running'
+              return (
+                <motion.div
+                  key={agent}
+                  initial={{ opacity: 0, scale: 0.9 }}
+                  animate={{ opacity: 1, scale: 1 }}
+                  transition={{ delay: i * 0.1 }}
+                  style={{
+                    padding: '16px 24px',
+                    borderRadius: 14,
+                    background: isRunning ? 'rgba(200,16,46,0.08)' : isDone ? 'rgba(0,212,170,0.06)' : 'rgba(255,255,255,0.03)',
+                    border: `1px solid ${isRunning ? 'rgba(200,16,46,0.2)' : isDone ? 'rgba(0,212,170,0.15)' : 'rgba(255,255,255,0.06)'}`,
+                    textAlign: 'center',
+                    minWidth: 120,
+                    position: 'relative',
+                    overflow: 'hidden',
+                  }}
+                >
+                  {isRunning && (
+                    <motion.div
+                      animate={{ x: ['-100%', '200%'] }}
+                      transition={{ duration: 1.5, repeat: Infinity, ease: 'linear' }}
+                      style={{
+                        position: 'absolute', top: 0, left: 0, right: 0, bottom: 0,
+                        background: 'linear-gradient(90deg, transparent, rgba(200,16,46,0.06), transparent)',
+                      }}
+                    />
+                  )}
+                  <div style={{ fontSize: 24, marginBottom: 8 }}>{AGENT_ICONS[agent]}</div>
+                  <div style={{
+                    fontSize: 13, fontWeight: 600,
+                    color: isRunning ? '#c8102e' : isDone ? '#00d4aa' : 'rgba(255,255,255,0.3)',
+                  }}>{AGENT_CN[agent]}</div>
+                  {p && (
+                    <div className="mono" style={{
+                      fontSize: 11, marginTop: 6,
+                      color: 'rgba(255,255,255,0.3)',
+                    }}>{p.cost_ms}ms</div>
+                  )}
+                  <div style={{
+                    position: 'absolute', top: 8, right: 8,
+                    width: 6, height: 6, borderRadius: 3,
+                    background: isRunning ? '#c8102e' : isDone ? '#00d4aa' : 'rgba(255,255,255,0.1)',
+                    boxShadow: isRunning ? '0 0 8px rgba(200,16,46,0.5)' : isDone ? '0 0 6px rgba(0,212,170,0.4)' : 'none',
+                  }} />
+                </motion.div>
+              )
+            })}
+          </div>
         </div>
       )}
 
-      {result && (
-        <>
-          {result.status !== 'success'
-            ? <Result status="error" title="研判失败"
-                subTitle={String(result.payload?.['error'] ?? '请重试或检查模型配置')} />
-            : <Result status="success" title="研判完成"
-                subTitle={`风险等级：${payloadRisk(result.payload)}`}
-                extra={<Space>
-                  <RiskTag level={payloadRisk(result.payload)} />
-                  <Button type="primary" href="/orders">去工单页派发</Button>
-                </Space>} />}
-          {(() => {
-            const vision = result?.payload?.['vision'] as
-              Record<string, unknown> | undefined
-            const dets = (vision?.['payload'] as
-              Record<string, unknown> | undefined)?.['detections']
-            if (result?.status === 'success' && Array.isArray(dets)
-                && dets.length === 0) {
-              return <Alert style={{ marginTop: 8 }} type="info" showIcon
-                message="本帧未检出隐患目标"
-                description="模型识别范围有限（火花/烟雾/灭火器/安全帽/反光衣等），普通场景照片没有可识别对象属正常现象。" />
-            }
-            return null
-          })()}
-          {Object.keys(wo).length > 0 && (
-            <Card size="small" title="处置工单" style={{ marginTop: 8 }}>
-              <Descriptions column={1} size="small">
-                <Descriptions.Item label="隐患">{wo['hazard_desc']}</Descriptions.Item>
-                <Descriptions.Item label="违反规范">{wo['clause'] || '—'}</Descriptions.Item>
-                <Descriptions.Item label="整改要求">{wo['requirement']}</Descriptions.Item>
-              </Descriptions>
-            </Card>
-          )}
-        </>
-      )}
+      <AnimatePresence>
+        {result && (
+          <motion.div
+            initial={{ opacity: 0, y: 20 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.5 }}
+          >
+            {result.status !== 'success'
+              ? <div style={{
+                  padding: 24, borderRadius: 14, textAlign: 'center',
+                  background: 'rgba(200,16,46,0.06)', border: '1px solid rgba(200,16,46,0.2)',
+                }}>
+                  <div style={{ fontSize: 18, fontWeight: 700, color: '#c8102e', marginBottom: 8 }}>
+                    研判失败
+                  </div>
+                  <div style={{ color: 'rgba(255,255,255,0.5)' }}>
+                    {String(result.payload?.['error'] ?? '请重试或检查模型配置')}
+                  </div>
+                </div>
+              : <div style={{
+                  padding: 24, borderRadius: 14,
+                  background: 'rgba(0,212,170,0.04)', border: '1px solid rgba(0,212,170,0.15)',
+                }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 16, marginBottom: 16 }}>
+                    <div style={{
+                      width: 40, height: 40, borderRadius: 20,
+                      background: 'rgba(0,212,170,0.1)', display: 'flex',
+                      alignItems: 'center', justifyContent: 'center', fontSize: 20,
+                    }}>✓</div>
+                    <div>
+                      <div style={{ fontSize: 16, fontWeight: 700, color: '#fff' }}>研判完成</div>
+                      <div style={{ fontSize: 13, color: 'rgba(255,255,255,0.4)' }}>
+                        风险等级：<RiskTag level={payloadRisk(result.payload)} />
+                      </div>
+                    </div>
+                    <Button type="primary" href="/orders" style={{ marginLeft: 'auto' }}>
+                      去工单页派发
+                    </Button>
+                  </div>
+                </div>}
+            {(() => {
+              const vision = result?.payload?.['vision'] as Record<string, unknown> | undefined
+              const dets = (vision?.['payload'] as Record<string, unknown> | undefined)?.['detections']
+              if (result?.status === 'success' && Array.isArray(dets) && dets.length === 0) {
+                return <Alert style={{ marginTop: 12 }} type="info" showIcon
+                  message="本帧未检出隐患目标"
+                  description="模型识别范围有限（火花/烟雾/灭火器/安全帽/反光衣等），普通场景照片没有可识别对象属正常现象。" />
+              }
+              return null
+            })()}
+            {Object.keys(wo).length > 0 && (
+              <div style={{
+                marginTop: 16, padding: 20, borderRadius: 14,
+                background: 'rgba(255,255,255,0.02)', border: '1px solid rgba(255,255,255,0.06)',
+              }}>
+                <div style={{
+                  fontSize: 12, fontWeight: 600, color: 'rgba(255,255,255,0.4)',
+                  textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: 14,
+                }}>处置工单</div>
+                <Descriptions column={1} size="small">
+                  <Descriptions.Item label="隐患">{wo['hazard_desc']}</Descriptions.Item>
+                  <Descriptions.Item label="违反规范">{wo['clause'] || '—'}</Descriptions.Item>
+                  <Descriptions.Item label="整改要求">{wo['requirement']}</Descriptions.Item>
+                </Descriptions>
+              </div>
+            )}
+          </motion.div>
+        )}
+      </AnimatePresence>
 
       {detail?.risk && (
-        <Alert style={{ marginTop: 12 }} type="info" showIcon
+        <Alert style={{ marginTop: 16 }} type="info" showIcon
           message={<>当前风险：<RiskTag level={detail.risk['override_level'] as string
             || detail.risk['risk_level'] as string} />
             {detail.risk['override_reason']
@@ -183,50 +271,105 @@ export default function AgentRun() {
       )}
 
       {(() => {
-        // LLM 辅助研判意见（低置信度时异步生成；仅辅助理解，不改变定级）
         const assist = runs.find((r) => r.agent === 'llm_assist')
         if (!assist) return null
         let advice = ''
         try {
-          advice = String((JSON.parse(assist.output_json) as
-            { advice?: string }).advice ?? '')
+          advice = String((JSON.parse(assist.output_json) as { advice?: string }).advice ?? '')
         } catch { /* 证据链摘要格式 */ }
         if (!advice) return null
         return (
-          <Card size="small" title="🧠 AI 辅助研判意见" style={{
-            marginTop: 16, borderColor: '#7c4dff',
-            background: '#faf7ff',
-          }}
-            extra={<Tag color="purple">仅辅助理解 · 不改变定级</Tag>}>
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            transition={{ delay: 0.3 }}
+            style={{
+              marginTop: 20, padding: 20, borderRadius: 14,
+              background: 'rgba(124,77,255,0.04)',
+              border: '1px solid rgba(124,77,255,0.15)',
+            }}>
+            <div style={{
+              display: 'flex', alignItems: 'center', gap: 8, marginBottom: 12,
+            }}>
+              <span style={{ fontSize: 16 }}>🧠</span>
+              <span style={{ fontSize: 13, fontWeight: 600, color: '#7c4dff' }}>
+                AI 辅助研判意见
+              </span>
+              <Tag color="purple" style={{ marginLeft: 'auto' }}>仅辅助理解 · 不改变定级</Tag>
+            </div>
             <pre style={{
               whiteSpace: 'pre-wrap', margin: 0,
-              fontFamily: 'inherit', fontSize: 13,
+              fontFamily: 'var(--font-mono)', fontSize: 12,
+              color: 'rgba(255,255,255,0.6)', lineHeight: 1.7,
             }}>{advice}</pre>
-          </Card>
+          </motion.div>
         )
       })()}
 
       {runs.length > 0 && (
-        <Card size="small" title="Agent 运行证据链" style={{ marginTop: 16 }}>
-          <Timeline items={runs.map((r) => ({
-            color: r.status === 'success' ? 'green' : r.status === 'failed' ? 'red' : 'blue',
-            children: (
-              <>
-                <b>{AGENT_CN[r.agent] || r.agent}</b>
-                <Tag style={{ marginLeft: 8 }}>{r.status}</Tag>
-                <Tag>{r.cost_ms} ms</Tag>
-                {r.error && <Typography.Text type="danger">{r.error}</Typography.Text>}
+        <motion.div
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          transition={{ delay: 0.4 }}
+          style={{
+            marginTop: 20, padding: 20, borderRadius: 14,
+            background: 'rgba(255,255,255,0.02)', border: '1px solid rgba(255,255,255,0.06)',
+          }}>
+          <div style={{
+            fontSize: 12, fontWeight: 600, color: 'rgba(255,255,255,0.4)',
+            textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: 16,
+          }}>Agent 运行证据链</div>
+          <div style={{ position: 'relative', paddingLeft: 20 }}>
+            <div style={{
+              position: 'absolute', left: 5, top: 0, bottom: 0, width: 1,
+              background: 'rgba(255,255,255,0.06)',
+            }} />
+            {runs.map((r, i) => (
+              <motion.div
+                key={r.agent}
+                initial={{ opacity: 0, x: -10 }}
+                animate={{ opacity: 1, x: 0 }}
+                transition={{ delay: i * 0.1 }}
+                style={{
+                  position: 'relative', marginBottom: 20, paddingLeft: 16,
+                }}>
+                <div style={{
+                  position: 'absolute', left: -18, top: 4,
+                  width: 10, height: 10, borderRadius: 5,
+                  background: r.status === 'success' ? '#00d4aa' : r.status === 'failed' ? '#c8102e' : '#3b82f6',
+                  boxShadow: `0 0 8px ${r.status === 'success' ? 'rgba(0,212,170,0.4)' : r.status === 'failed' ? 'rgba(200,16,46,0.4)' : 'rgba(59,130,246,0.4)'}`,
+                }} />
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
+                  <span style={{ fontWeight: 600, color: '#fff' }}>
+                    {AGENT_ICONS[r.agent]} {AGENT_CN[r.agent] || r.agent}
+                  </span>
+                  <Tag style={{
+                    background: r.status === 'success' ? 'rgba(0,212,170,0.1)' : 'rgba(200,16,46,0.1)',
+                    border: 'none',
+                    color: r.status === 'success' ? '#00d4aa' : '#c8102e',
+                    fontSize: 10,
+                  }}>{r.status}</Tag>
+                  <span className="mono" style={{ fontSize: 11, color: 'rgba(255,255,255,0.3)' }}>
+                    {r.cost_ms}ms
+                  </span>
+                </div>
+                {r.error && (
+                  <div style={{ fontSize: 12, color: '#c8102e', marginBottom: 4 }}>{r.error}</div>
+                )}
                 <pre style={{
-                  margin: '4px 0 0', fontSize: 12, maxHeight: 160,
-                  overflow: 'auto', background: '#fafafa', padding: 8,
+                  margin: 0, padding: 12, borderRadius: 8,
+                  background: 'rgba(0,0,0,0.3)',
+                  border: '1px solid rgba(255,255,255,0.04)',
+                  fontSize: 11, maxHeight: 140, overflow: 'auto',
+                  fontFamily: 'var(--font-mono)',
+                  color: 'rgba(0,212,170,0.7)',
+                  lineHeight: 1.6,
                 }}>{r.output_json}</pre>
-              </>
-            ),
-          }))} />
-        </Card>
+              </motion.div>
+            ))}
+          </div>
+        </motion.div>
       )}
-    </Card>
+    </>
   )
 }
-
-const AGENT_ORDER = ['vision', 'rule', 'fusion', 'action']

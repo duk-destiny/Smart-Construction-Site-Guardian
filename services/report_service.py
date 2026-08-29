@@ -96,7 +96,7 @@ class WeeklyReportService:
         overdue_ids = {
             r["id"] for r in self.conn.execute(
                 "SELECT id, assignee_id FROM work_orders "
-                "WHERE status='open' AND deadline IS NOT NULL AND deadline < ?",
+                "WHERE status IN ('open','rejected') AND deadline IS NOT NULL AND deadline < ?",
                 (as_of,))
         }
 
@@ -118,7 +118,7 @@ class WeeklyReportService:
         for r in self.conn.execute(per_assignee_sql, per_params).fetchall():
             od = self.conn.execute(
                 "SELECT COUNT(*) AS n FROM work_orders w, users u "
-                "WHERE u.id=w.assignee_id AND u.username=? AND w.status='open' "
+                "WHERE u.id=w.assignee_id AND u.username=? AND w.status IN ('open','rejected') "
                 "AND w.deadline IS NOT NULL AND w.deadline < ?",
                 (r["name"], as_of)).fetchone()["n"]
             item = dict(r)

@@ -1,14 +1,9 @@
-/** 实时监测页（Phase 4）：WebSocket 帧广播 + canvas 渲染 + 告警弹窗/声音。
- *
- * 后端单推理循环（api.realtime_hub）：N 个观看者共享同一路推理；
- * 本页仅消费广播（最新帧 seq 去重），推理成本与观看人数无关。
- * Hub 未启用时降级为告警只读列表（Phase 3 占位行为保留）。
- */
 import { useCallback, useEffect, useRef, useState } from 'react'
 import {
-  Alert, App as AntApp, Badge, Button, Card, Image as AntImage,
-  Popconfirm, Select, Space, Statistic, Table, Tag,
+  Alert, App as AntApp, Badge, Button, Popconfirm, Select, Space,
+  Table, Tag,
 } from 'antd'
+import { motion } from 'framer-motion'
 import dayjs from 'dayjs'
 import * as ep from '../api/endpoints'
 import { getToken } from '../api/client'
@@ -17,9 +12,14 @@ import { ALARM_WAV_B64 } from '../shared/alarmAudio'
 import type { AlarmRow } from '../api/types'
 import { AlarmStatusTag } from '../components/Tags'
 import { useAuth } from '../auth/AuthContext'
+import PageHeader from '../components/PageHeader'
 
-const STATUSES = ['new', 'confirmed', 'false_alarm', 'resolved']
-  .map((v) => ({ value: v }))
+const STATUSES = [
+  { value: 'new', label: '新建' },
+  { value: 'confirmed', label: '已确认' },
+  { value: 'false_alarm', label: '误报' },
+  { value: 'resolved', label: '已关闭' },
+]
 
 interface FrameMsg {
   type: 'frame'
@@ -33,15 +33,13 @@ interface FrameMsg {
   ts: number
 }
 
-/** 800Hz 警报音：base64 WAV（与 Streamlit 实时页同源生成）。
- *  自动播放受浏览器策略限制时，首次点击画面任意处即解锁。 */
 function playAlarm(cooldownRef: { current: number }) {
   const now = Date.now()
-  if (now - cooldownRef.current < 5000) return  // 客户端 5s 冷却防轰炸
+  if (now - cooldownRef.current < 5000) return
   cooldownRef.current = now
   try {
     new Audio(`data:audio/wav;base64,${ALARM_WAV_B64}`).play()
-      .catch(() => {/* 自动播放被拦截：用户点击画面后即解锁 */})
+      .catch(() => {/* 自动播放被拦截 */})
   } catch { /* 音频失败不影响监测 */ }
 }
 
@@ -89,7 +87,7 @@ function LiveView() {
       if (msg.alarms?.length) {
         const a = msg.alarms[0]
         notification.error({
-          message: `🚨 高危告警：${a.label}`,
+          message: `高危告警：${a.label}`,
           description: `置信度 ${Math.round((a.conf || 0) * 100)}% · 告警 ${a.id} · 已推送`,
           duration: 6,
         })
@@ -99,40 +97,114 @@ function LiveView() {
     return () => { ws.close(); wsRef.current = null }
   }, [sources, sourceIdx, notification])
 
-  const levelColor = meta?.level === 'critical' ? '#c8102e'
-    : meta?.level === 'warning' ? '#faad14' : '#52c41a'
+  const borderColor = meta?.level === 'critical' ? '#c8102e'
+    : meta?.level === 'warning' ? '#f59e0b' : '#00d4aa'
 
   return (
-    <div>
-      <Space style={{ marginBottom: 12 }} wrap>
+    <motion.div
+      initial={{ opacity: 0, scale: 0.98 }}
+      animate={{ opacity: 1, scale: 1 }}
+      transition={{ duration: 0.5 }}
+      style={{ position: 'relative', marginBottom: 24 }}
+    >
+      <div style={{
+        display: 'flex', alignItems: 'center', gap: 12, marginBottom: 16,
+      }}>
         <Select value={sourceIdx} style={{ minWidth: 220 }}
           onChange={(v) => setSourceIdx(v)}
           options={sources.map((s) => ({ value: s.index, label: s.source }))} />
-        <Badge status={connected ? 'processing' : 'error'}
-          text={connected ? 'WebSocket 已连接（共享后端单路推理）' : '未连接'} />
-        {meta && <>
-          <Tag color={meta.level === 'critical' ? 'red'
-            : meta.level === 'warning' ? 'gold' : 'green'}>{meta.status}</Tag>
-          <span style={{ color: '#888', fontSize: 12 }}>
-            帧序 #{meta.seq} · 本帧 {meta.cost_ms}ms
+        <div style={{
+          display: 'flex', alignItems: 'center', gap: 6,
+          padding: '6px 12px', borderRadius: 8,
+          background: connected ? 'rgba(0,212,170,0.06)' : 'rgba(200,16,46,0.06)',
+          border: `1px solid ${connected ? 'rgba(0,212,170,0.15)' : 'rgba(200,16,46,0.15)'}`,
+        }}>
+          <div style={{
+            width: 6, height: 6, borderRadius: 3,
+            background: connected ? '#00d4aa' : '#c8102e',
+            animation: connected ? 'breathe 2s ease-in-out infinite' : 'none',
+          }} />
+          <span style={{ fontSize: 12, color: 'rgba(255,255,255,0.5)' }}>
+            {connected ? '已连接' : '未连接'}
           </span>
-        </>}
-      </Space>
-      <div style={{
-        background: '#111', borderRadius: 8, minHeight: 320,
-        display: 'flex', alignItems: 'center', justifyContent: 'center',
-        border: `3px solid ${meta ? levelColor : '#333'}`,
-      }}>
-        <canvas ref={canvasRef} style={{ maxWidth: '100%', maxHeight: 560 }} />
-        {!meta && <span style={{ color: '#666' }}>等待视频帧…</span>}
+        </div>
+        {meta && (
+          <div style={{
+            display: 'flex', alignItems: 'center', gap: 12, marginLeft: 'auto',
+          }}>
+            <Tag style={{
+              background: meta.level === 'critical' ? 'rgba(200,16,46,0.15)' :
+                meta.level === 'warning' ? 'rgba(245,158,11,0.1)' : 'rgba(0,212,170,0.1)',
+              border: 'none',
+              color: meta.level === 'critical' ? '#c8102e' :
+                meta.level === 'warning' ? '#f59e0b' : '#00d4aa',
+              fontWeight: 600,
+            }}>{meta.status}</Tag>
+            <span className="mono" style={{ fontSize: 11, color: 'rgba(255,255,255,0.3)' }}>
+              #{meta.seq} · {meta.cost_ms}ms
+            </span>
+          </div>
+        )}
       </div>
-      <div style={{ marginTop: 8, color: '#888', fontSize: 12 }}>
-        红框=不合规（当帧告警+声音） / 黄框=警告 / 绿框=合规；声音被浏览器拦截时，点击画面即可解锁。
-        <Button size="small" type="link" onClick={() => playAlarm({ current: 0 })}>
-          手动试听警报
+
+      <div style={{
+        position: 'relative',
+        borderRadius: 16,
+        overflow: 'hidden',
+        background: '#000',
+        border: `2px solid ${meta ? borderColor : 'rgba(255,255,255,0.06)'}`,
+        boxShadow: meta ? `0 0 30px ${borderColor}33, 0 0 60px ${borderColor}11` : 'none',
+        transition: 'border-color 0.3s, box-shadow 0.3s',
+      }}>
+        <canvas ref={canvasRef} style={{ display: 'block', width: '100%', maxHeight: 560 }} />
+        {!meta && (
+          <div style={{
+            position: 'absolute', inset: 0, display: 'flex',
+            alignItems: 'center', justifyContent: 'center',
+            color: 'rgba(255,255,255,0.2)', fontSize: 14,
+          }}>等待视频帧…</div>
+        )}
+
+        {meta && (
+          <>
+            <div style={{
+              position: 'absolute', top: 12, left: 12,
+              padding: '6px 10px', borderRadius: 8,
+              background: 'rgba(0,0,0,0.6)', backdropFilter: 'blur(8px)',
+              fontSize: 11, color: 'rgba(255,255,255,0.6)',
+              fontFamily: 'var(--font-mono)',
+            }}>
+              LIVE
+              <span style={{
+                display: 'inline-block', width: 5, height: 5, borderRadius: 3,
+                background: '#c8102e', marginLeft: 6,
+                animation: 'pulse-glow 1.5s ease-in-out infinite',
+              }} />
+            </div>
+            <div style={{
+              position: 'absolute', bottom: 12, right: 12,
+              padding: '6px 10px', borderRadius: 8,
+              background: 'rgba(0,0,0,0.6)', backdropFilter: 'blur(8px)',
+              fontSize: 11, color: 'rgba(255,255,255,0.4)',
+              fontFamily: 'var(--font-mono)',
+            }}>
+              {dayjs().format('HH:mm:ss')}
+            </div>
+          </>
+        )}
+      </div>
+
+      <div style={{
+        marginTop: 10, display: 'flex', alignItems: 'center', gap: 12,
+        fontSize: 11, color: 'rgba(255,255,255,0.25)',
+      }}>
+        <span>红框=不合规 / 黄框=警告 / 绿框=合规</span>
+        <Button size="small" type="link" onClick={() => playAlarm({ current: 0 })}
+          style={{ color: 'rgba(255,255,255,0.3)', fontSize: 11, padding: 0 }}>
+          试听警报
         </Button>
       </div>
-    </div>
+    </motion.div>
   )
 }
 
@@ -166,17 +238,20 @@ function AlarmsTable() {
         { title: '告警', dataIndex: 'id', width: 150 },
         { title: '类别', dataIndex: 'cls', width: 110 },
         { title: '置信度', dataIndex: 'conf', width: 90,
-          render: (v: number) => v && `${Math.round(v * 100)}%` },
+          render: (v: number) => v ? <span className="mono">{Math.round(v * 100)}%</span> : null },
         { title: '来源', dataIndex: 'source', width: 130, ellipsis: true },
         { title: '条款', dataIndex: 'clause', ellipsis: true },
         { title: '证据', dataIndex: 'image_path', width: 110,
           render: (p: string) => p
-            ? <AntImage width={72} height={54} src={mediaUrl(p)} />
+            ? <img src={mediaUrl(p)} alt="" style={{
+                width: 72, height: 54, objectFit: 'cover', borderRadius: 6,
+                border: '1px solid rgba(255,255,255,0.06)',
+              }} />
             : <Tag>无截图</Tag> },
         { title: '状态', dataIndex: 'status', width: 100,
           render: (_, r) => <AlarmStatusTag status={r.status} /> },
         { title: '时间', dataIndex: 'created_at', width: 160,
-          render: (d: string) => d && dayjs(d).format('MM-DD HH:mm:ss') },
+          render: (d: string) => d && <span className="mono">{dayjs(d).format('MM-DD HH:mm:ss')}</span> },
         ...(user?.role === 'admin' || user?.role === 'safety' ? [{
           title: '操作', width: 230, render: (_: unknown, r: AlarmRow) => (
             <Space>
@@ -205,27 +280,42 @@ export default function Realtime() {
   }, [])
 
   return (
-    <Card title="📷 实时监测">
-      <Space style={{ marginBottom: 12 }} size={24}>
-        <Statistic title="Hub 状态" valueRender={() => (
-          <span>
-            {hubStatus?.running
-              ? <Tag color="success">运行中</Tag>
-              : <Tag>未启用（config.realtime.enabled）</Tag>}
-          </span>
-        )} />
-        <Statistic title="观看者" value={hubStatus?.viewers ?? 0} />
-        <Statistic title="累计推理帧" value={hubStatus?.polls ?? 0} />
-        <Statistic title="产生告警" value={hubStatus?.alarms ?? 0} />
-        {hubStatus?.running && (
-          <Statistic title="当前帧率" value={`${hubStatus.target_fps ?? '—'} fps`} />
-        )}
-      </Space>
+    <>
+      <PageHeader title="实时监测" subtitle="WebSocket 视频流 · 共享推理后端" />
+
+      <div style={{
+        display: 'flex', gap: 12, marginBottom: 20, flexWrap: 'wrap',
+      }}>
+        {[
+          { label: 'HUB', value: hubStatus?.running ? '运行中' : '未启用', color: hubStatus?.running ? '#00d4aa' : 'rgba(255,255,255,0.3)' },
+          { label: '观看者', value: String(hubStatus?.viewers ?? 0), mono: true },
+          { label: '推理帧', value: String(hubStatus?.polls ?? 0), mono: true },
+          { label: '告警', value: String(hubStatus?.alarms ?? 0), mono: true },
+          ...(hubStatus?.running ? [{ label: '帧率', value: `${hubStatus.target_fps ?? '—'} fps`, mono: true }] : []),
+        ].map((s) => (
+          <div key={s.label} style={{
+            padding: '12px 18px', borderRadius: 12,
+            background: 'rgba(255,255,255,0.02)',
+            border: '1px solid rgba(255,255,255,0.06)',
+            minWidth: 100,
+          }}>
+            <div style={{
+              fontSize: 10, color: 'rgba(255,255,255,0.3)',
+              textTransform: 'uppercase', letterSpacing: '0.1em', marginBottom: 6,
+            }}>{s.label}</div>
+            <div className={s.mono ? 'mono' : ''} style={{
+              fontSize: s.mono ? 18 : 13, fontWeight: 600, color: s.color || '#fff',
+            }}>{s.value}</div>
+          </div>
+        ))}
+      </div>
+
       {hubStatus?.enabled
         ? <LiveView />
-        : <Alert style={{ marginBottom: 16 }} type="warning" showIcon
-            message="实时 Hub 未启用：在 config.yaml 设 realtime.enabled=true 并重启 API 后，本页展示共享推理的实时画面（后端单推理循环，多端观看零额外推理成本）。当前为告警列表模式。" />}
+        : <Alert style={{ marginBottom: 20 }} type="warning" showIcon
+            message="实时 Hub 未启用"
+            description="在 config.yaml 设 realtime.enabled=true 并重启 API 后，本页展示共享推理的实时画面。当前为告警列表模式。" />}
       <AlarmsTable />
-    </Card>
+    </>
   )
 }

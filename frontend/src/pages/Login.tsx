@@ -1,10 +1,10 @@
-/** 登录页：成功后按 must_change_password 决定去改密页或角色首页。 */
-import { App as AntApp } from 'antd'
-import { Form, Input, Button, Card, Typography } from 'antd'
+import { App as AntApp, Form, Input, Button } from 'antd'
+import { motion } from 'framer-motion'
 import { useLocation, useNavigate } from 'react-router-dom'
 import { useEffect, useState } from 'react'
 import { useAuth } from '../auth/AuthContext'
 import { homeFor } from '../router'
+import ParticleField from '../components/ParticleField'
 
 export default function Login() {
   const { login, user } = useAuth()
@@ -13,9 +13,6 @@ export default function Login() {
   const { message } = AntApp.useApp()
   const [loading, setLoading] = useState(false)
 
-  // 登录态驱动路由（单一事实源）：user 出现即跳改密页或角色首页。
-  // 不在 onFinish 里手动 navigate——事件回调里 await 之后紧跟 navigate
-  // 会被路由状态竞争吞掉（运维验收实测：token 已存但 URL 不变）。
   useEffect(() => {
     if (!user) return
     navigate(user.must_change_password
@@ -37,29 +34,180 @@ export default function Login() {
 
   return (
     <div style={{
-      minHeight: '100vh', display: 'flex', alignItems: 'center',
+      minHeight: '100vh',
+      display: 'flex',
+      alignItems: 'center',
       justifyContent: 'center',
-      background: 'linear-gradient(160deg, #1f2733 0%, #2c3e50 60%, #3b1f24 100%)',
+      background: 'radial-gradient(ellipse at 30% 50%, #1a0a10 0%, #070b14 50%, #0a0e1a 100%)',
+      position: 'relative',
+      overflow: 'hidden',
     }}>
-      <Card style={{ width: 380, boxShadow: '0 8px 32px rgba(0,0,0,.25)' }}>
-        <Typography.Title level={3} style={{ textAlign: 'center' }}>
-          🏗 智护工地
-        </Typography.Title>
-        <Typography.Paragraph type="secondary" style={{ textAlign: 'center' }}>
-          施工安全 AI 监控系统 · 动火作业 / 施工 PPE
-        </Typography.Paragraph>
-        <Form onFinish={onFinish} layout="vertical" autoFocus>
-          <Form.Item name="username" label="用户名" rules={[{ required: true, message: '请输入用户名' }]}>
-            <Input placeholder="用户名" size="large" autoComplete="username" />
-          </Form.Item>
-          <Form.Item name="password" label="密码" rules={[{ required: true, message: '请输入密码' }]}>
-            <Input.Password placeholder="密码" size="large" autoComplete="current-password" />
-          </Form.Item>
-          <Button type="primary" htmlType="submit" block size="large" loading={loading}>
-            登 录
-          </Button>
-        </Form>
-      </Card>
+      <ParticleField />
+
+      <div style={{
+        position: 'relative',
+        zIndex: 1,
+        display: 'flex',
+        alignItems: 'center',
+        gap: 80,
+        padding: '0 40px',
+        maxWidth: 960,
+        width: '100%',
+      }}>
+        <motion.div
+          initial={{ opacity: 0, x: -30 }}
+          animate={{ opacity: 1, x: 0 }}
+          transition={{ duration: 0.8, ease: [0.25, 0.46, 0.45, 0.94] }}
+          style={{ flex: 1, minWidth: 0 }}
+        >
+          <div style={{
+            fontSize: 14,
+            fontWeight: 600,
+            color: '#c8102e',
+            letterSpacing: '0.15em',
+            textTransform: 'uppercase',
+            marginBottom: 16,
+            fontFamily: 'var(--font-mono)',
+          }}>
+            CONSTRUCTION SAFETY AI
+          </div>
+          <h1 style={{
+            fontSize: 52,
+            fontWeight: 800,
+            color: '#fff',
+            lineHeight: 1.1,
+            margin: '0 0 20px',
+            letterSpacing: '-0.02em',
+          }}>
+            智护工地
+          </h1>
+          <p style={{
+            fontSize: 16,
+            color: 'rgba(255,255,255,0.4)',
+            lineHeight: 1.7,
+            margin: 0,
+            maxWidth: 360,
+          }}>
+            多 Agent 协同研判 · 实时视觉监测 · 工单全链路闭环
+          </p>
+          <div style={{
+            marginTop: 40,
+            display: 'flex',
+            gap: 24,
+          }}>
+            {[
+              { label: '检测帧', value: '—' },
+              { label: 'Agent 链路', value: '4 级' },
+              { label: '响应时效', value: '<3s' },
+            ].map((s) => (
+              <div key={s.label}>
+                <div style={{
+                  fontSize: 22,
+                  fontWeight: 700,
+                  color: '#fff',
+                  fontFamily: 'var(--font-mono)',
+                }}>{s.value}</div>
+                <div style={{
+                  fontSize: 11,
+                  color: 'rgba(255,255,255,0.3)',
+                  textTransform: 'uppercase',
+                  letterSpacing: '0.1em',
+                  marginTop: 4,
+                }}>{s.label}</div>
+              </div>
+            ))}
+          </div>
+        </motion.div>
+
+        <motion.div
+          initial={{ opacity: 0, x: 30 }}
+          animate={{ opacity: 1, x: 0 }}
+          transition={{ duration: 0.8, delay: 0.2, ease: [0.25, 0.46, 0.45, 0.94] }}
+          style={{ width: 380, flexShrink: 0 }}
+        >
+          <div style={{
+            padding: 32,
+            borderRadius: 20,
+            background: 'rgba(17, 24, 39, 0.6)',
+            backdropFilter: 'blur(24px)',
+            WebkitBackdropFilter: 'blur(24px)',
+            border: '1px solid rgba(255,255,255,0.06)',
+            boxShadow: '0 24px 64px rgba(0,0,0,0.3)',
+          }}>
+            <div style={{
+              fontSize: 18,
+              fontWeight: 700,
+              color: '#fff',
+              marginBottom: 4,
+            }}>登录系统</div>
+            <div style={{
+              fontSize: 13,
+              color: 'rgba(255,255,255,0.35)',
+              marginBottom: 28,
+            }}>使用您的授权账号访问监控平台</div>
+
+            <Form onFinish={onFinish} layout="vertical" autoFocus size="large">
+              <Form.Item name="username" rules={[{ required: true, message: '请输入用户名' }]}>
+                <Input
+                  placeholder="用户名"
+                  autoComplete="username"
+                  style={{
+                    height: 48,
+                    background: 'rgba(255,255,255,0.04)',
+                    border: '1px solid rgba(255,255,255,0.08)',
+                    borderRadius: 12,
+                    color: '#fff',
+                    fontSize: 15,
+                  }} />
+              </Form.Item>
+              <Form.Item name="password" rules={[{ required: true, message: '请输入密码' }]}>
+                <Input.Password
+                  placeholder="密码"
+                  autoComplete="current-password"
+                  style={{
+                    height: 48,
+                    background: 'rgba(255,255,255,0.04)',
+                    border: '1px solid rgba(255,255,255,0.08)',
+                    borderRadius: 12,
+                    color: '#fff',
+                    fontSize: 15,
+                  }} />
+              </Form.Item>
+              <Form.Item style={{ marginBottom: 0, marginTop: 8 }}>
+                <Button
+                  type="primary"
+                  htmlType="submit"
+                  block
+                  loading={loading}
+                  style={{
+                    height: 48,
+                    borderRadius: 12,
+                    fontSize: 15,
+                    fontWeight: 600,
+                    background: 'linear-gradient(135deg, #c8102e 0%, #9b0a22 100%)',
+                    border: 'none',
+                    boxShadow: '0 4px 16px rgba(200,16,46,0.3)',
+                  }}
+                >
+                  进入系统
+                </Button>
+              </Form.Item>
+            </Form>
+
+            <div style={{
+              marginTop: 24,
+              paddingTop: 20,
+              borderTop: '1px solid rgba(255,255,255,0.06)',
+              fontSize: 11,
+              color: 'rgba(255,255,255,0.2)',
+              textAlign: 'center',
+              fontFamily: 'var(--font-mono)',
+            }}>
+              动火作业 / 施工 PPE · AI 安全监控
+            </div>
+          </div>
+        </motion.div>
+      </div>
     </div>
   )
 }

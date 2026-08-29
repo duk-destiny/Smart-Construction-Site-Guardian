@@ -241,6 +241,6 @@ class IntentRouter:
         rows = [dict(r) for r in self.conn.execute(
             "SELECT w.*, u.username AS assignee_name FROM work_orders w "
             "LEFT JOIN users u ON u.id=w.assignee_id "
-            "WHERE status='open' AND deadline IS NOT NULL AND deadline < ? "
+            "WHERE status IN ('open','rejected') AND deadline IS NOT NULL AND deadline < ? "
             "ORDER BY deadline ASC LIMIT ?", (as_of, limit))]
         return rows

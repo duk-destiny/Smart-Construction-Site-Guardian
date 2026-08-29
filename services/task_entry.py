@@ -118,8 +118,7 @@ def run_sync(task_id: str, user_id: str | None, images: list[str],
     from agents.orchestrator import Orchestrator
     with scoped() as conn:
         svc = TaskService(conn)
-        orch = Orchestrator(progress_cb=svc.update_progress, scene_id=scene_id,
-                            work_order_dao=svc.work_orders)
+        orch = Orchestrator(progress_cb=svc.update_progress, scene_id=scene_id)
         result = orch.execute(task_id, images=images, permit_info=permit_info)
         svc.save_result(task_id, result.payload)
         wo = result.payload.get("work_order") or {}

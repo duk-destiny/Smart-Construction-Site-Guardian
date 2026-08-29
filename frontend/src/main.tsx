@@ -1,4 +1,4 @@
-import { ConfigProvider, App as AntApp } from 'antd'
+import { ConfigProvider, App as AntApp, theme } from 'antd'
 import zhCN from 'antd/locale/zh_CN'
 import dayjs from 'dayjs'
 import 'dayjs/locale/zh-cn'
@@ -17,6 +17,7 @@ import Orders from './pages/Orders'
 import Realtime from './pages/Realtime'
 import Report from './pages/Report'
 import { homeFor, RequireRole } from './router'
+import './styles/global.css'
 
 dayjs.locale('zh-cn')
 
@@ -58,7 +59,18 @@ function AppRoutes() {
 ReactDOM.createRoot(document.getElementById('root')!).render(
   <React.StrictMode>
     <ConfigProvider locale={zhCN} theme={{
-      token: { colorPrimary: '#c8102e' }, // 安全红主色（与 Streamlit 主题口径一致）
+      algorithm: theme.darkAlgorithm,
+      token: {
+        colorPrimary: '#c8102e',
+        colorBgBase: '#0a0e1a',
+        colorBgContainer: 'rgba(17, 24, 39, 0.7)',
+        colorBgElevated: '#1a2235',
+        colorBorder: 'rgba(255, 255, 255, 0.06)',
+        colorText: '#e5e7eb',
+        colorTextSecondary: '#9ca3af',
+        borderRadius: 10,
+        fontFamily: "'Inter', -apple-system, BlinkMacSystemFont, sans-serif",
+      },
     }}>
       <AntApp>
         <BrowserRouter>
