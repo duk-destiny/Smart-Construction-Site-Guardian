@@ -223,7 +223,12 @@ def test_task_service_start_run_no_double_start(monkeypatch, tmp_db):
 
     def _try_start():
         barrier.wait(timeout=5)
-        results.append(TaskService(conn).start_async_run(
+        # 每线程独立连接：sqlite3 默认拒绝跨线程使用同一连接，
+        # 共享 conn 在 Linux 上两线程都会抛 ProgrammingError；
+        # 独立连接也是 API 真实请求的形态（每请求 scoped 一连）
+        own = get_conn()
+        init_db(own)
+        results.append(TaskService(own).start_async_run(
             tid, admin, [], {"scene": "hot_work"}))
 
     threads = [threading.Thread(target=_try_start) for _ in range(2)]
