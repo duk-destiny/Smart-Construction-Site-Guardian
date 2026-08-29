@@ -93,12 +93,12 @@ export default function AgentRun() {
   }
 
   const entries = Object.entries(progress)
-  const running = entries.some(([, v]) => v.status === 'running')
+  const anyRunning = entries.some(([, v]) => v.status === "running")
   const wo = payloadWorkOrder(result?.payload)
 
   const stepIndex = (() => {
     if (result) return AGENT_ORDER.length
-    const done = entries.filter(([, v]) => v.status !== 'running').length
+    const done = entries.filter(([, v]) => v.status !== "running").length
     return Math.min(done, AGENT_ORDER.length - 1)
   })()
 
@@ -106,29 +106,34 @@ export default function AgentRun() {
     <Card title={`🤖 多 Agent 研判 · ${taskId || '（无任务）'}`}>
       {!taskId && <Alert type="info" message="请从「统一上报 → 影像研判」发起任务" />}
 
-      {taskId && !result && (
+      {taskId && !result && (entries.length === 0 || !anyRunning) && (
+        // 无进度=尚未研判;有进度但无进行中 agent 且无结果=上一轮已完成
+        // 但结果已被取走/丢失（二次访问页面）——两种情况都应可重新发起
         <div style={{ textAlign: 'center', padding: '24px 0' }}>
-          {entries.length === 0
-            ? <>
-                <Alert style={{ marginBottom: 16, maxWidth: 520, margin: '0 auto 16px' }}
-                  type="info" message="尚未开始研判" />
-                <Button type="primary" loading={starting} onClick={startRun}>
-                  开始 / 重试多 Agent 研判
-                </Button>
-              </>
-            : <>
-                <Spin style={{ marginBottom: 16 }} />
-                <Steps size="small" direction="horizontal"
-                  current={running ? stepIndex : stepIndex + 1}
-                  items={AGENT_ORDER.map((a) => ({
-                    title: AGENT_CN[a] || a,
-                    status: progress[a]?.status === 'running' ? 'process' as const
-                      : progress[a] ? 'finish' as const : 'wait' as const,
-                  }))} />
-                <Typography.Text type="secondary">
-                  后台研判进行中，页面每 1.5 秒自动轮询进度…
-                </Typography.Text>
-              </>}
+          {entries.length > 0 && (
+            <Alert style={{ maxWidth: 520, margin: '0 auto 16px' }}
+              type="warning"
+              message="上一轮研判结果已被取走或已过期，可重新发起研判" />
+          )}
+          <Button type="primary" loading={starting} onClick={startRun}>
+            开始 / 重试多 Agent 研判
+          </Button>
+        </div>
+      )}
+
+      {taskId && !result && anyRunning && (
+        <div style={{ textAlign: 'center', padding: '24px 0' }}>
+          <Spin style={{ marginBottom: 16 }} />
+          <Steps size="small" direction="horizontal"
+            current={stepIndex}
+            items={AGENT_ORDER.map((a) => ({
+              title: AGENT_CN[a] || a,
+              status: progress[a]?.status === 'running' ? 'process' as const
+                : progress[a] ? 'finish' as const : 'wait' as const,
+            }))} />
+          <Typography.Text type="secondary">
+            后台研判进行中，页面每 1.5 秒自动轮询进度…
+          </Typography.Text>
         </div>
       )}
 
