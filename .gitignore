@@ -113,3 +113,15 @@ config/config.yaml
 
 # ===== CI 调试产物 =====
 data/ci/
+
+# ===== 本地材料/演示产物：仅本机保留，不入 GitHub =====
+data/e2e_screens/
+docs/*.pdf
+docs/*.docx
+docs/*.doc
+docs/*.png
+/介绍视频.mp4
+/智护工地·施工安全.zip
+/创意材料.html
+/痛点调研.html
+/realtime-subtitle.log
