@@ -63,3 +63,96 @@ def test_permit_noncompliant_at_low_risk_requires_review():
         "compliance": [{"verdict": "不合规", "label": "监火人"}],
     }))
     assert out.payload["needs_review"] is True
+
+
+# ---------- 低置信度 LLM 辅助理解（异步落证据链） ----------
+
+import json
+import time
+
+import pytest
+
+import dao.db as dao_db
+from dao.db import get_conn, init_db
+from dao.models import AgentRunDAO, TaskDAO, UserDAO
+
+
+@pytest.fixture
+def assist_env(tmp_path, monkeypatch):
+    monkeypatch.setattr(dao_db, "DEFAULT_DB_PATH", str(tmp_path / "assist.db"))
+    conn = get_conn()
+    init_db(conn)
+    admin = UserDAO(conn).insert("admin", "hashed", "admin")
+    tid = TaskDAO(conn).insert(admin, "{}", "completed", source="upload")
+    yield conn, tid
+    conn.close()
+
+
+class FakeEng:
+    """可编程 LLM 桩：返回固定建议/抛异常/不可用。"""
+    outcome = "ok"
+    text = "可能原因:距离远。复核要点:核对灭火器压力表。建议:2小时内复核。"
+
+    def available(self):
+        return FakeEng.outcome != "unavailable"
+
+    def chat(self, system, user, num_predict=None):
+        if FakeEng.outcome == "raise":
+            raise RuntimeError("ollama down")
+        if FakeEng.outcome == "empty":
+            return None
+        return FakeEng.text
+
+
+def _wait_assist(conn, tid, timeout=8.0):
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        rows = AgentRunDAO(conn).list_by_task(tid)
+        hits = [r for r in rows if r["agent"] == "llm_assist"]
+        if hits:
+            return hits[-1]
+        time.sleep(0.1)
+    return None
+
+
+def test_assist_async_persists_advice(assist_env, monkeypatch):
+    from agents.review_agent import ReviewAgent
+
+    conn, tid = assist_env
+    monkeypatch.setattr("agents.review_agent.LlmEngine", FakeEng)
+    ReviewAgent().assist_async(
+        tid, [{"cls": "smoke", "conf": 0.40, "scene": "hot_work"}],
+        [], "重大", ["smoke 置信度 0.40 低于 0.55，属高风险项，建议人工复核"])
+    row = _wait_assist(conn, tid)
+    assert row is not None and row["status"] == "success"
+    out = json.loads(row["output_json"])
+    assert "灭火器压力表" in out["advice"]
+    assert out["review_reasons"]
+    # 不改变定级:advice 是文本,风险等级仍在 risks 表由规则决定
+
+
+def test_assist_async_llm_unavailable_skips(assist_env, monkeypatch):
+    from agents.review_agent import ReviewAgent
+
+    conn, tid = assist_env
+    FakeEng.outcome = "unavailable"
+    monkeypatch.setattr("agents.review_agent.LlmEngine", FakeEng)
+    ReviewAgent().assist_async(tid, [{"cls": "smoke", "conf": 0.4}], [], "重大",
+                               ["低置信"])
+    row = _wait_assist(conn, tid)
+    assert row is not None and row["status"] == "skipped"
+    FakeEng.outcome = "ok"
+
+
+def test_assist_async_llm_error_lands_failed(assist_env, monkeypatch):
+    from agents.review_agent import ReviewAgent
+
+    conn, tid = assist_env
+    FakeEng.outcome = "raise"
+    monkeypatch.setattr("agents.review_agent.LlmEngine", FakeEng)
+    ReviewAgent().assist_async(tid, [{"cls": "smoke", "conf": 0.4}], [], "重大",
+                               ["低置信"])
+    row = _wait_assist(conn, tid)
+    assert row is not None and row["status"] == "failed"
+    assert "ollama down" in (row["error"] or "")
+    FakeEng.outcome = "ok"

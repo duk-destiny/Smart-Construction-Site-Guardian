@@ -16,6 +16,7 @@ import { RiskTag } from '../components/Tags'
 const AGENT_CN: Record<string, string> = {
   vision: '👁 视觉检测', rule: '📜 规范合规', fusion: '⚖️ 融合定级',
   action: '📋 处置工单', review: '🔍 人工复核',
+  llm_assist: '🧠 LLM 辅助研判（低置信度）',
 }
 
 interface RunResult {
@@ -180,6 +181,30 @@ export default function AgentRun() {
             {detail.risk['override_reason']
               ? `（改判原因：${detail.risk['override_reason']}）` : ''}</>} />
       )}
+
+      {(() => {
+        // LLM 辅助研判意见（低置信度时异步生成；仅辅助理解，不改变定级）
+        const assist = runs.find((r) => r.agent === 'llm_assist')
+        if (!assist) return null
+        let advice = ''
+        try {
+          advice = String((JSON.parse(assist.output_json) as
+            { advice?: string }).advice ?? '')
+        } catch { /* 证据链摘要格式 */ }
+        if (!advice) return null
+        return (
+          <Card size="small" title="🧠 AI 辅助研判意见" style={{
+            marginTop: 16, borderColor: '#7c4dff',
+            background: '#faf7ff',
+          }}
+            extra={<Tag color="purple">仅辅助理解 · 不改变定级</Tag>}>
+            <pre style={{
+              whiteSpace: 'pre-wrap', margin: 0,
+              fontFamily: 'inherit', fontSize: 13,
+            }}>{advice}</pre>
+          </Card>
+        )
+      })()}
 
       {runs.length > 0 && (
         <Card size="small" title="Agent 运行证据链" style={{ marginTop: 16 }}>

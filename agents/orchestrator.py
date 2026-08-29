@@ -186,6 +186,21 @@ class Orchestrator:
             timeout=_TIMEOUT_REVIEW, agent="review", task_id=task_id)
         self._push(task_id, "review", rvmsg.status, rvmsg.cost_ms)
 
+        # 低置信度 LLM 辅助理解：needs_review 时后台发起（异步，不占
+        # 主链路时延；结论落 agent_runs 证据链，仅辅助不改变定级）
+        if rvmsg.status in ("success", "degraded") and                 rvmsg.payload.get("needs_review"):
+            try:
+                self.review.assist_async(
+                    task_id,
+                    vout.payload.get("detections", []) if vout.status == "success" else [],
+                    rout.payload.get("compliance", []) if rout.status == "success" else [],
+                    fmsg.payload.get("risk_level", "一般"),
+                    rvmsg.payload.get("review_reasons", []))
+            except Exception as exc:  # noqa: BLE001 辅助失败不影响主链路
+                from core.logging import get_logger
+                get_logger(__name__).warning(
+                    f"任务 {task_id} LLM 辅助研判发起失败: {exc}")
+
         # 闭环处置
         self._push(task_id, "action", "running")
         amsg = self._run_with_timeout(
