@@ -31,9 +31,17 @@
 - 纳入发布前工作区既有变更（单独成提交）：润色后台线程池化、Orchestrator
   分 agent 超时预算、BGE 分块上限/重叠与会话 LRU、`scripts/backup_db.py`
   在线备份脚本——发布基线回归已含上述变更全绿；
-- CI 适配（打版后首推发现）：配置出库后云端 fresh checkout 无
-  `config/config.yaml`，测试前从 `config.example.yaml` 引导；
-  ruff 范围补 `api/` 目录；
+- **CI 首次真正执行并全绿（run #35, Ubuntu/Py3.13）**：根因是 `ci.yml`
+  Install dependencies 单行标量里 `:all: -r` 的冒号被 YAML 当映射键——
+  自 v0.6 起每次 push 均 startup failure（jobs=0），云端测试从未真正跑过；
+  连带修复三个环境依赖问题：①配置出库后云端 fresh checkout 无
+  `config/config.yaml`，测试前从 `config.example.yaml` 引导（ruff 范围
+  同步补 `api/`）；②pytest-asyncio 升 1.4.0（0.26.0 声明 pytest<9 与
+  pytest 9.1.1 冲突，云端全新解析必炸，本地增量安装掩盖）；③两个测试的
+  环境依赖（AppTest 实时页桩点迁移至 Phase 0 后的真实缝隙、TOCTOU 用例
+  改每线程独立连接）；④周报测试日期改动态（硬编码区间跨天即挂）；
+- SonarCloud 质量门禁（第三方集成）仍报 New Code 可靠性/安全性评级不达标，
+  与本项目测试 CI 相互独立，处理与否待定；
 - 回退预案：Streamlit 经典版保留可运行，至 React 版稳定一个迭代周期后下线；
 - 已知边界（记 backlog，不阻断打版）：BGE 转 ONNX、OCR 扫描件入库、
   INT8 量化版本达标后的线上切换、答辩材料同步 React 功能面。
