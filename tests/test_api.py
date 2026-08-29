@@ -486,8 +486,12 @@ async def test_export_download_and_traversal_guard(client):
 async def test_weekly_report_generate_download_preview(client):
     await _create_text_hazard(client)
     token = await _login(client, ADMIN)
+    # 动态日期：硬编码区间会在跨天后把新建工单排除在统计外（实测踩坑）
+    end = dayjs_today = __import__("datetime").date.today().isoformat()
+    start = __import__("datetime").date.today().replace(
+        day=1).isoformat()
     r = await client.post("/api/reports/weekly",
-                          json={"start": "2026-08-01", "end": "2026-08-28"},
+                          json={"start": start, "end": end},
                           headers=_auth(token))
     body = r.json()
     assert r.status_code == 200, r.text
