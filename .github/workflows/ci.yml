@@ -21,7 +21,10 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends fonts-noto-cjk
       - name: Install dependencies
-        run: pip install --disable-pip-version-check --only-binary :all: -r requirements.txt
+        # 块标量：单行写法里 ":all: -r" 的冒号会被 YAML 当映射键，
+        # 自 v0.6 起工作流一直 startup failure（云端测试从未真正执行）
+        run: |
+          pip install --disable-pip-version-check --only-binary :all: -r requirements.txt
       - name: Lint (ruff)
         run: |
           pip install ruff
