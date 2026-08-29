@@ -148,6 +148,19 @@ export default function AgentRun() {
                   <RiskTag level={payloadRisk(result.payload)} />
                   <Button type="primary" href="/orders">去工单页派发</Button>
                 </Space>} />}
+          {(() => {
+            const vision = result?.payload?.['vision'] as
+              Record<string, unknown> | undefined
+            const dets = (vision?.['payload'] as
+              Record<string, unknown> | undefined)?.['detections']
+            if (result?.status === 'success' && Array.isArray(dets)
+                && dets.length === 0) {
+              return <Alert style={{ marginTop: 8 }} type="info" showIcon
+                message="本帧未检出隐患目标"
+                description="模型识别范围有限（火花/烟雾/灭火器/安全帽/反光衣等），普通场景照片没有可识别对象属正常现象。" />
+            }
+            return null
+          })()}
           {Object.keys(wo).length > 0 && (
             <Card size="small" title="处置工单" style={{ marginTop: 8 }}>
               <Descriptions column={1} size="small">

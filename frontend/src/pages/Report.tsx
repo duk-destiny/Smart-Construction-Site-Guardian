@@ -6,7 +6,7 @@
 import { useEffect, useState } from 'react'
 import {
   Alert, App as AntApp, Button, Card, Descriptions, Form, Input, Select,
-  Table, Tabs, Tag, Upload,
+  Table, Tabs, Tag, Typography, Upload,
 } from 'antd'
 import { InboxOutlined, ThunderboltOutlined } from '@ant-design/icons'
 import { useNavigate } from 'react-router-dom'
@@ -65,6 +65,7 @@ function MediaTab() {
       <Form.Item label="影像（图片/视频，服务端魔数+大小校验）" required>
         <Upload.Dragger
           maxCount={1} beforeUpload={() => false}
+          onChange={({ fileList }) => setFile(fileList[0]?.originFileObj ?? null)}
           onRemove={() => setFile(null)}
           accept=".jpg,.jpeg,.png,.mp4,.mov"
         >
@@ -98,10 +99,11 @@ function MediaTab() {
   )
 }
 
-function TextTab({ hazards }: { hazards: HazardOption[] }) {
+function TextTab({ hazards, enhance }: { hazards: HazardOption[]; enhance: boolean }) {
   const { message } = AntApp.useApp()
   const navigate = useNavigate()
   const [loading, setLoading] = useState(false)
+  const [extracting, setExtracting] = useState(false)
   const [created, setCreated] = useState<{
     task_id: string; risk_level: string; work_order: Record<string, string>;
     worker_notice: string
@@ -141,8 +143,38 @@ function TextTab({ hazards }: { hazards: HazardOption[] }) {
         <Form.Item name="location" label="位置（可选）">
           <Input placeholder="如：3号楼西侧 / 地库B区" />
         </Form.Item>
-        <Form.Item name="description" label="隐患描述" rules={[{ required: true }]}>
-          <Input.TextArea rows={3} placeholder="例：3号楼西侧电焊机旁堆着纸箱没人清理，也没有监火人" />
+        <Form.Item label="隐患描述"
+          extra={enhance ? "点「AI 提取预填」可自动拆出类别/位置等字段,结果需人工确认" : undefined}
+          rules={[{ required: true }]}>
+          <Form.Item name="description" noStyle rules={[{ required: true, message: "请填写隐患描述" }]}>
+            <Input.TextArea rows={3} placeholder="例：3号楼西侧电焊机旁堆着纸箱没人清理，也没有监火人" />
+          </Form.Item>
+          {enhance && (
+            <Button size="small" icon={<ThunderboltOutlined />} loading={extracting}
+              style={{ marginTop: 8 }}
+              onClick={async () => {
+                const raw = form.getFieldValue("description")
+                if (!raw || !String(raw).trim()) {
+                  message.warning("请先描述情况,再点 AI 提取")
+                  return
+                }
+                setExtracting(true)
+                try {
+                  const out = await ep.enhanceExtract(String(raw))
+                  form.setFieldsValue({
+                    description: out.description,
+                    hazard_key: out.hazard_key,
+                    location: out.location || undefined,
+                    scene_id: out.scene_id || undefined,
+                  })
+                  message.success("AI 预填完成，请人工确认后提交")
+                } finally {
+                  setExtracting(false)
+                }
+              }}>
+              ⚡ AI 提取预填
+            </Button>
+          )}
         </Form.Item>
         <Button type="primary" block loading={loading} onClick={submit}>
           📝 创建文字隐患单
@@ -165,33 +197,79 @@ function TextTab({ hazards }: { hazards: HazardOption[] }) {
   )
 }
 
-function renderChat(route: ChatRoute) {
-  const data = route.data as Record<string, unknown> | undefined
-  if (route.action === 'order_detail' && data) {
-    return <Descriptions bordered column={1} size="small">
-      <Descriptions.Item label="工单">{String(data['id'] ?? route.order_id)}</Descriptions.Item>
-      <Descriptions.Item label="隐患">{String(data['hazard_desc'] ?? '—')}</Descriptions.Item>
-      <Descriptions.Item label="状态">{String(data['status'] ?? '—')}</Descriptions.Item>
-      <Descriptions.Item label="责任人">{String(data['assignee'] ?? '—')}</Descriptions.Item>
-      <Descriptions.Item label="截止">{String(data['deadline'] ?? '—')}</Descriptions.Item>
-    </Descriptions>
+const STATUS_CN: Record<string, string> = {
+  open: '待整改', rejected: '驳回重改', submitted: '待验收', closed: '已销项',
+}
+
+function OrderCard({ o }: { o: Record<string, unknown> }) {
+  return <Descriptions bordered column={1} size="small" style={{ marginBottom: 12 }}>
+    <Descriptions.Item label="工单">{String(o['id'])}</Descriptions.Item>
+    <Descriptions.Item label="隐患">{String(o['hazard_desc'] ?? '—')}</Descriptions.Item>
+    <Descriptions.Item label="等级">{String(o['risk_level'] ?? '—')}</Descriptions.Item>
+    <Descriptions.Item label="状态">{STATUS_CN[String(o['status'])] ?? String(o['status'] ?? '—')}</Descriptions.Item>
+    <Descriptions.Item label="责任人">{String(o['assignee_name'] ?? '未派发')}</Descriptions.Item>
+    <Descriptions.Item label="截止">{String(o['deadline'] ?? '—')}</Descriptions.Item>
+    <Descriptions.Item label="整改要求">{String(o['requirement'] ?? '—')}</Descriptions.Item>
+  </Descriptions>
+}
+
+function renderChat(route: ChatRoute, ask: (t: string) => void) {
+  const data = route.data
+  if (route.action === 'order_detail' && data && !Array.isArray(data)) {
+    return <OrderCard o={data as Record<string, unknown>} />
   }
   if (route.action === 'order_list' && Array.isArray(data)) {
     const rows = data as Record<string, unknown>[]
+    if (!rows.length) return <Alert type="success" message="该范围内暂无工单" />
     return <Table size="small" rowKey={(r) => String(r['id'])} dataSource={rows}
       pagination={{ pageSize: 8 }}
+      onRow={(r) => ({ onClick: () => void ask(`#${String(r['id'])} 的进度`),
+        style: { cursor: 'pointer' } })}
       columns={[
         { title: '工单', dataIndex: 'id' },
         { title: '隐患', dataIndex: 'hazard_desc', ellipsis: true },
         { title: '等级', dataIndex: 'risk_level', width: 90 },
-        { title: '状态', dataIndex: 'status', width: 100 },
+        { title: '状态', dataIndex: 'status', width: 100,
+          render: (s: string) => STATUS_CN[s] ?? s },
+        { title: '责任人', dataIndex: 'assignee_name', width: 100,
+          render: (v: string | null) => v ?? '未派发' },
         { title: '截止', dataIndex: 'deadline', width: 170 },
       ]} />
   }
-  if ((route.action === 'overdue_stats' || route.action === 'weekly_stats') && data) {
-    return <pre style={{ whiteSpace: 'pre-wrap' }}>
-      {JSON.stringify(data, null, 2)}
-    </pre>
+  if (route.action === 'confirm_list' && Array.isArray(data)) {
+    const rows = data as Record<string, unknown>[]
+    return <>
+      <Typography.Text type="secondary">匹配到多张，点击选择：</Typography.Text>
+      {rows.map((r) => (
+        <Card key={String(r['id'])} size="small" hoverable style={{ marginBottom: 8 }}
+          onClick={() => void ask(`#${String(r['id'])} 的进度`)}>
+          <b>{String(r['id'])}</b>　{String(r['hazard_desc'] ?? '')}
+        </Card>
+      ))}
+    </>
+  }
+  if (route.action === 'overdue_stats' && data) {
+    const rows = (data as { rows?: Record<string, unknown>[] }).rows ?? []
+    return <>
+      <Alert type={rows.length ? 'warning' : 'success'} showIcon
+        message={`存量逾期未整改：${rows.length} 张`} />
+      {rows.map((r) => (
+        <div key={String(r['id'])} style={{ margin: '6px 0' }}>
+          <Tag color="volcano">{String(r['risk_level'] ?? '—')}</Tag>
+          <code>{String(r['id'])}</code>　{(String(r['deadline'] ?? '')).slice(0, 19)}
+          　{String(r['assignee_name'] ?? '未派发')}
+        </div>
+      ))}
+    </>
+  }
+  if (route.action === 'weekly_stats' && data) {
+    const st = data as Record<string, unknown>
+    return <Descriptions bordered column={2} size="small">
+      <Descriptions.Item label="检测帧">{String(st['frames'] ?? 0)}</Descriptions.Item>
+      <Descriptions.Item label="不合规帧">{String(st['bad'] ?? 0)}</Descriptions.Item>
+      <Descriptions.Item label="新增工单">{String(st['orders_total'] ?? 0)}</Descriptions.Item>
+      <Descriptions.Item label="存量逾期">{String(st['overdue_open_now'] ?? 0)}</Descriptions.Item>
+    </Descriptions>
   }
   return <Alert type="warning" showIcon
     message={route.hint || '未能理解这个问题'}
@@ -204,15 +282,17 @@ function ChatTab() {
   const [loading, setLoading] = useState(false)
   const [route, setRoute] = useState<ChatRoute | null>(null)
 
-  async function ask() {
-    if (!text.trim()) return
+  async function ask(q: string) {
     setLoading(true)
     try {
-      setRoute(await ep.queryChat(text))
+      setRoute(await ep.queryChat(q))
     } finally {
       setLoading(false)
     }
   }
+
+  // 进入页面即展示最新待办清单（与 Streamlit 版空态行为一致）
+  useEffect(() => { void ask('') }, [])
 
   return (
     <div style={{ maxWidth: 760 }}>
@@ -220,14 +300,13 @@ function ChatTab() {
         message="对话式只读查询：问工单进度、逾期统计、本周情况。绝不写入。例：3号楼消防通道被占用处理得怎么样了？" />
       <Input.Search
         value={text} onChange={(e) => setText(e.target.value)}
-        onSearch={ask} enterButton="查询" loading={loading}
-        placeholder="如：近7天有多少张未闭环工单" />
+        onSearch={(q) => void ask(q)} enterButton="查询" loading={loading}
+        placeholder="如：近7天有多少张未闭环工单 / #w_xxx 的进度 / 最近有没有逾期的" />
       <div style={{ marginTop: 16 }}>
         {route && (
           <>
-            <Tag color="blue">tier: {route.tier}</Tag>
-            <Tag>action: {route.action}</Tag>
-            <div style={{ marginTop: 12 }}>{renderChat(route)}</div>
+            <Tag color="blue">理解方式: {route.tier === 'llm' ? '本地模型' : route.tier === 'rule' ? '规则' : '人工点选'}</Tag>
+            <div style={{ marginTop: 12 }}>{renderChat(route, ask)}</div>
           </>
         )}
       </div>
@@ -236,9 +315,13 @@ function ChatTab() {
 }
 
 export default function Report() {
-  const [caps, setCaps] = useState<HazardOption[]>([])
+  const [hazardOpts, setHazardOpts] = useState<HazardOption[]>([])
+  const [enhance, setEnhance] = useState(false)
   useEffect(() => {
-    void ep.getCapabilities().then((c) => setCaps(c.hazard_options || []))
+    void ep.getCapabilities().then((c) => {
+      setHazardOpts(c.hazard_options || [])
+      setEnhance(c.enhance_available)
+    })
   }, [])
 
   return (
@@ -246,7 +329,8 @@ export default function Report() {
       <Tabs
         items={[
           { key: 'media', label: '📷 影像研判', children: <MediaTab /> },
-          { key: 'text', label: '📝 文字线索建单', children: <TextTab hazards={caps} /> },
+          { key: 'text', label: '📝 文字线索建单',
+            children: <TextTab hazards={hazardOpts} enhance={enhance} /> },
           { key: 'chat', label: '💬 对话式查询', children: <ChatTab /> },
         ]}
       />

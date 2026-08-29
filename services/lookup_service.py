@@ -44,6 +44,49 @@ def history_orders() -> list[dict]:
         return [dict(r) for r in WorkOrderDAO(conn).list_all_with_risk()]
 
 
+def chat_execute(text: str) -> dict:
+    """对话式只读查询（API 用）：路由 + 按动作执行只读取数，一次返回。
+
+    与 ui/page_upload Tab③ 的消费语义逐条对齐（detail 卡/清单/逾期/周统计）；
+    空文本返回最新待办清单。绝不产生写操作（读写硬隔离）。
+    """
+    import dataclasses
+    from datetime import date, timedelta
+
+    from services.intent_router import IntentRouter
+    from services.report_service import WeeklyReportService
+
+    with scoped() as conn:
+        router = IntentRouter(conn)
+        if not (text or "").strip():
+            # 空文本 = 最新待办清单（与 Streamlit 版空态一致）
+            rows = router.list_view(limit=8)
+            return {"action": "order_list", "tier": "rule", "status": None,
+                    "days": 7, "order_id": None, "hint": "最新待办工单",
+                    "candidates": [r["id"] for r in rows], "data": rows}
+        route = router.route(text)
+        data = None
+        action = route.action
+        if action == "order_detail" and route.order_id:
+            data = router.detail_view(route.order_id)
+        elif action == "order_list":
+            statuses = (route.status,) if route.status else                 ("open", "rejected", "submitted")
+            data = router.list_view(statuses=statuses, limit=8)
+        elif action == "confirm_list":
+            data = [router.detail_view(cid) or {"id": cid}
+                    for cid in route.candidates[:8]]
+        elif action == "overdue_stats":
+            from services.dispatch_service import _now_str
+            data = {"rows": router.overdue_rows(_now_str())}
+        elif action == "weekly_stats":
+            end = date.today().isoformat()
+            start = (date.today() - timedelta(days=route.days - 1)).isoformat()
+            data = WeeklyReportService(conn).gather(start, end)
+    out = dataclasses.asdict(route)
+    out["data"] = data
+    return out
+
+
 def task_detection_detail(task_id: str) -> dict:
     """单任务检测/合规明细（历史列表「查看检测数据」+ API 任务详情）。
 

@@ -41,7 +41,7 @@ class EnhanceIn(BaseModel):
 
 
 class ChatQueryIn(BaseModel):
-    text: str = Field(min_length=1, max_length=500)
+    text: str = Field(default="", max_length=500)
 
 
 class OverrideIn(BaseModel):

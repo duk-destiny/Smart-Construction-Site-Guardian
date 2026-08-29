@@ -5,7 +5,6 @@
 """
 from __future__ import annotations
 
-import dataclasses
 import json
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
@@ -111,9 +110,8 @@ def enhance_extract(body: EnhanceIn,
 @router.post("/query-chat")
 def query_chat(body: ChatQueryIn,
                user: CurrentUser = Depends(_capabilities)) -> dict:
-    """对话式只读查询（intent_router）：返回路由结论与数据，绝不写入。"""
-    res = lookup_service.route(body.text)
-    return dataclasses.asdict(res)
+    """对话式只读查询：路由 + 按动作执行只读取数（空文本=最新待办清单）。"""
+    return lookup_service.chat_execute(body.text)
 
 
 @router.get("")
