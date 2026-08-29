@@ -197,7 +197,10 @@ class _FakeEngine:
     def draw(self, frame, dets):
         return frame
 
-page._get_engine = lambda: _FakeEngine()
+# Phase 0 起页面经 services.realtime_entry.get_engine() 取引擎——
+# 桩点必须打在真实缝隙上；CI 无 ONNX 权重，真实引擎会走"未加载"分支
+import services.realtime_entry as _rt
+_rt.get_engine = lambda: _FakeEngine()
 page.render_realtime()
 """
     at = _run_script(tmp_path, source, session={"role": "safety"})
