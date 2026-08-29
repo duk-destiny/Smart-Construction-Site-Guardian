@@ -9,9 +9,15 @@
 - Python 环境：项目根 `.venv313`（含 playwright、uvicorn、fastapi 等，见 requirements.txt）
 - 浏览器：`playwright install chromium`（首次需执行）
 - 前端 dev server 与临时库后端（见下方启动顺序）
-- 仓库根存在 `docs/说明文档.pdf`（Phase 5 知识库导入用）
-- 临时库存在种子账号（由 `scripts/seed_demo.py` 初始化逻辑提供）：
+- 仓库根存在 `docs/说明文档.pdf`（Phase 5 知识库导入用）；该文件被 .gitignore 排除，
+  **他机运行需自备任意合规 PDF 放到该路径**
+- Phase 4 的证据缩略图断言依赖 `data/alarms/` 下运行期产生的告警图（同样不入库）；
+  他机首跑时该依赖由 Phase 4 自身流程（告警夹具写库 + 转工单）产生数据满足，无需预置
+- 临时库存在种子账号（由 `launcher.py` 启动时经后端自举（`api.main` lifespan →
+  `core/bootstrap.py`）对空库自动幂等补种，无需手动执行任何脚本）：
   `admin/admin123`、`lisi/demo1234`、`safety/demo1234`
+- 验证形态声明：本套件基于 **5173 dev server** 验证，不覆盖生产托管形态（FastAPI 8000
+  直接托管 dist）。发版前建议 `npm run build` 后用 `launcher.py` 起 8000 对登录页做一次冒烟
 
 ## 启动顺序（3 个终端）
 
