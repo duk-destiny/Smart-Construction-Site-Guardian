@@ -19,7 +19,7 @@ from dataclasses import dataclass, field
 from dao.models import UserDAO, WorkOrderDAO
 
 # 状态词 → 库内枚举
-# 正则化状态词表( 在中文边界不可靠,改包含式正则);未/没 系优先于 已 系
+# 正则化状态词表(\b 在中文边界不可靠,改包含式正则);未/没 系优先于 已 系
 _STATUS_RES: list[tuple[str, str]] = [
     (r"未闭环|没闭环|还没.{0,3}闭环|未销项|没销项", "open"),
     (r"整改中|待整改|未处理|在办", "open"),
