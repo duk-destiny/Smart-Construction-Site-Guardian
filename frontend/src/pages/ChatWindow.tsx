@@ -26,6 +26,7 @@ import { renderChat } from '../components/ChatCards'
 import CapabilityModal, { capabilityFor } from '../components/CapabilityModal'
 import type { CapabilityInfo } from '../components/CapabilityModal'
 import PageHeader from '../components/PageHeader'
+import { activateOnKey } from '../shared/keyboard'
 
 const { RangePicker } = DatePicker
 
@@ -292,7 +293,8 @@ export default function ChatWindow() {
             {sessions.map((s) => {
               const on = s.id === activeId
               return (
-                <div key={s.id}
+                <div key={s.id} role="button" tabIndex={0}
+                  onKeyDown={activateOnKey}
                   onClick={() => (managing
                     ? setSelected((prev) => {
                         const nx = new Set(prev)
@@ -325,16 +327,22 @@ export default function ChatWindow() {
                       position: 'absolute', top: 8, right: 8, display: 'flex', gap: 4,
                       opacity: on ? 1 : 0, transition: 'opacity 0.15s',
                     }}>
-                      <span title="改名" style={{ cursor: 'pointer' }}
+                      <span title="改名" role="button" tabIndex={0}
+                        onKeyDown={activateOnKey}
+                        style={{ cursor: 'pointer' }}
                         onClick={(e) => { e.stopPropagation(); setRenaming(s); setRenameVal(s.title || '') }}>
                         <EditOutlined />
                       </span>
-                      <span title={s.archived ? '移出归档' : '归档'} style={{ cursor: 'pointer' }}
+                      <span title={s.archived ? '移出归档' : '归档'} role="button" tabIndex={0}
+                        onKeyDown={activateOnKey}
+                        style={{ cursor: 'pointer' }}
                         onClick={(e) => { e.stopPropagation(); patchArchive(s.id, !s.archived) }}>
                         <FolderOpenOutlined />
                       </span>
                       <Popconfirm title="删除该会话？不可恢复" onConfirm={() => removeSession(s.id)}>
-                        <span title="删除" style={{ cursor: 'pointer', color: 'var(--accent-primary)' }}
+                        <span title="删除" role="button" tabIndex={0}
+                          onKeyDown={activateOnKey}
+                          style={{ cursor: 'pointer', color: 'var(--accent-primary)' }}
                           onClick={(e) => e.stopPropagation()}>
                           <DeleteOutlined />
                         </span>
@@ -428,7 +436,9 @@ export default function ChatWindow() {
                     : <div style={{ whiteSpace: 'pre-wrap', fontSize: 13, color: 'rgba(var(--fg-rgb),0.88)', lineHeight: 1.7 }}>
                       {m.text}
                       {m.role === 'assistant' && m.text && (
-                        <span style={{ marginLeft: 10, cursor: 'pointer', opacity: 0.6 }}
+                        <span role="button" tabIndex={0}
+                          onKeyDown={activateOnKey}
+                          style={{ marginLeft: 10, cursor: 'pointer', opacity: 0.6 }}
                           title="朗读" onClick={() => void speak(m.text || '')}>
                           <SoundOutlined />
                         </span>

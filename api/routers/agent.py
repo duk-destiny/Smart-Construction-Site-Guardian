@@ -17,6 +17,7 @@ import os
 
 from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
 from fastapi.responses import JSONResponse, Response
+from starlette.concurrency import run_in_threadpool
 
 from api.deps import CurrentUser, get_current_user
 from api.schemas import (AgentChatIn, AgentConfirmIn, SessionCreateIn,
@@ -284,11 +285,17 @@ async def upload_attachment(file: UploadFile = File(...),
     if not ok:
         raise HTTPException(status_code=400, detail=err)
     save_dir = data_path("uploads", "chat")
-    os.makedirs(save_dir, exist_ok=True)
     name = sanitize_filename(file.filename or "attachment", fallback="attachment")
-    path = os.path.join(save_dir, f"{uuid.uuid4().hex[:8]}_{name}")
-    with open(path, "wb") as f:
-        f.write(data)
+
+    def _save() -> str:
+        # 阻塞写盘挪出事件循环（S7493）：async 端点内不得直接同步 open
+        os.makedirs(save_dir, exist_ok=True)
+        path = os.path.join(save_dir, f"{uuid.uuid4().hex[:8]}_{name}")
+        with open(path, "wb") as f:
+            f.write(data)
+        return path
+
+    path = await run_in_threadpool(_save)
     return {"path": to_rel(path)}
 
 

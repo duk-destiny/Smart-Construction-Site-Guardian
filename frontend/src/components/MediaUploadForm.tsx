@@ -9,6 +9,7 @@ import { motion as Motion } from 'framer-motion'
 import { InboxOutlined } from '@ant-design/icons'
 import { useNavigate } from 'react-router-dom'
 import * as ep from '../api/endpoints'
+import { activateOnKey } from '../shared/keyboard'
 
 const SCENES = [
   { value: 'hot_work', label: '动火作业安全' },
@@ -69,13 +70,15 @@ export default function MediaUploadForm() {
             <p className="ant-upload-text">点击或拖拽上传取证照片 / 视频</p>
           </Upload.Dragger>
         </Form.Item>
-        <div style={{
-          display: 'flex', alignItems: 'center', gap: 12, marginBottom: 20,
-          padding: '12px 16px', borderRadius: 10,
-          background: autoRun ? 'rgba(0,212,170,0.06)' : 'rgba(var(--fg-rgb),0.03)',
-          border: `1px solid ${autoRun ? 'rgba(0,212,170,0.15)' : 'rgba(var(--fg-rgb),0.06)'}`,
-          cursor: 'pointer', transition: 'all 0.2s',
-        }} onClick={() => setAutoRun(!autoRun)}>
+        <div role="switch" aria-checked={autoRun} tabIndex={0}
+          onKeyDown={activateOnKey}
+          style={{
+            display: 'flex', alignItems: 'center', gap: 12, marginBottom: 20,
+            padding: '12px 16px', borderRadius: 10,
+            background: autoRun ? 'rgba(0,212,170,0.06)' : 'rgba(var(--fg-rgb),0.03)',
+            border: `1px solid ${autoRun ? 'rgba(0,212,170,0.15)' : 'rgba(var(--fg-rgb),0.06)'}`,
+            cursor: 'pointer', transition: 'all 0.2s',
+          }} onClick={() => setAutoRun(!autoRun)}>
           <div style={{
             width: 10, height: 10, borderRadius: 5,
             background: autoRun ? '#00d4aa' : 'rgba(var(--fg-rgb),0.2)',

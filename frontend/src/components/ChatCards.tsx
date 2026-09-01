@@ -10,6 +10,7 @@ import {
 } from 'antd'
 import * as ep from '../api/endpoints'
 import type { AgentChatCognitive, AgentChatReply, AgentRunProgress } from '../api/types'
+import { activateOnKey } from '../shared/keyboard'
 
 export const STATUS_CN: Record<string, string> = {
   open: '待整改', rejected: '驳回重改', submitted: '待验收', closed: '已销项',
@@ -270,11 +271,13 @@ export function renderChat(route: AgentChatReply, ask: (t: string) => void) {
     return <>
       <Typography.Text type="secondary">匹配到多张，点击选择：</Typography.Text>
       {rows.map((r) => (
-        <div key={String(r['id'])} style={{
-          padding: '10px 14px', marginBottom: 8, borderRadius: 10,
-          background: 'rgba(var(--fg-rgb),0.03)', border: '1px solid rgba(var(--fg-rgb),0.06)',
-          cursor: 'pointer', transition: 'all 0.2s',
-        }}
+        <div key={String(r['id'])} role="button" tabIndex={0}
+          onKeyDown={activateOnKey}
+          style={{
+            padding: '10px 14px', marginBottom: 8, borderRadius: 10,
+            background: 'rgba(var(--fg-rgb),0.03)', border: '1px solid rgba(var(--fg-rgb),0.06)',
+            cursor: 'pointer', transition: 'all 0.2s',
+          }}
           onClick={() => void ask(`#${String(r['id'])} 的进度`)}>
           <b style={{ color: 'var(--text-strong)' }}>{String(r['id'])}</b>
           <span style={{ color: 'rgba(var(--fg-rgb),0.5)', marginLeft: 12 }}>

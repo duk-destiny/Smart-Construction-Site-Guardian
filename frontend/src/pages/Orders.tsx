@@ -8,6 +8,7 @@ import dayjs from 'dayjs'
 import * as ep from '../api/endpoints'
 import { downloadFile } from '../api/client'
 import { mediaUrl } from '../shared/media'
+import { activateOnKey } from '../shared/keyboard'
 import type { DispatchPanel, OrderRow } from '../api/types'
 import OrderAskDrawer from '../components/OrderAskDrawer'
 import { OrderStatusTag, RiskTag } from '../components/Tags'
@@ -304,7 +305,8 @@ export default function Orders() {
       <div style={{ display: 'flex', gap: 24 }}>
         <div style={{ width: 160, flexShrink: 0 }}>
           {TAB_ITEMS.map((t) => (
-            <div key={t.key}
+            <div key={t.key} role="button" tabIndex={0}
+              onKeyDown={activateOnKey}
               onClick={() => setActiveTab(t.key)}
               style={{
                 padding: '12px 16px', marginBottom: 4, borderRadius: 10,
