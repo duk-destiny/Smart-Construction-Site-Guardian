@@ -139,3 +139,4 @@ tests/e2e/phase2_ids.txt
 演示视频.mp4
 data/e2e_tmp/
 docs/*.md
+!docs/0*.md
