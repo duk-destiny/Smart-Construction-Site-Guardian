@@ -6,25 +6,53 @@
   --bg-surface: #111827;
   --bg-elevated: #1a2235;
   --border-subtle: rgba(255, 255, 255, 0.06);
-  --border-glow: rgba(200, 16, 46, 0.3);
+  --accent-primary: #c8102e;
+  --accent-primary-deep: #9b0a22;
+  --accent-primary-rgb: 200, 16, 46;
+  --border-glow: rgba(var(--accent-primary-rgb), 0.3);
   --text-primary: #e5e7eb;
   --text-secondary: #9ca3af;
   --text-muted: #6b7280;
-  --accent-red: #c8102e;
-  --accent-red-glow: rgba(200, 16, 46, 0.4);
+  --accent-red: var(--accent-primary);
+  --accent-red-glow: rgba(var(--accent-primary-rgb), 0.4);
   --accent-cyan: #00d4aa;
   --accent-cyan-glow: rgba(0, 212, 170, 0.3);
   --accent-amber: #f59e0b;
   --accent-amber-glow: rgba(245, 158, 11, 0.3);
   --glass-bg: rgba(17, 24, 39, 0.7);
-  --glass-border: rgba(255, 255, 255, 0.08);
+  --glass-border: rgba(var(--fg-rgb), 0.08);
   --glass-blur: 20px;
+  /* 前景叠加基色：暗色=白色叠加，亮色=深墨叠加（组件内联样式统一走 var） */
+  --fg-rgb: 255, 255, 255;
+  --text-strong: #ffffff;
+  --topbar-bg: rgba(7, 11, 20, 0.8);
+  --dock-bg: rgba(10, 14, 26, 0.85);
+  --auth-bg: radial-gradient(ellipse at 30% 50%, #1a0a10 0%, #070b14 50%, #0a0e1a 100%);
   --font-mono: 'JetBrains Mono', 'Fira Code', monospace;
   --font-sans: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
   --radius-sm: 8px;
   --radius-md: 12px;
   --radius-lg: 16px;
   --radius-xl: 24px;
+}
+
+/* ---------- 亮色主题（v2.2）：data-mode='light' 时整组变量翻转 ---------- */
+[data-mode='light'] {
+  --fg-rgb: 15, 23, 42;
+  --text-strong: #0f172a;
+  --bg-deep: #eef1f6;
+  --bg-base: #f4f6fa;
+  --bg-surface: #ffffff;
+  --bg-elevated: #ffffff;
+  --border-subtle: rgba(15, 23, 42, 0.1);
+  --glass-bg: rgba(255, 255, 255, 0.85);
+  --glass-border: rgba(15, 23, 42, 0.1);
+  --text-primary: #1f2937;
+  --text-secondary: #4b5563;
+  --text-muted: #6b7280;
+  --topbar-bg: rgba(255, 255, 255, 0.85);
+  --dock-bg: rgba(255, 255, 255, 0.9);
+  --auth-bg: radial-gradient(ellipse at 30% 50%, #e8edf8 0%, #f4f6fa 50%, #eef1f6 100%);
 }
 
 * { box-sizing: border-box; }

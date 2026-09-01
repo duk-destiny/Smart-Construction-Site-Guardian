@@ -1,9 +1,13 @@
-"""AI 提取预填服务（v0.6 二期a → v0.8 多 Provider 升级）。
+"""AI 提取预填服务（v0.6 二期a → v0.8 多 Provider → v2.1 统一入口）。
 
-Provider 链（v0.8）：`enhance.providers` 列表，**链序即降级序**，每项
-{name, type(cloud|local), api_base, api_key, model, timeout_sec}；全部失败退手填表单。
-向后兼容：`providers` 缺省时由 legacy `provider`(auto/cloud/local) + `cloud`
-单槽合成等价链（cloud→local），老配置零破坏。
+Provider 链（v0.8）：链序即降级序，每项 {name, type(cloud|local),
+api_base, api_key, model, timeout_sec}；全部失败退手填表单。
+v2.1（云端优先）：provider 链已迁入 `llm.providers`（统一 LLM 入口单一配置源），
+旧 `enhance.provider/cloud/providers` 键已自配置文件删除；本模块的历史回退双读
+（`_load_providers`）仅兼容未迁移的旧配置文件，下一版本移除。
+云端调用不再走裸 urllib，改由 `core/chat_client.py::ChatClient` 提供。
+本模块保留白名单校验与 `total_deadline_sec` 总预算语义。
+`check_provider` 连通性自检仍用最小 HTTP 探活（不在降级链内，§10 明确保留）。
 
 铁律不变：输出**仅作表单预填草稿**，人工确认后才建单；风险定级仍由
 compliance.severity 查表完成——LLM 全程不碰判定路径（Q3/Q6）。
@@ -17,6 +21,7 @@ import time
 import urllib.error
 import urllib.request
 
+from core.chat_client import get_chat_client
 from core.config import ConfigLoader
 
 
@@ -28,12 +33,29 @@ def _whitelist() -> tuple[set[str], list[str]]:
     return keys, scenes
 
 
+def _load_providers() -> dict:
+    """过渡双读（单一语义）：provider 链先读统一的 `llm.providers`，
+    无有效条目时回退 `enhance` 旧键；M1 完成后删除回退分支。"""
+    try:
+        cfg = dict(ConfigLoader().get("enhance") or {})
+    except Exception:  # noqa: BLE001 配置缺失=纯手填模式
+        cfg = {}
+    try:
+        raw = (ConfigLoader().get("llm") or {}).get("providers")
+    except Exception:  # noqa: BLE001
+        raw = None
+    if isinstance(raw, list) and raw and EnhanceEngine._normalize(
+            {"providers": raw}):
+        cfg["providers"] = raw
+    return cfg
+
+
 class EnhanceEngine:
     """多 Provider 预填提取器：{hazard_key, scene_id, description, location}。"""
 
     def __init__(self, provider: str | None = None) -> None:
         try:
-            cfg = ConfigLoader().get("enhance") or {}
+            cfg = _load_providers()
         except Exception:  # noqa: BLE001 配置缺失=纯手填模式
             cfg = {}
         cfg = dict(cfg)
@@ -123,46 +145,32 @@ class EnhanceEngine:
                 continue
         return None
 
-    # ---------- 通道调用 ----------
+    # ---------- 通道调用（v2.1：裸 urllib 云端退役，改经统一 ChatClient）----------
     def _chat_cloud(self, p: dict, system: str, user: str,
                     timeout: float | None = None) -> dict | None:
-        body = {
-            "model": p["model"],
-            "messages": [{"role": "system", "content": system},
-                         {"role": "user", "content": user}],
-            "temperature": 0.2,
-        }
-        try:
-            req = urllib.request.Request(
-                f"{p['api_base']}/chat/completions",
-                data=json.dumps(body).encode("utf-8"),
-                headers={"Content-Type": "application/json",
-                         "Authorization": f"Bearer {p['api_key']}"},
-                method="POST")
-            with urllib.request.urlopen(
-                    req, timeout=timeout or p["timeout_sec"]) as resp:
-                data = json.loads(resp.read().decode("utf-8"))
-            raw = (data["choices"][0]["message"].get("content") or "").strip()
-            s, e = raw.find("{"), raw.rfind("}")
-            if s == -1 or e <= s:
-                self.last_error = f"[{p['name']}] 云端输出无 JSON"
-                return None
-            obj = json.loads(raw[s:e + 1])
-            return obj if isinstance(obj, dict) else None
-        except Exception as exc:  # noqa: BLE001 单家失败→降级下一档
-            self.last_error = f"[{p['name']}] {type(exc).__name__}: {exc}"
-            return None
+        """云端档：经 ChatClient（openai SDK）显式指定本 provider，
+        降级由 extract_hazard 链控制（方法名/签名保留，测试缝不变）。"""
+        result = get_chat_client().chat(
+            system, user, json_schema={"type": "object"},
+            max_tokens=1024,
+            total_deadline_sec=float(timeout or p["timeout_sec"]),
+            provider=p["name"])
+        if result.status != "failed" and isinstance(result.content, dict):
+            return result.content
+        self.last_error = (f"[{p['name']}] {result.error or '云端输出无 JSON'}")
+        return None
 
     def _chat_local(self, p: dict, system: str, user: str) -> dict | None:
-        try:
-            from core.llm_engine import LlmEngine
-            out = LlmEngine(model=p["model"] or None).ask_json(f"{system}\n{user}")
-            if out is None:
-                self.last_error = f"[{p['name']}] local 未返回 JSON"
-            return out
-        except Exception as exc:  # noqa: BLE001
-            self.last_error = f"[{p['name']}] {type(exc).__name__}: {exc}"
-            return None
+        """本地档：经 ChatClient 委托 LlmEngine（方法名/签名保留）。"""
+        result = get_chat_client().chat(
+            system, user, json_schema={"type": "object"},
+            max_tokens=1024,
+            total_deadline_sec=float(p["timeout_sec"]),
+            provider=p["name"])
+        if result.status != "failed" and isinstance(result.content, dict):
+            return result.content
+        self.last_error = (f"[{p['name']}] {result.error or 'local 未返回 JSON'}")
+        return None
 
     def _call(self, p: dict, system: str, user: str,
               timeout: float | None = None) -> dict | None:
@@ -227,40 +235,25 @@ class EnhanceEngine:
     # ---------- 通用单轮 chat（Agent 测试场按 base 对比润色用）----------
     def chat(self, provider_name: str, system: str, user: str,
              num_predict: int | None = None) -> str | None:
-        """指定 provider 的通用单轮对话，返回文本或 None（last_error 留因）。"""
+        """指定 provider 的通用单轮对话（经统一 ChatClient），
+        返回文本或 None（last_error 留因）。"""
         p = next((x for x in self.providers if x["name"] == provider_name), None)
         if p is None:
             self.last_error = f"未知 provider: {provider_name}"
             return None
-        if p["type"] == "local":
-            try:
-                from core.llm_engine import LlmEngine
-                return LlmEngine(model=p["model"] or None).chat(
-                    system, user, num_predict)
-            except Exception as exc:  # noqa: BLE001
-                self.last_error = f"[{p['name']}] {type(exc).__name__}: {exc}"
-                return None
-        body: dict = {
-            "model": p["model"],
-            "messages": [{"role": "system", "content": system},
-                         {"role": "user", "content": user}],
-            "temperature": 0.3,
-        }
-        if num_predict:
-            body["max_tokens"] = int(num_predict)
-        try:
-            req = urllib.request.Request(
-                f"{p['api_base']}/chat/completions",
-                data=json.dumps(body).encode("utf-8"),
-                headers={"Content-Type": "application/json",
-                         "Authorization": f"Bearer {p['api_key']}"},
-                method="POST")
-            with urllib.request.urlopen(req, timeout=p["timeout_sec"]) as resp:
-                data = json.loads(resp.read().decode("utf-8"))
-            return (data["choices"][0]["message"].get("content") or "").strip() or None
-        except Exception as exc:  # noqa: BLE001
-            self.last_error = f"[{p['name']}] {type(exc).__name__}: {exc}"
+        result = get_chat_client().chat(
+            system, user,
+            max_tokens=int(num_predict or 1024),
+            total_deadline_sec=float(p["timeout_sec"]),
+            provider=provider_name)
+        if result.status == "failed":
+            self.last_error = (f"[{provider_name}] "
+                               f"{result.error or '调用失败'}")
             return None
+        if not isinstance(result.content, str):
+            self.last_error = f"[{provider_name}] 非文本输出"
+            return None
+        return result.content.strip() or None
 
     # ---------- 通道连通性自检（v0.8）----------
     def check_provider(self, p: dict) -> dict:

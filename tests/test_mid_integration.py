@@ -1,17 +1,17 @@
 """Task 12.5 核心链路中期集成检查（Vision→Rule→Fusion）。
 
 说明：YOLO ONNX 权重尚未就绪，本检查用合成视觉输出（detections）驱动
-真实 RuleAgent + 真实 FusionAgent，验证三段链路可达、类型正确、不抛异常。
-权重就绪后，将 vision_out 替换为 VisionAgent().run(...) 的实跑结果即可。
+真实 RuleStage + 真实 FusionStage，验证三段链路可达、类型正确、不抛异常。
+权重就绪后，将 vision_out 替换为 VisionStage().run(...) 的实跑结果即可。
 """
 import time
 
 import pytest
 from fpdf import FPDF
 
-from agents.base import AgentMessage
-from agents.fusion_agent import FusionAgent
-from agents.rule_agent import RuleAgent
+from pipeline.base import StageMessage
+from pipeline.fusion import FusionStage
+from pipeline.rule import RuleStage
 from core.rag_engine import RagEngine
 from tests.cjk_font import cjk_font_path
 
@@ -51,13 +51,13 @@ def ready_rag(tmp_path):
 
 def test_mid_pipeline_vision_to_fusion(ready_rag, tmp_path):
     """核心三段链路：合成视觉 → Rule → Fusion，断言全链路可达。"""
-    # 1) 合成视觉输出（YOLO 就绪后替换为 VisionAgent().run(...)）
+    # 1) 合成视觉输出（YOLO 就绪后替换为 VisionStage().run(...)）
     detections = [{"cls": "spark", "conf": 0.92}]
     violation_descs = [d["cls"] for d in detections]
 
     # 2) 规范 Agent（真实 RAG）
-    rule = RuleAgent(rag=ready_rag)
-    rmsg = rule.run(AgentMessage(
+    rule = RuleStage(rag=ready_rag)
+    rmsg = rule.run(StageMessage(
         task_id="mid_check", agent="rule", status="pending",
         payload={
             "permit_info": {"watcher": "", "extinguisher": "无", "fire_blanket": "", "approval": "否"},
@@ -69,8 +69,8 @@ def test_mid_pipeline_vision_to_fusion(ready_rag, tmp_path):
     print(f"[中期检查] 合规结果: {len(compliance)} 项 -> {compliance}")
 
     # 3) 融合定级
-    fusion = FusionAgent()
-    fmsg = fusion.run(AgentMessage(
+    fusion = FusionStage()
+    fmsg = fusion.run(StageMessage(
         task_id="mid_check", agent="fusion", status="pending",
         payload={"detections": detections, "compliance": compliance},
         error=None, cost_ms=0))
@@ -90,13 +90,13 @@ def test_mid_pipeline_performance(ready_rag):
     """三段链路耗时检查（视觉占位，RAG+融合应 < 2s）。"""
     t0 = time.perf_counter()
     detections = [{"cls": "spark", "conf": 0.92}]
-    rule = RuleAgent(rag=ready_rag)
-    rmsg = rule.run(AgentMessage(
+    rule = RuleStage(rag=ready_rag)
+    rmsg = rule.run(StageMessage(
         task_id="perf", agent="rule", status="pending",
         payload={"permit_info": {"watcher": "张三"}, "violation_descs": ["spark"]},
         error=None, cost_ms=0))
-    fusion = FusionAgent()
-    fmsg = fusion.run(AgentMessage(
+    fusion = FusionStage()
+    fmsg = fusion.run(StageMessage(
         task_id="perf", agent="fusion", status="pending",
         payload={"detections": detections, "compliance": rmsg.payload["compliance"]},
         error=None, cost_ms=0))

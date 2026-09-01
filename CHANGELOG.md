@@ -6,6 +6,92 @@
 
 ---
 
+## [v2.2] — 2026-08-30
+
+### 🚀 AI 助手对话窗口 + 影像研判双窗口（前后端）
+
+**核心特性**
+- **`/chat` AI 助手窗口**（替代原统一上报的文字线索/对话查询，类豆包交互）：
+  会话管理全量（列表/新建/改名/归档/删除 + 管理模式批量操作，`chat_sessions`
+  增 `archived` 列自动迁移）；消息气泡流复用双层路由（快路径五分支卡片 +
+  认知层 CognitiveRun 轮询/确认卡）；语音输入（MediaRecorder → 既有 ASR
+  端点回填输入框）与语音朗读（新增 `tts.*` 云端 TTS 能力，OpenAI 兼容
+  /audio/speech）；**能力检测式降级**：语音/合成未配置点击弹
+  「模型暂未拥有该能力」提示（`GET /api/agent/model-info` 数据源）；
+- **工具抽屉**：📝文字线索建单卡（AI 预填 + 白名单下拉）、🎬影像 AI 分析卡、
+  📊周报生成卡（PDF 下载 / 对话内解读）、⚡快捷查询 chips——按角色与能力渲染；
+- **对话附件**：`POST /api/agent/uploads`（魔数/大小校验，落
+  `data/uploads/chat/`，不建任务行）+ `AgentChatIn.attachments`；**服务端
+  强制绑定**：附件路径写 run 上下文与规划提示词，`run_video_pipeline` 的
+  video/images 参数由代码覆盖为白名单附件（LLM 编路径即拒，§5.13 附件版）；
+- **`/agents` 影像研判窗口**：原统一上报影像 Tab 升级为独立窗口（发起表单 +
+  研判结果 + 证据链一体），`/report` 统一上报页退役；
+- **工单 AI 弹窗**（责任人守护能力）：`POST /api/orders/{id}/ask`——仅携带
+  当前工单上下文 + RAG 条款，单轮 LLM 只读问答（不进认知内核、零工具调用、
+  零写入），权限服务层强制（本单责任人本人或 admin/safety）；嵌入
+  我的整改单卡片与工单台账抽屉；
+- **登录落地页**：admin/safety → `/chat`；导航改为 AI 助手/影像研判/工单闭环/
+  历史分析/实时监测(/管理端)。
+
+- **主题系统**：暗色（默认）/亮色双模式 + 四套主色预设（赤焰/沧海/翡翠/
+  紫霄），顶栏开关与色板；实现分两层——AntD token（colorPrimary/明暗算法）
+  + CSS 变量（`--accent-primary*`/`--fg-rgb`/表面与文字色），15 个组件文件
+  的内联颜色全部变量化（白色半透明叠加统一 `rgba(var(--fg-rgb), a)`，亮色
+  自动翻转为深墨叠加）；认证页/顶栏/Dock 全适配双模式；localStorage 持久
+  （`zhg_mode`/`zhg_theme`），纯前端偏好零后端状态；
+- **上下文管理与会话记忆**：规划输入升级为"近 5 轮摘要 + 本会话最近 2 轮
+  原文（截断 200 字）+ 跨会话记忆（最近 2 个其他会话要点，标注非本轮指令）"，
+  `agent.memory_enabled/memory_sessions/recent_turns` 可配；页面刷新后
+  未完结 run 自动恢复实时气泡（副作用确认卡不丢）；
+- **修复（UI 实测发现）**：`downloadFile` 双 `/api` 前缀——后端返回的
+  download_url 自带前缀、axios baseURL 再拼一次，周报 PDF/台账 Excel
+  下载 404（归一化修复）；
+- **闲聊归宿**：问候/身份/能力类输入（你好/你是谁/你能做什么等）此前
+  落认知层被"计划至少一步"契约判失败——新增规则快路径零 LLM 直答
+  （正则仅放行纯问候词串，周报/查询类不误伤），前端欢迎卡渲染；
+**工程**
+- 测试：后端 +8（会话 CRUD/跨属主 404/附件校验与注入覆盖/model-info/
+  tts 501/工单问询权限与降级/上下文记忆注入与开关），全量 387 passed；Playwright e2e 六阶段
+  适配双窗口（Phase2 重写为对话+影像双窗流程）6/6 117 断言全绿；
+  api_browser_smoke 适配工具卡建单全链路 SMOKE PASS（顺带修复 v1.0 改版
+  后未跟进的陈年选择器：登录按钮/改密标签/登出触发器/待验收页签，
+  Windows 临时目录清理竞态 ignore_cleanup_errors，e2e 夹具
+  说明文档.pdf 缺失自举，BGE 子进程冷启 stderr 可诊断化 + 握手超时 60→120s）；
+  Vitest 登录用例修复（陈年 label 断言 → placeholder/按钮现文案）；
+- 文档：README/02/03/05 双窗口口径，CHANGELOG/版本迭代同步。
+
+## [Unreleased] — 2026-08-30
+
+**工程**
+- 版本号统一收口：`api/main.py`（1.0.0→2.1.0）、`frontend/package.json`（1.0.0→2.1.0）、前端顶栏（v2.0→v2.1），对齐 CHANGELOG 当前版 v2.1；
+- 修复 Streamlit 管理端「模型版本与回滚」区块崩溃：版本排序 `int(version.lstrip('v'))` 遇 `v3-int8` 抛 ValueError 致该区块整段无法渲染（INT8 副本已注册且 `/api/admin/models` 返回正常，仅此一处展示层问题）；改取版本号前缀数字，`v3-int8` 正常参与排序与展示；
+- **下层研判链路去 Agent 化**：`agents/` 包更名 `pipeline/`（git mv 保历史），五段组件 `VisionAgent/RuleAgent/FusionAgent/ReviewAgent/ActionAgent` → `VisionStage/RuleStage/FusionStage/ReviewStage/ActionStage`（文件同名去 `_agent` 后缀），`AgentBase/AgentMessage` → `StageBase/StageMessage`——明确其为 `run_video_pipeline` 工具的内部实现单元（确定性组件，非 LLM 智能体），系统唯一顶层智能体为 `services/agent/` 认知层；React/Streamlit 页面与文案同步更名「影像智能研判」（含 e2e 脚本断言）；全部文档（02/03/08 等）口径对齐，08 附带修正 Q7 陈年"switch 回写 config.yaml"旧描述（v0.9 起唯一落 DB）；
+- 文档对齐当前状态：05 API 接口（去"与 Streamlit 平行"旧口径、实时监测去 Phase 4 标签与 Streamlit 过渡措辞、Swagger 非仅开发）、07 部署（生产建议去 v0.8 口径标注、Docker 指向 api 服务 8000 端口、上传限制去 `.streamlit/config.toml`、LLM 描述改云端优先四级降级、新增实时监测上线检查）、09 优化计划（版本号统一已完成移除；INT8 改写为"已产出并注册、复评达标后切换"口径）、01 快速开始（Docker 段改 api 服务）、04 配置（realtime 段同步）、02 架构（认知层补 mermaid 流程图与四级降级链图）、08 设计取舍 QA（新增 Q11-Q17 评审高频问答：双入口单引擎、为何不用多模态大模型看图、计划越权四层防线、数字/条款溯源、读写硬隔离、数据主权边界、周报 UI 与智能体并存——一个引擎两个入口）、06 测试与评测（补 INT8 逐类量化评测表——v0.7 实测结果此前只在 CHANGELOG/评测 JSON，未同步进评测文档）。
+
+## [v2.1] — 2026-08-29
+
+### 🚀 Agent 认知层架构改造（云端优先）
+
+**核心特性**
+- 统一 LLM 入口 `core/chat_client.py`：云端 API（openai SDK，JSON mode）→
+  本地 Ollama → 规则模板 → 人工，四级降级 + 断路器 + 墙钟预算；
+  收敛润色/复核辅助/预填/意图分类 4 处旁路。
+- 认知层 `services/agent/`：Plan-and-Execute 受限内核（计划 ≤8 步、
+  双闸预算强制收敛）、工具注册表（6 工具，副作用强制人工确认）、
+  挂起-恢复状态机（`_RUN_LOCK` 原子查再置 + 步骤幂等 + 孤儿扫描）、
+  周报剧本（键路径回溯校验 100%）。
+- `/api/agent/*` 六端点 + 双层路由（规则快路径零契约变化，
+  旧 `/tasks/query-chat` 转发薄壳标弃用）；React 前端认知分支
+  （计划步骤渲染 / 2s 进度轮询 / 确认卡 / 改计划）。
+- 视频分析：`Orchestrator mode=full|quick` + `DetectionCache`（对话场景 opt-in）。
+
+**工程**
+- 新四表 `agent_chat_runs / agent_chat_run_steps / chat_sessions /
+  chat_messages`（schema.sql 自动重放）；`PRAGMA busy_timeout`；
+- 测试 +22（降级矩阵/安全边界/挂起恢复/剧本回溯），全量 378 passed；
+- 文档叙事同步：离线优先 → 云端优先，C1 约束语义收窄；
+  `enhance` 旧 provider 键退役（统一 `llm.providers`）。
+
 ## [v1.0] — 2026-08-29
 
 ### 🎉 首个稳定版：前后端分离架构正式打版

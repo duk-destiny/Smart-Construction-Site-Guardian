@@ -195,8 +195,8 @@ class DispatchService:
                             "report_type": "alarm", "alarm_id": alarm_id},
                            ensure_ascii=False),
                 "completed", source="camera", commit=False)
-            from agents.action_agent import ActionAgent
-            notice_template = ActionAgent()._template(desc, alarm["clause"] or "",
+            from pipeline.action import ActionStage
+            notice_template = ActionStage()._template(desc, alarm["clause"] or "",
                                                      risk_level)
             requirement_line = next(
                 (line for line in notice_template.splitlines()

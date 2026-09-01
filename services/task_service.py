@@ -41,8 +41,13 @@ class TaskService:
     # 测试注入口：后台异步研判的 Orchestrator 类（None=真实实现）
     _ORCH_FACTORY = None
 
-    # 清空范围：仅业务数据；用户、审计日志、知识库与模型注册保留
+    # 清空范围：仅业务数据；用户、审计日志、知识库与模型注册保留。
+    # 删除顺序即元组顺序：按外键方向子表先行——
+    # 认知层：chat_messages → agent_chat_run_steps → agent_chat_runs → chat_sessions
     _CLEARABLE_TABLES = (
+        "chat_messages",
+        "agent_chat_run_steps",
+        "agent_chat_runs",
         "detection_records",
         "alarm_events",
         "notification_logs",
@@ -53,6 +58,7 @@ class TaskService:
         "compliances",
         "detections",
         "tasks",
+        "chat_sessions",
     )
 
     def __init__(self, conn: sqlite3.Connection) -> None:
@@ -107,7 +113,7 @@ class TaskService:
 
         def _worker() -> None:
             try:
-                from agents.orchestrator import Orchestrator
+                from pipeline.orchestrator import Orchestrator
                 cls = TaskService._ORCH_FACTORY or Orchestrator
                 # Phase 2 修复（与 Phase 1 _attach_clause_async 同型）：
                 # worker 与请求生命周期解耦——原实现捕获调用方 TaskService
@@ -202,8 +208,8 @@ class TaskService:
             TaskService._task_owners[tid] = user_id or ""
             TaskService._timestamps[tid] = time.monotonic()
         # 复用处置 Agent 的等级话术模板，保持工单文案口径一致
-        from agents.action_agent import ActionAgent
-        agent = ActionAgent()
+        from pipeline.action import ActionStage
+        agent = ActionStage()
         notice_template = agent._template(desc, "", risk_level)
         requirement_line = next(
             (line for line in notice_template.splitlines()
@@ -470,8 +476,8 @@ class TaskService:
     def save_result(self, task_id: str, agent_results: dict) -> None:
         """持久化研判全链条结果（幂等：同一 task_id 已存在则跳过）。
 
-        agent_results: {vision: AgentMessage, rule: AgentMessage,
-                        fusion: AgentMessage, action: AgentMessage}
+        agent_results: {vision: StageMessage, rule: StageMessage,
+                        fusion: StageMessage, action: StageMessage}
         """
         # 幂等判断：已有工单记录则跳过
         if self.work_orders.get_by_task(task_id) is not None:

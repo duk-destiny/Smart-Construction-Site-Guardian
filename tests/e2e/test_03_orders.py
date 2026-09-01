@@ -52,7 +52,7 @@ def main():
         page = browser.new_page(viewport={"width": 1440, "height": 900})
 
         # ===== 1. admin：工单页结构 =====
-        login(page, "admin", "Admin@E2E123", "/report")
+        login(page, "admin", "Admin@E2E123", "/chat")
         page.goto(BASE + "/orders", wait_until="networkidle")
         expect(page.get_by_text("工单闭环", exact=True).first).to_be_visible(timeout=8000)
         for label in ("台账与派发", "待验收", "逾期"):
@@ -94,7 +94,7 @@ def main():
 
         # ===== 4. admin：驳回一次（驳回重改链路）=====
         logout(page, "lisi")
-        login(page, "admin", "Admin@E2E123", "/report")
+        login(page, "admin", "Admin@E2E123", "/chat")
         page.goto(BASE + "/orders", wait_until="networkidle")
         switch_orders_tab(page, "待验收")
         rows = page.locator(".ant-table-tbody tr.ant-table-row")
@@ -122,7 +122,7 @@ def main():
 
         # ===== 6. admin：验收通过 =====
         logout(page, "lisi")
-        login(page, "admin", "Admin@E2E123", "/report")
+        login(page, "admin", "Admin@E2E123", "/chat")
         page.goto(BASE + "/orders", wait_until="networkidle")
         switch_orders_tab(page, "待验收")
         rows = page.locator(".ant-table-tbody tr.ant-table-row")

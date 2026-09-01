@@ -1,23 +1,23 @@
-"""规范 Agent（M04）：接收作业票信息与违规描述，检索规范并判定合规。
+"""规范检索段（M04）：接收作业票信息与违规描述，检索规范并判定合规。
     
 职责：
 1. 调用 RagEngine 检索相关条款
 2. 比对待测项 vs 规范要求 → 生成 compliance 列表
 3. 生成 training_tips 培训要点
 
-计时与异常兜底由 AgentBase.run 统一完成（代码规范 §4）。
+计时与异常兜底由 StageBase.run 统一完成（代码规范 §4）。
 """
 from __future__ import annotations
 
-from agents.base import AgentBase, AgentMessage
+from pipeline.base import StageBase, StageMessage
 from core.rag_engine import RagEngine
 
 # 软匹配：作业票字段值若出现以下词，视为"缺失/不合规"
 MISSING_TOKENS = {"", "无", "未", "否", "未配备", "未设置", "未填写"}
 
 
-class RuleAgent(AgentBase):
-    """规范匹配与合规判定 Agent。"""
+class RuleStage(StageBase):
+    """规范匹配与合规判定段。"""
 
     def __init__(self, rag: RagEngine | None = None):
         self._rag = rag or RagEngine()
@@ -33,7 +33,7 @@ class RuleAgent(AgentBase):
                 return r, True
         return None, False
 
-    def _execute(self, msg: AgentMessage) -> AgentMessage:
+    def _execute(self, msg: StageMessage) -> StageMessage:
         permit = msg.payload.get("permit_info", {}) or {}
         violation_descs = msg.payload.get("violation_descs", []) or []
         skip_rag = bool(msg.payload.get("skip_rag", False))
@@ -78,7 +78,7 @@ class RuleAgent(AgentBase):
             related = self._rag.query(query_text, top_k=5)
 
         # 3. 违规项匹配规范条款
-        # 视觉 Agent 已检出的违规，直接判为不合规；RAG 仅用于补充条款引用。
+        # 视觉段已检出的违规，直接判为不合规；RAG 仅用于补充条款引用。
         # 未匹配到明确条款时不默认套用第一条，交由人工复核补充依据。
         if not skip_rag:
             for vd in violation_descs:

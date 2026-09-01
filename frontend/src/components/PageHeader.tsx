@@ -22,14 +22,14 @@ export default function PageHeader({ title, subtitle, action }: {
         <h2 style={{
           fontSize: 22,
           fontWeight: 700,
-          color: '#fff',
+          color: 'var(--text-strong)',
           margin: 0,
           letterSpacing: '-0.01em',
         }}>{title}</h2>
         {subtitle && (
           <p style={{
             fontSize: 13,
-            color: 'rgba(255,255,255,0.35)',
+            color: 'rgba(var(--fg-rgb),0.35)',
             margin: '6px 0 0',
           }}>{subtitle}</p>
         )}

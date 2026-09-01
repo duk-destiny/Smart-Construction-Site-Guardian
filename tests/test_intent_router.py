@@ -135,20 +135,25 @@ def test_llm_fallback_whitelist_branch(env, monkeypatch):
 
     eng_calls = {"n": 0}
 
-    class FakeEngine:
-        def __init__(self, *a, **k):
-            pass
+    class FakeClient:
+        """v2.1 起第 2 层走统一 ChatClient——在接缝处注入，白名单语义不变。"""
 
-        def available(self):
-            return True
+        def available_provider(self):
+            return "fake"
 
-        def ask_json(self, instruction):
+        def chat(self, system, user, *, json_schema=None, max_tokens=1024,
+                 total_deadline_sec=30.0, provider=None) -> ChatResult:
             eng_calls["n"] += 1
-            if "订机票" in instruction:
-                return {"intent": "NASTY_DROP_TABLE"}     # 越白名单
-            return {"intent": "order_status", "id": "w_llmsemtic01"}
+            if "订机票" in user:
+                return ChatResult(content={"intent": "NASTY_DROP_TABLE"},
+                                  status="success")                # 越白名单
+            return ChatResult(content={"intent": "order_status",
+                                       "id": "w_llmsemtic01"},
+                              status="success")
 
-    monkeypatch.setattr(lle, "LlmEngine", FakeEngine)
+    from core.chat_client import ChatResult  # noqa: F401  供上方构造
+    monkeypatch.setattr("core.chat_client.get_chat_client",
+                        lambda: FakeClient())
 
     bad = IntentRouter(env["conn"], use_llm=True)
     # 让正则层无法命中 → 强制走 LLM 层；sample 中"样本"不带数字不触动静默
@@ -165,3 +170,40 @@ def test_llm_fallback_whitelist_branch(env, monkeypatch):
 def test_permission_negative_still_unused_here_guard():
     """占位断言：确保本文件确实引用了权限异常类型（防误删导入）。"""
     assert AuthorizationError is not None
+
+
+# ---------- 双层路由：认知路径前置识别（v2.1 §5.11，T8 实跑补） ----------
+
+def test_cognitive_weekly_generation_routes_to_playbook(env):
+    """「出一份本周安全周报」（§5.2 标准话术）→ weekly_report 认知路径。"""
+    r = IntentRouter(env["conn"], use_llm=False).route("出一份本周安全周报")
+    assert r.path == "cognitive" and r.action == "weekly_report"
+
+
+def test_weekly_stats_fetch_stays_fast(env):
+    """纯取数话术不进认知层：走 weekly_stats 规则快路径（含导出周报）。"""
+    for text in ("本周统计", "给我来一份周报", "导出周报", "近7天统计"):
+        r = IntentRouter(env["conn"], use_llm=False).route(text)
+        assert r.path == "fast", text
+        assert r.action == "weekly_stats", text
+
+
+def test_cognitive_video_analysis_routes(env):
+    r = IntentRouter(env["conn"], use_llm=False).route(
+        "帮我看看这段视频有没有违规")
+    assert r.path == "cognitive" and r.action == "video_analysis"
+
+
+def test_cognitive_root_cause_routes(env):
+    for text in ("为什么会逾期", "帮我根因分析一下近期告警"):
+        r = IntentRouter(env["conn"], use_llm=False).route(text)
+        assert r.path == "cognitive", text
+        assert r.action == "root_cause_analysis", text
+
+
+def test_knowledge_base_query_routes_cognitive(env):
+    """「帮我查询知识库」（v2.2 对话窗口实跑误路由修复）→ evidence_query 认知层。"""
+    for text in ("帮我查询知识库", "看一下知识库规范", "查一下规范要求"):
+        r = IntentRouter(env["conn"], use_llm=False).route(text)
+        assert r.path == "cognitive", text
+        assert r.action == "evidence_query", text

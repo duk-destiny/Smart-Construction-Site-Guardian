@@ -40,7 +40,7 @@ SEGMENTS = [
     ("02_upload", "当前无模型加载时，系统自动降级为Mock模式演示完整流程。"),
     ("02_upload", "填写完成后点击开始智能研判。"),
     # 3. Multi-Agent Analysis
-    ("03_agents", "进入多Agent研判页面，点击运行，五个Agent协同工作。"),
+    ("03_agents", "进入影像智能研判页面，点击运行，五段流水线协同工作。"),
     ("03b_agents_result", "感知视觉Agent识别安全装备与火情隐患。"),
     ("03b_agents_result", "安全规范Agent基于RAG知识库进行合规判定。"),
     ("03b_agents_result", "风险融合Agent综合评估风险等级。"),

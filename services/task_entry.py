@@ -115,7 +115,7 @@ def progress(task_id: str, user_id: str | None) -> dict:
 def run_sync(task_id: str, user_id: str | None, images: list[str],
              permit_info: dict, scene_id: str = "hot_work") -> dict:
     """同步研判（兼容模式）：Orchestrator 构造/执行/落库/润色/审计全在服务层。"""
-    from agents.orchestrator import Orchestrator
+    from pipeline.orchestrator import Orchestrator
     with scoped() as conn:
         svc = TaskService(conn)
         orch = Orchestrator(progress_cb=svc.update_progress, scene_id=scene_id)

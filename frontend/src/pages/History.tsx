@@ -1,13 +1,15 @@
 import { useCallback, useEffect, useState } from 'react'
-import { DatePicker, Table } from 'antd'
+import { DatePicker, Empty, Table } from 'antd'
 import dayjs, { type Dayjs } from 'dayjs'
 import * as ep from '../api/endpoints'
 import EChart from '../components/EChart'
 import PageHeader from '../components/PageHeader'
+import { useTheme } from '../theme'
 
 type Range = [Dayjs | null, Dayjs | null] | null
 
 export default function History() {
+  const { theme } = useTheme()
   const [range, setRange] = useState<Range>([
     dayjs().subtract(6, 'day'), dayjs(),
   ])
@@ -30,18 +32,18 @@ export default function History() {
   const trendOption = {
     tooltip: { trigger: 'axis' as const },
     legend: { data: ['合规率%', '不合规帧', '警告帧', '合规帧'], textStyle: { color: '#9ca3af' } },
-    grid: { left: 48, right: 24, top: 40, bottom: 32 },
+    grid: { left: 48, right: 48, top: 40, bottom: 32 },
     xAxis: {
       type: 'category' as const, data: stats.map((s) => s.day),
-      axisLine: { lineStyle: { color: 'rgba(255,255,255,0.06)' } },
+      axisLine: { lineStyle: { color: 'rgba(148,163,184,0.22)' } },
       axisLabel: { color: '#6b7280' },
     },
     yAxis: [
       {
         type: 'value' as const, name: '帧数',
         nameTextStyle: { color: '#6b7280' },
-        axisLine: { lineStyle: { color: 'rgba(255,255,255,0.06)' } },
-        splitLine: { lineStyle: { color: 'rgba(255,255,255,0.04)' } },
+        axisLine: { lineStyle: { color: 'rgba(148,163,184,0.22)' } },
+        splitLine: { lineStyle: { color: 'rgba(148,163,184,0.12)' } },
         axisLabel: { color: '#6b7280' },
       },
       {
@@ -54,6 +56,7 @@ export default function History() {
     series: [
       {
         name: '合规率%', type: 'line' as const, yAxisIndex: 1, smooth: true,
+        symbol: 'circle' as const, symbolSize: 7,
         data: stats.map((s) => {
           const total = (s.compliant || 0) + (s.warning || 0) + (s.non_compliant || 0)
           return total ? Math.round((s.compliant / total) * 1000) / 10 : 0
@@ -62,36 +65,36 @@ export default function History() {
         itemStyle: { color: '#00d4aa' },
         areaStyle: { color: 'rgba(0,212,170,0.08)' },
       },
-      { name: '不合规帧', type: 'bar' as const, stack: 'f',
-        data: stats.map((s) => s.non_compliant), itemStyle: { color: '#c8102e' } },
-      { name: '警告帧', type: 'bar' as const, stack: 'f',
+      { name: '不合规帧', type: 'bar' as const, stack: 'f', barMaxWidth: 40,
+        data: stats.map((s) => s.non_compliant), itemStyle: { color: theme.primary } },
+      { name: '警告帧', type: 'bar' as const, stack: 'f', barMaxWidth: 40,
         data: stats.map((s) => s.warning), itemStyle: { color: '#f59e0b' } },
-      { name: '合规帧', type: 'bar' as const, stack: 'f',
+      { name: '合规帧', type: 'bar' as const, stack: 'f', barMaxWidth: 40,
         data: stats.map((s) => s.compliant), itemStyle: { color: '#00d4aa' } },
     ],
   }
 
   const sevOption = {
     tooltip: {},
-    grid: { left: 48, right: 24, top: 24, bottom: 64 },
+    grid: { left: 48, right: 24, top: 24, bottom: 48 },
     xAxis: {
       type: 'category' as const,
       data: sev.map((s) => s.cls),
-      axisLabel: { rotate: 30, color: '#6b7280' },
-      axisLine: { lineStyle: { color: 'rgba(255,255,255,0.06)' } },
+      axisLabel: { color: '#6b7280', interval: 0 },
+      axisLine: { lineStyle: { color: 'rgba(148,163,184,0.22)' } },
     },
     yAxis: {
       type: 'value' as const,
       nameTextStyle: { color: '#6b7280' },
-      axisLine: { lineStyle: { color: 'rgba(255,255,255,0.06)' } },
-      splitLine: { lineStyle: { color: 'rgba(255,255,255,0.04)' } },
+      axisLine: { lineStyle: { color: 'rgba(148,163,184,0.22)' } },
+      splitLine: { lineStyle: { color: 'rgba(148,163,184,0.12)' } },
       axisLabel: { color: '#6b7280' },
     },
     series: [{
-      type: 'bar' as const, name: '命中次数',
+      type: 'bar' as const, name: '命中次数', barMaxWidth: 40,
       data: sev.map((s) => s.cnt),
       itemStyle: {
-        color: 'rgba(200,16,46,0.6)',
+        color: `rgba(${theme.rgb},0.6)`,
         borderRadius: [4, 4, 0, 0],
       },
     }],
@@ -110,30 +113,36 @@ export default function History() {
       <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
         <div style={{
           padding: 20, borderRadius: 16,
-          background: 'rgba(255,255,255,0.02)', border: '1px solid rgba(255,255,255,0.06)',
+          background: 'rgba(var(--fg-rgb),0.02)', border: '1px solid rgba(var(--fg-rgb),0.06)',
         }}>
           <div style={{
-            fontSize: 12, fontWeight: 600, color: 'rgba(255,255,255,0.3)',
+            fontSize: 12, fontWeight: 600, color: 'rgba(var(--fg-rgb),0.3)',
             textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: 16,
           }}>合规率趋势</div>
-          <EChart option={trendOption} height={300} />
+          {stats.length
+            ? <EChart option={trendOption} height={300} />
+            : <Empty image={Empty.PRESENTED_IMAGE_SIMPLE}
+              description="所选日期范围内无检测记录" style={{ padding: '32px 0' }} />}
         </div>
         <div style={{
           padding: 20, borderRadius: 16,
-          background: 'rgba(255,255,255,0.02)', border: '1px solid rgba(255,255,255,0.06)',
+          background: 'rgba(var(--fg-rgb),0.02)', border: '1px solid rgba(var(--fg-rgb),0.06)',
         }}>
           <div style={{
-            fontSize: 12, fontWeight: 600, color: 'rgba(255,255,255,0.3)',
+            fontSize: 12, fontWeight: 600, color: 'rgba(var(--fg-rgb),0.3)',
             textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: 16,
           }}>隐患类别分布</div>
-          <EChart option={sevOption} height={260} />
+          {sev.length
+            ? <EChart option={sevOption} height={260} />
+            : <Empty image={Empty.PRESENTED_IMAGE_SIMPLE}
+              description="所选日期范围内无类别命中" style={{ padding: '24px 0' }} />}
         </div>
         <div style={{
           padding: 20, borderRadius: 16,
-          background: 'rgba(255,255,255,0.02)', border: '1px solid rgba(255,255,255,0.06)',
+          background: 'rgba(var(--fg-rgb),0.02)', border: '1px solid rgba(var(--fg-rgb),0.06)',
         }}>
           <div style={{
-            fontSize: 12, fontWeight: 600, color: 'rgba(255,255,255,0.3)',
+            fontSize: 12, fontWeight: 600, color: 'rgba(var(--fg-rgb),0.3)',
             textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: 16,
           }}>任务风险记录</div>
           <Table size="small" rowKey={(r) => String(r['task_id'])} dataSource={risks}

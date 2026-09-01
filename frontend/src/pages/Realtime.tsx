@@ -97,7 +97,7 @@ function LiveView() {
     return () => { ws.close(); wsRef.current = null }
   }, [sources, sourceIdx, notification])
 
-  const borderColor = meta?.level === 'critical' ? '#c8102e'
+  const borderColor = meta?.level === 'critical' ? 'var(--accent-primary)'
     : meta?.level === 'warning' ? '#f59e0b' : '#00d4aa'
 
   return (
@@ -116,15 +116,15 @@ function LiveView() {
         <div style={{
           display: 'flex', alignItems: 'center', gap: 6,
           padding: '6px 12px', borderRadius: 8,
-          background: connected ? 'rgba(0,212,170,0.06)' : 'rgba(200,16,46,0.06)',
-          border: `1px solid ${connected ? 'rgba(0,212,170,0.15)' : 'rgba(200,16,46,0.15)'}`,
+          background: connected ? 'rgba(0,212,170,0.06)' : 'rgba(var(--accent-primary-rgb),0.06)',
+          border: `1px solid ${connected ? 'rgba(0,212,170,0.15)' : 'rgba(var(--accent-primary-rgb),0.15)'}`,
         }}>
           <div style={{
             width: 6, height: 6, borderRadius: 3,
-            background: connected ? '#00d4aa' : '#c8102e',
+            background: connected ? '#00d4aa' : 'var(--accent-primary)',
             animation: connected ? 'breathe 2s ease-in-out infinite' : 'none',
           }} />
-          <span style={{ fontSize: 12, color: 'rgba(255,255,255,0.5)' }}>
+          <span style={{ fontSize: 12, color: 'rgba(var(--fg-rgb),0.5)' }}>
             {connected ? '已连接' : '未连接'}
           </span>
         </div>
@@ -133,14 +133,14 @@ function LiveView() {
             display: 'flex', alignItems: 'center', gap: 12, marginLeft: 'auto',
           }}>
             <Tag style={{
-              background: meta.level === 'critical' ? 'rgba(200,16,46,0.15)' :
+              background: meta.level === 'critical' ? 'rgba(var(--accent-primary-rgb),0.15)' :
                 meta.level === 'warning' ? 'rgba(245,158,11,0.1)' : 'rgba(0,212,170,0.1)',
               border: 'none',
-              color: meta.level === 'critical' ? '#c8102e' :
+              color: meta.level === 'critical' ? 'var(--accent-primary)' :
                 meta.level === 'warning' ? '#f59e0b' : '#00d4aa',
               fontWeight: 600,
             }}>{meta.status}</Tag>
-            <span className="mono" style={{ fontSize: 11, color: 'rgba(255,255,255,0.3)' }}>
+            <span className="mono" style={{ fontSize: 11, color: 'rgba(var(--fg-rgb),0.3)' }}>
               #{meta.seq} · {meta.cost_ms}ms
             </span>
           </div>
@@ -152,7 +152,7 @@ function LiveView() {
         borderRadius: 16,
         overflow: 'hidden',
         background: '#000',
-        border: `2px solid ${meta ? borderColor : 'rgba(255,255,255,0.06)'}`,
+        border: `2px solid ${meta ? borderColor : 'rgba(var(--fg-rgb),0.06)'}`,
         boxShadow: meta ? `0 0 30px ${borderColor}33, 0 0 60px ${borderColor}11` : 'none',
         transition: 'border-color 0.3s, box-shadow 0.3s',
       }}>
@@ -161,7 +161,7 @@ function LiveView() {
           <div style={{
             position: 'absolute', inset: 0, display: 'flex',
             alignItems: 'center', justifyContent: 'center',
-            color: 'rgba(255,255,255,0.2)', fontSize: 14,
+            color: 'rgba(var(--fg-rgb),0.2)', fontSize: 14,
           }}>等待视频帧…</div>
         )}
 
@@ -171,13 +171,13 @@ function LiveView() {
               position: 'absolute', top: 12, left: 12,
               padding: '6px 10px', borderRadius: 8,
               background: 'rgba(0,0,0,0.6)', backdropFilter: 'blur(8px)',
-              fontSize: 11, color: 'rgba(255,255,255,0.6)',
+              fontSize: 11, color: 'rgba(var(--fg-rgb),0.6)',
               fontFamily: 'var(--font-mono)',
             }}>
               LIVE
               <span style={{
                 display: 'inline-block', width: 5, height: 5, borderRadius: 3,
-                background: '#c8102e', marginLeft: 6,
+                background: 'var(--accent-primary)', marginLeft: 6,
                 animation: 'pulse-glow 1.5s ease-in-out infinite',
               }} />
             </div>
@@ -185,7 +185,7 @@ function LiveView() {
               position: 'absolute', bottom: 12, right: 12,
               padding: '6px 10px', borderRadius: 8,
               background: 'rgba(0,0,0,0.6)', backdropFilter: 'blur(8px)',
-              fontSize: 11, color: 'rgba(255,255,255,0.4)',
+              fontSize: 11, color: 'rgba(var(--fg-rgb),0.4)',
               fontFamily: 'var(--font-mono)',
             }}>
               {dayjs().format('HH:mm:ss')}
@@ -196,11 +196,11 @@ function LiveView() {
 
       <div style={{
         marginTop: 10, display: 'flex', alignItems: 'center', gap: 12,
-        fontSize: 11, color: 'rgba(255,255,255,0.25)',
+        fontSize: 11, color: 'rgba(var(--fg-rgb),0.25)',
       }}>
         <span>红框=不合规 / 黄框=警告 / 绿框=合规</span>
         <Button size="small" type="link" onClick={() => playAlarm({ current: 0 })}
-          style={{ color: 'rgba(255,255,255,0.3)', fontSize: 11, padding: 0 }}>
+          style={{ color: 'rgba(var(--fg-rgb),0.3)', fontSize: 11, padding: 0 }}>
           试听警报
         </Button>
       </div>
@@ -245,7 +245,7 @@ function AlarmsTable() {
           render: (p: string) => p
             ? <img src={mediaUrl(p)} alt="" style={{
                 width: 72, height: 54, objectFit: 'cover', borderRadius: 6,
-                border: '1px solid rgba(255,255,255,0.06)',
+                border: '1px solid rgba(var(--fg-rgb),0.06)',
               }} />
             : <Tag>无截图</Tag> },
         { title: '状态', dataIndex: 'status', width: 100,
@@ -287,7 +287,7 @@ export default function Realtime() {
         display: 'flex', gap: 12, marginBottom: 20, flexWrap: 'wrap',
       }}>
         {[
-          { label: 'HUB', value: hubStatus?.running ? '运行中' : '未启用', color: hubStatus?.running ? '#00d4aa' : 'rgba(255,255,255,0.3)' },
+          { label: 'HUB', value: hubStatus?.running ? '运行中' : '未启用', color: hubStatus?.running ? '#00d4aa' : 'rgba(var(--fg-rgb),0.3)' },
           { label: '观看者', value: String(hubStatus?.viewers ?? 0), mono: true },
           { label: '推理帧', value: String(hubStatus?.polls ?? 0), mono: true },
           { label: '告警', value: String(hubStatus?.alarms ?? 0), mono: true },
@@ -295,12 +295,12 @@ export default function Realtime() {
         ].map((s) => (
           <div key={s.label} style={{
             padding: '12px 18px', borderRadius: 12,
-            background: 'rgba(255,255,255,0.02)',
-            border: '1px solid rgba(255,255,255,0.06)',
+            background: 'rgba(var(--fg-rgb),0.02)',
+            border: '1px solid rgba(var(--fg-rgb),0.06)',
             minWidth: 100,
           }}>
             <div style={{
-              fontSize: 10, color: 'rgba(255,255,255,0.3)',
+              fontSize: 10, color: 'rgba(var(--fg-rgb),0.3)',
               textTransform: 'uppercase', letterSpacing: '0.1em', marginBottom: 6,
             }}>{s.label}</div>
             <div className={s.mono ? 'mono' : ''} style={{

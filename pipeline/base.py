@@ -1,7 +1,7 @@
-"""Agent 基础契约：AgentMessage 与 AgentBase（代码规范 §4）。
+"""流水线段基础契约：StageMessage 与 StageBase（代码规范 §4）。
 
-所有业务 Agent 继承 AgentBase，实现 _execute(msg)->AgentMessage；
-基类统一负责计时与"异常转 failed"（防止任意 Agent 崩溃拖垮主链路，SRS 3.2.4）。
+所有流水线段继承 StageBase，实现 _execute(msg)->StageMessage；
+基类统一负责计时与"异常转 failed"（防止任意段崩溃拖垮主链路，SRS 3.2.4）。
 """
 from __future__ import annotations
 
@@ -11,8 +11,8 @@ from dataclasses import dataclass, field
 
 
 @dataclass
-class AgentMessage:
-    """Agent 间通信的标准信封（强制封装，禁止裸 dict/list 跨 Agent）。
+class StageMessage:
+    """流水线段间通信的标准信封（强制封装，禁止裸 dict/list 跨段传递）。
 
     status: pending | success | failed | degraded
     """
@@ -35,7 +35,7 @@ class AgentMessage:
         }
 
     @classmethod
-    def from_dict(cls, d: dict) -> "AgentMessage":
+    def from_dict(cls, d: dict) -> "StageMessage":
         return cls(
             task_id=d["task_id"],
             agent=d["agent"],
@@ -46,16 +46,16 @@ class AgentMessage:
         )
 
 
-class AgentBase(ABC):
-    """业务 Agent 基类。子类只实现 _execute，计时与异常兜底由基类完成。"""
+class StageBase(ABC):
+    """流水线段基类。子类只实现 _execute，计时与异常兜底由基类完成。"""
 
-    def run(self, msg: AgentMessage) -> AgentMessage:
+    def run(self, msg: StageMessage) -> StageMessage:
         """执行并计时；任何未捕获异常转为 status=failed（不向上抛）。"""
         start = time.perf_counter()
         try:
             out = self._execute(msg)
         except Exception as e:  # noqa: BLE001 - 顶层兜底，保证进程不退出
-            out = AgentMessage(
+            out = StageMessage(
                 task_id=msg.task_id,
                 agent=msg.agent,
                 status="failed",
@@ -66,6 +66,6 @@ class AgentBase(ABC):
         return out
 
     @abstractmethod
-    def _execute(self, msg: AgentMessage) -> AgentMessage:
+    def _execute(self, msg: StageMessage) -> StageMessage:
         """子类实现的核心逻辑（不含计时与异常捕获，由基类包裹）。"""
         ...

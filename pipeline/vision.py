@@ -1,13 +1,14 @@
-"""视觉 Agent（M03）：调用本地 YOLO 引擎逐帧检测，映射违规中文描述。
+"""视觉检测段（M03）：调用本地 YOLO 引擎逐帧检测，映射违规中文描述。
 
-仅本地推理、零外网（C1）；检测类别白名单由 YoloEngine 保证（C4）。
-支持按场景加载多个检测头（如 fire 头 + PPE 头），并可在场景配置中
+仅本地推理，模型推理与数据链路本地化（C1 收窄语义：不覆盖 LLM 认知通道）；检测类别白名单由 YoloEngine 保证（C4）。
+支持按场景加载多个检测头（如 fire 头 + PPE 头），并可选配检测结果缓存（DetectionCache，§5.10，默认关闭）。
 """
 from __future__ import annotations
 
+import copy
 from typing import TYPE_CHECKING
 
-from agents.base import AgentBase, AgentMessage
+from pipeline.base import StageBase, StageMessage
 from core.config import ConfigLoader
 from core.yolo_adapter import COCO_CN
 from core.yolo_engine import FIRE_CLASSES, WHITELIST_CN, YoloEngine
@@ -18,18 +19,40 @@ log = get_logger(__name__)
 SAFE_SIGNAL_CLASSES = {"helmet", "vest", "person"}
 
 if TYPE_CHECKING:
-    pass
+    from pipeline.detection_cache import DetectionCache
 
 
-class VisionAgent(AgentBase):
-    """视觉检测 Agent：输入 image_paths，输出 detections + violation_descs。
+class VisionStage(StageBase):
+    """视觉检测段：输入 image_paths，输出 detections + violation_descs。
 
     yolo 注入时（测试/复用）仅用该单引擎；否则按 scene_id 从配置构建检测头。
+    cache 默认 None=关闭（上传主链路零影响）；传入 DetectionCache 时
+    按文件内容 hash 查/写缓存，命中则跳过 YOLO 推理（§5.10）。
     """
 
-    def __init__(self, yolo: YoloEngine | None = None, scene_id: str | None = None) -> None:
+    def __init__(self, yolo: YoloEngine | None = None, scene_id: str | None = None,
+                 cache: "DetectionCache | None" = None) -> None:
         self.yolo = yolo
         self.scene_id = scene_id
+        self.cache = cache
+
+    def _infer_one(self, engines: list, path: str) -> list[dict]:
+        """单文件检测（含缓存包装）：命中直接返回，未命中跑全部引擎后回写。"""
+        if self.cache is not None:
+            key = self.cache.key_of_file(path)
+            if key is not None:
+                hit = self.cache.get(key)
+                if hit is not None:
+                    return copy.deepcopy(hit)
+        detections: list[dict] = []
+        for eng in engines:
+            try:
+                detections.extend(eng.infer(path))
+            except Exception as e:  # noqa: BLE001
+                log.warning(f"推理失败 {path}: {e}")
+        if self.cache is not None and key is not None:
+            self.cache.put(key, copy.deepcopy(detections))
+        return detections
 
     def _build_engines(self, cfg: ConfigLoader) -> list[YoloEngine]:
         """按场景配置构建检测头列表；缺权重/不可用则跳过（优雅降级）。
@@ -74,7 +97,7 @@ class VisionAgent(AgentBase):
                 log.warning(f"跳过不可用模型 {path}: {e}")
         return engines
 
-    def _execute(self, msg: AgentMessage) -> AgentMessage:
+    def _execute(self, msg: StageMessage) -> StageMessage:
         cfg = ConfigLoader()
         if self.yolo is not None:
             engines = [self.yolo]
@@ -83,12 +106,8 @@ class VisionAgent(AgentBase):
 
         paths = msg.payload.get("image_paths", []) or []
         detections: list[dict] = []
-        for eng in engines:
-            for p in paths:
-                try:
-                    detections.extend(eng.infer(p))
-                except Exception as e:  # noqa: BLE001
-                    log.warning(f"推理失败 {p}: {e}")
+        for p in paths:
+            detections.extend(self._infer_one(engines, p))
 
         # 映射可读描述：项目白名单优先，否则 COCO 中文释义，再否则原名
         for d in detections:
@@ -114,7 +133,7 @@ class VisionAgent(AgentBase):
             lim = ("本次未检出明火/烟雾等火情目标（模型仅识别 Fire/smoke 类）；"
                    "防护面罩/灭火器/易燃物需结合规范与人工核查")
 
-        return AgentMessage(
+        return StageMessage(
             task_id=msg.task_id,
             agent="vision",
             status="success",

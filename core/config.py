@@ -41,6 +41,30 @@ def _expand_env(node: Any) -> Any:
     return node
 
 
+def _load_dotenv(root: str) -> None:
+    """加载 <root>/.env（KEY=VALUE）到进程环境（v2.2 统一密钥入口）。
+
+    一个 base + 一个 key（AI_API_BASE / AI_API_KEY）供 llm/asr/tts
+    全部云端通道共用；明文密钥只落 .env（gitignore 内），不进
+    config.yaml。已存在的环境变量不覆盖；文件缺失静默跳过。
+    """
+    path = os.path.join(root, ".env")
+    if not os.path.isfile(path):
+        return
+    try:
+        with open(path, encoding="utf-8") as f:
+            for line in f:
+                line = line.strip()
+                if not line or line.startswith("#") or "=" not in line:
+                    continue
+                k, _, v = line.partition("=")
+                k, v = k.strip(), v.strip().strip('"').strip("'")
+                if k and v and not os.environ.get(k):
+                    os.environ[k] = v
+    except OSError:
+        pass  # .env 读取失败不阻断（与 ${ENV} 展开的 best-effort 同口径）
+
+
 class ConfigError(Exception):
     """配置缺失或解析失败时抛出，由调用方转为降级状态（不阻断进程）。"""
 
@@ -61,6 +85,8 @@ class ConfigLoader:
         if self._cache is None:
             if not os.path.exists(self._path):
                 raise ConfigError(f"配置文件不存在: {self._path}")
+            _load_dotenv(os.path.abspath(
+                os.path.join(self._path, os.pardir, os.pardir)))
             with open(self._path, encoding="utf-8") as f:
                 self._cache = _expand_env(yaml.safe_load(f))
             self._validate(self._cache)

@@ -1,4 +1,4 @@
-# 智护工地 · 施工安全智能体 依赖清单（离线部署，无云端 SDK）
+# 智护工地 · 施工安全智能体 依赖清单（云端优先：比赛方云端大模型为默认 LLM 通道，本地 Ollama 降级兜底）
 # 注意：实际环境为 Python 3.13，以下为验证可用的锁死版本（S8544 安全审计要求）
 streamlit==1.60.0
 onnxruntime==1.28.0
@@ -14,7 +14,9 @@ fpdf2==2.8.7
 ultralytics==8.4.112
 torch==2.6.0
 torchvision==0.21.0
-# ---- Phase 2 前后端分离：API 层（离线内网部署，无云端 SDK）----
+# ---- Phase 2 前后端分离：API 层 ----
+# ---- 认知层统一 LLM 入口（core/chat_client.py）：云端档走 openai SDK 接 OpenAI 兼容端点 ----
+openai==2.8.0
 fastapi==0.135.2
 uvicorn==0.42.0
 PyJWT==2.13.0

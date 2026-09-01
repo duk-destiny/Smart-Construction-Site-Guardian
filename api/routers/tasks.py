@@ -110,8 +110,14 @@ def enhance_extract(body: EnhanceIn,
 @router.post("/query-chat")
 def query_chat(body: ChatQueryIn,
                user: CurrentUser = Depends(_capabilities)) -> dict:
-    """对话式只读查询：路由 + 按动作执行只读取数（空文本=最新待办清单）。"""
-    return lookup_service.chat_execute(body.text)
+    """[已弃用，请改用 POST /agent/chat] 迁移期转发薄壳（§5.11 双层）。
+
+    快路径（封闭查询/空文本=最新待办清单）同步直返旧结构，一字不变；
+    认知路径（周报/根因/证据问答/视频分析，或规则无把握）返
+    `{path:"cognitive", run_id, status:"pending"}`。鉴权维持现状。
+    """
+    from api.routers.agent import dispatch_chat
+    return dispatch_chat(user.user_id, body.text)
 
 
 @router.get("")

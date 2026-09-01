@@ -22,13 +22,27 @@ infer:
   intra_op_threads: 0     # 每个ONNX会话intra-op线程上限(0=自动≈物理核/引擎数，防抢核；小模型线程宜少)
 
 llm:
-  enabled: true                       # 本地 LLM 文案润色开关（可选增强）
+  enabled: true                       # 本地 LLM 开关（云端不可用时的降级兜底通道）
   base_url: http://localhost:11434    # Ollama 本机地址，仅 localhost 通信（C1）
   model: qwen3:8b                      # 本地 LLM，断网自动降级（C2）
   think: false                        # 关 qwen3 思考（思考会吞 num_predict 致空输出；非思考模型忽略）
   num_predict: 220                    # 润色 token 上限（异步路径，不进 ≤8s 主链路）
   temperature: 0.3                    # 低温度，贴近给定信息、抑制编造
   keep_alive: "30m"                   # ollama 模型常驻时长（app 启动后台预热一次；冷启 11s→热 3s）
+  # ---- 统一 LLM 入口降级链（core/chat_client.py，云端优先）----
+  # 列表序即降级序：云端为正常态（success），命中本地及以下均记 degraded。
+  # 云端条目必须 api_base+api_key+model 齐全，缺任一即整条丢弃（宁缺毋错）；
+  # 本段缺省时回退读下方 enhance 旧键（过渡双读，M1 后删除）。
+  providers:
+    - name: cloud
+      type: cloud
+      api_base: ${AI_API_BASE}   # 统一云端通道（与 asr/tts 共用一对 env，含 /v1）
+      api_key: ${AI_API_KEY}   # 建议用环境变量注入（v0.8 支持 ${ENV} 展开）
+      model: ""           # 比赛方提供的模型名，如 gpt-4o-mini / deepseek-chat
+      timeout_sec: 20
+    - name: local         # 云端不可用时的兜底档（复用上方 base_url/model）
+      type: local
+      model: qwen3:8b
 
 # 多场景危险检测配置：每个场景 = 一组检测头 + 知识库 + 风险矩阵
 # 视觉 Agent 按场景加载 yolo_weights（可多个，含 PPE 头）；
@@ -76,9 +90,9 @@ compliance:
 
 # ================= 账号安全（v0.8）=================
 security:
-  # true=初始密码账号登录后强制改密（生产建议开启）；
-  # false=仅展示「初始密码未修改」提醒，不阻断演示流程（默认，保住演示故事线）
-  force_default_pwd_change: false
+  # true=初始密码账号登录后强制改密（v2.2 起默认强制——存量账号已在库内置标记）
+  # false=仅展示「初始密码未修改」提醒，不阻断（演示特殊需要时手动降级）
+  force_default_pwd_change: true
 
 # ================= 上传文件约束（Phase 1）=================
 # 服务端魔数校验 + 大小上限（MB）；图片类共用 max_image_mb，
@@ -133,35 +147,37 @@ asr:
   model: "whisper-1"
   timeout_sec: 30
 
+# ================= 语音合成（v2.2 对话窗口 · 可选增强 · 能力门控）=================
+# OpenAI 兼容 /audio/speech 端点。未配置时前端语音朗读按钮弹「模型暂未拥有
+# 语音合成能力」提示（能力检测式降级）。不做本地 TTS。
+tts:
+  enabled: false
+  api_base: ""        # 例 https://api.openai.com/v1
+  api_key: ""         # 建议用环境变量：${TTS_API_KEY}
+  model: "tts-1"
+  voice: "alloy"
+  timeout_sec: 30
+
+# ================= 认知层上下文与记忆（v2.2）=================
+# 会话内：规划输入拼入最近 N 轮原文（双方各截 200 字，理解"刚才那张单"类指代）；
+# 跨会话：规划时注入用户最近 K 个其他会话的要点（digest ≤120 字/条，
+# 标注"非本轮指令"，不参与工具参数）。memory_enabled=false 整体关闭记忆。
+agent:
+  memory_enabled: true
+  memory_sessions: 2      # 注入的最近其他会话数
+  recent_turns: 2         # 会话内拼入规划上下文的最近轮数
+
 # ================= AI 提取预填（v0.6 二期a · v0.8 多 Provider 升级）=================
 # 自由文本 → 四字段草稿预填（hazard_key/scene/description/location）。
-# v0.8：providers 列表即降级链序（自上而下首中即用，local 条目走本地 Ollama）；
+# 云端优先（v2.1）：provider 链已迁入上方 llm.providers（统一 LLM 入口单一配置源）；
+# 下方 provider/cloud 旧键仅作过渡期回退双读（llm.providers 缺省且无有效条目时才生效）。
 # total_deadline_sec 为全链总预算，防多家慢超时叠加。每家输出均过白名单，越界即弃试下一家。
-# 向后兼容：providers 缺省时由下方 provider/cloud 单槽合成等价链（cloud→local）。
 # 输出仅作预填草稿，人工确认后才建单；hazard_key 越白名单即弃。
 enhance:
-  provider: auto
   total_deadline_sec: 30
-  cloud:
-    api_base: ""        # OpenAI 兼容端点,如 https://api.openai.com/v1
-    api_key: ""         # 建议用环境变量：${ENHANCE_API_KEY}（v0.8 支持 ${ENV} 展开）
-    model: "gpt-4o-mini"
-    timeout_sec: 20
-  # 多 base 接入示例（启用后优先生效，覆盖上方单槽）：
-  # providers:
-  #   - name: deepseek
-  #     api_base: https://api.deepseek.com/v1
-  #     api_key: ${DEEPSEEK_KEY}
-  #     model: deepseek-chat
-  #     timeout_sec: 15
-  #   - name: openai
-  #     api_base: https://api.openai.com/v1
-  #     api_key: ${OPENAI_KEY}
-  #     model: gpt-4o-mini
-  #     timeout_sec: 20
-  #   - name: local       # type 省略时按名推断；model 空则用 llm.model
-  #     type: local
-  #     model: qwen3:8b
+  # v2.1 §10.4：旧 provider/cloud/providers 键已删除——provider 条目统一迁入
+  # llm.providers（单一配置源，避免双份漂移）；本节仅保留非 provider 参数。
+  # （代码内旧键回退读取保留一版兼容历史配置文件，下一版本移除。）
 
 # ================= API 服务（Phase 2 前后端分离）=================
 # FastAPI 接口层（api/ 包，uvicorn 启动）；React 前端构建产物由其静态挂载。

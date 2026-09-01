@@ -38,7 +38,7 @@ export default function Login() {
       display: 'flex',
       alignItems: 'center',
       justifyContent: 'center',
-      background: 'radial-gradient(ellipse at 30% 50%, #1a0a10 0%, #070b14 50%, #0a0e1a 100%)',
+      background: 'var(--auth-bg)',
       position: 'relative',
       overflow: 'hidden',
     }}>
@@ -63,7 +63,7 @@ export default function Login() {
           <div style={{
             fontSize: 14,
             fontWeight: 600,
-            color: '#c8102e',
+            color: 'var(--accent-primary)',
             letterSpacing: '0.15em',
             textTransform: 'uppercase',
             marginBottom: 16,
@@ -74,7 +74,7 @@ export default function Login() {
           <h1 style={{
             fontSize: 52,
             fontWeight: 800,
-            color: '#fff',
+            color: 'var(--text-strong)',
             lineHeight: 1.1,
             margin: '0 0 20px',
             letterSpacing: '-0.02em',
@@ -83,12 +83,12 @@ export default function Login() {
           </h1>
           <p style={{
             fontSize: 16,
-            color: 'rgba(255,255,255,0.4)',
+            color: 'rgba(var(--fg-rgb),0.4)',
             lineHeight: 1.7,
             margin: 0,
             maxWidth: 360,
           }}>
-            多 Agent 协同研判 · 实时视觉监测 · 工单全链路闭环
+            影像研判 · 实时视觉监测 · 工单全链路闭环
           </p>
           <div style={{
             marginTop: 40,
@@ -104,12 +104,12 @@ export default function Login() {
                 <div style={{
                   fontSize: 22,
                   fontWeight: 700,
-                  color: '#fff',
+                  color: 'var(--text-strong)',
                   fontFamily: 'var(--font-mono)',
                 }}>{s.value}</div>
                 <div style={{
                   fontSize: 11,
-                  color: 'rgba(255,255,255,0.3)',
+                  color: 'rgba(var(--fg-rgb),0.3)',
                   textTransform: 'uppercase',
                   letterSpacing: '0.1em',
                   marginTop: 4,
@@ -128,21 +128,21 @@ export default function Login() {
           <div style={{
             padding: 32,
             borderRadius: 20,
-            background: 'rgba(17, 24, 39, 0.6)',
+            background: 'var(--glass-bg)',
             backdropFilter: 'blur(24px)',
             WebkitBackdropFilter: 'blur(24px)',
-            border: '1px solid rgba(255,255,255,0.06)',
+            border: '1px solid rgba(var(--fg-rgb),0.06)',
             boxShadow: '0 24px 64px rgba(0,0,0,0.3)',
           }}>
             <div style={{
               fontSize: 18,
               fontWeight: 700,
-              color: '#fff',
+              color: 'var(--text-strong)',
               marginBottom: 4,
             }}>登录系统</div>
             <div style={{
               fontSize: 13,
-              color: 'rgba(255,255,255,0.35)',
+              color: 'rgba(var(--fg-rgb),0.35)',
               marginBottom: 28,
             }}>使用您的授权账号访问监控平台</div>
 
@@ -153,10 +153,10 @@ export default function Login() {
                   autoComplete="username"
                   style={{
                     height: 48,
-                    background: 'rgba(255,255,255,0.04)',
-                    border: '1px solid rgba(255,255,255,0.08)',
+                    background: 'rgba(var(--fg-rgb),0.04)',
+                    border: '1px solid rgba(var(--fg-rgb),0.08)',
                     borderRadius: 12,
-                    color: '#fff',
+                    color: 'var(--text-strong)',
                     fontSize: 15,
                   }} />
               </Form.Item>
@@ -166,10 +166,10 @@ export default function Login() {
                   autoComplete="current-password"
                   style={{
                     height: 48,
-                    background: 'rgba(255,255,255,0.04)',
-                    border: '1px solid rgba(255,255,255,0.08)',
+                    background: 'rgba(var(--fg-rgb),0.04)',
+                    border: '1px solid rgba(var(--fg-rgb),0.08)',
                     borderRadius: 12,
-                    color: '#fff',
+                    color: 'var(--text-strong)',
                     fontSize: 15,
                   }} />
               </Form.Item>
@@ -184,9 +184,9 @@ export default function Login() {
                     borderRadius: 12,
                     fontSize: 15,
                     fontWeight: 600,
-                    background: 'linear-gradient(135deg, #c8102e 0%, #9b0a22 100%)',
+                    background: 'linear-gradient(135deg, var(--accent-primary) 0%, var(--accent-primary-deep) 100%)',
                     border: 'none',
-                    boxShadow: '0 4px 16px rgba(200,16,46,0.3)',
+                    boxShadow: '0 4px 16px rgba(var(--accent-primary-rgb),0.3)',
                   }}
                 >
                   进入系统
@@ -197,9 +197,9 @@ export default function Login() {
             <div style={{
               marginTop: 24,
               paddingTop: 20,
-              borderTop: '1px solid rgba(255,255,255,0.06)',
+              borderTop: '1px solid rgba(var(--fg-rgb),0.06)',
               fontSize: 11,
-              color: 'rgba(255,255,255,0.2)',
+              color: 'rgba(var(--fg-rgb),0.2)',
               textAlign: 'center',
               fontFamily: 'var(--font-mono)',
             }}>

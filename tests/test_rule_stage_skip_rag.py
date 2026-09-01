@@ -1,7 +1,7 @@
 """规范 Agent 预检与条款匹配策略测试（不依赖真实 RAG / PDF）。"""
 
-from agents.base import AgentMessage
-from agents.rule_agent import RuleAgent
+from pipeline.base import StageMessage
+from pipeline.rule import RuleStage
 
 
 class _FakeRag:
@@ -17,15 +17,15 @@ class _FakeRag:
         }]
 
 
-def _msg(payload: dict) -> AgentMessage:
-    return AgentMessage(
+def _msg(payload: dict) -> StageMessage:
+    return StageMessage(
         task_id="t_rule", agent="rule", status="pending",
         payload=payload, error=None, cost_ms=0)
 
 
 def test_skip_rag_does_not_query():
     rag = _FakeRag()
-    out = RuleAgent(rag=rag).run(_msg({
+    out = RuleStage(rag=rag).run(_msg({
         "permit_info": {"watcher": ""},
         "violation_descs": ["火花"],
         "skip_rag": True,
@@ -39,7 +39,7 @@ def test_skip_rag_does_not_query():
 
 def test_no_matched_clause_uses_review_instead_of_first_clause():
     rag = _FakeRag()
-    out = RuleAgent(rag=rag).run(_msg({
+    out = RuleStage(rag=rag).run(_msg({
         "permit_info": {"watcher": "张三"},
         "violation_descs": ["火花"],
         "skip_rag": False,

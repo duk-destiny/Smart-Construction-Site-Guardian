@@ -1,7 +1,8 @@
-"""复核 Agent：对高风险或证据不足的结果标记人工复核。
+"""复核段：对高风险或证据不足的结果标记人工复核。
 
 它不是直接改判，而是把“需要人工确认”的结论显式交给安全员，
 与人工纠偏闭环共同构成 AI 纠偏管理能力。
+辅助研判的 LLM 调用经统一入口 ChatClient（v2.1 §5.1，云端→本地降级）。
 """
 from __future__ import annotations
 
@@ -9,8 +10,8 @@ import json
 import time
 from concurrent.futures import ThreadPoolExecutor
 
-from agents.base import AgentBase, AgentMessage
-from core.llm_engine import LlmEngine
+from pipeline.base import StageBase, StageMessage
+from core.chat_client import get_chat_client
 from core.logging import get_logger
 
 # 高风险类别在置信度低于该值时进入复核
@@ -27,10 +28,10 @@ HIGH_RISK_CLASSES = {
 HIGH_RISK_LEVELS = {"较大", "重大"}
 
 
-class ReviewAgent(AgentBase):
-    """复核 Agent：消费融合结果，输出是否需要人工复核。"""
+class ReviewStage(StageBase):
+    """复核段：消费融合结果，输出是否需要人工复核。"""
 
-    def _execute(self, msg: AgentMessage) -> AgentMessage:
+    def _execute(self, msg: StageMessage) -> StageMessage:
         detections = msg.payload.get("detections", []) or []
         compliance = msg.payload.get("compliance", []) or []
         risk_level = msg.payload.get("risk_level", "低")
@@ -128,8 +129,8 @@ class ReviewAgent(AgentBase):
 
         t0 = time.monotonic()
         try:
-            eng = LlmEngine()
-            if not eng.available():
+            client = get_chat_client()
+            if not client.available_provider():
                 _row("skipped",
                      {"advice": None, "review_reasons": reasons},
                      "LLM 不可用", 0)
@@ -147,17 +148,21 @@ class ReviewAgent(AgentBase):
                             "场景": d.get("scene")} for d in detections[:10]],
                 "进入复核的原因": reasons,
             }, ensure_ascii=False)
-            advice = eng.chat(system, user, num_predict=220)
+            result = client.chat(system, user, max_tokens=220,
+                                 total_deadline_sec=30.0)
             cost = int((time.monotonic() - t0) * 1000)
+            advice = (result.content.strip()
+                      if isinstance(result.content, str) else None)
             if advice:
                 _row("success",
-                     {"advice": advice.strip(),
+                     {"advice": advice,
                       "review_reasons": reasons},
                      None, cost)
-                log.info(f"任务 {task_id} LLM 辅助研判完成（{cost}ms）")
+                log.info(f"任务 {task_id} LLM 辅助研判完成"
+                         f"（{result.provider}/{cost}ms）")
             else:
                 _row("failed", {"advice": None, "review_reasons": reasons},
-                     "LLM 空输出", cost)
+                     result.error or "LLM 空输出", cost)
         except Exception as exc:  # noqa: BLE001 辅助失败静默降级留痕
             log.warning(f"任务 {task_id} LLM 辅助研判失败: {exc}")
             try:

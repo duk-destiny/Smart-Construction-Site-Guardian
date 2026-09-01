@@ -4,7 +4,8 @@
  */
 import { api } from './client'
 import type {
-  AgentRunRow, AlarmRow, Capabilities, ChatRoute, DispatchPanel,
+  AgentChatReply, AgentMessageRow, AgentRunProgress, AgentRunRow,
+  AlarmRow, Capabilities, ChatRoute, DispatchPanel,
   ModelRow, OrderRow, TaskDetail, UserRow,
 } from './types'
 
@@ -97,6 +98,118 @@ export async function queryChat(text: string) {
   return r.data as ChatRoute
 }
 
+/** 语音转写（录音文件 → 文本）：asr.* 未配置时后端 501 → 上层弹能力提示。 */
+export async function asrTranscribe(file: File): Promise<string> {
+  const form = new FormData()
+  form.append('file', file)
+  const r = await api.post('/tasks/asr-transcribe', form)
+  return r.data.text as string
+}
+
+// ---------- agent（认知层，§5.12 六端点） ----------
+
+/** 对话入口（双层）：快路径同步直返旧查询结构；认知路径返 run_id。
+ *  attachments 非空强制走认知路径（服务端强制绑定给视频分析工具）。 */
+export async function agentChat(
+  text: string, sessionId?: string | null,
+  attachments?: string[],
+) {
+  const r = await api.post('/agent/chat', {
+    text, session_id: sessionId ?? null, attachments: attachments ?? [] })
+  return r.data as AgentChatReply
+}
+
+/** 计划/步骤进度轮询（前端 2s 间隔）。 */
+export async function agentProgress(runId: string) {
+  const r = await api.get(`/agent/runs/${runId}/progress`)
+  return r.data as AgentRunProgress
+}
+
+/** 完整证据链（计划 + 每步摘要 + 降级原因）。 */
+export async function agentTrace(runId: string) {
+  const r = await api.get(`/agent/runs/${runId}/trace`)
+  return r.data as AgentRunProgress
+}
+
+/** 确认/取消挂起计划；confirm 可携 modified_plan（删步/改参）。 */
+export async function agentConfirm(
+  runId: string, action: 'confirm' | 'cancel',
+  modifiedPlan?: Record<string, unknown> | null,
+) {
+  const r = await api.post(`/agent/runs/${runId}/confirm`, {
+    action, modified_plan: modifiedPlan ?? null })
+  return r.data as { status: string }
+}
+
+/** 执行中/挂起中取消。 */
+export async function agentCancel(runId: string) {
+  const r = await api.post(`/agent/runs/${runId}/cancel`)
+  return r.data as { ok: boolean; status: string }
+}
+
+/** 会话历史（用户原文 + 助手最终答案 + 代码摘要）。 */
+export async function agentHistory(sessionId: string) {
+  const r = await api.get(`/agent/sessions/${sessionId}/history`)
+  return r.data as AgentMessageRow[]
+}
+
+// ---------- agent 会话管理 / 附件 / 能力 / TTS（v2.2 对话窗口） ----------
+
+export interface SessionRow {
+  id: string; title: string | null; archived: boolean;
+  created_at: string; updated_at: string | null
+}
+
+export interface ModelInfo {
+  provider_available: string | null
+  providers: { name: string; type: string }[]
+  asr_available: boolean
+  tts_available: boolean
+}
+
+export async function listSessions(archivedOnly = false) {
+  const r = await api.get('/agent/sessions',
+    { params: archivedOnly ? { archived_only: true } : {} })
+  return r.data as SessionRow[]
+}
+
+export async function createSession(title?: string) {
+  const r = await api.post('/agent/sessions', { title: title ?? null })
+  return r.data as { id: string; title: string | null }
+}
+
+export async function patchSession(
+  sessionId: string, body: { title?: string; archived?: boolean },
+) {
+  const r = await api.patch(`/agent/sessions/${sessionId}`, body)
+  return r.data as { ok: boolean }
+}
+
+export async function deleteSession(sessionId: string) {
+  const r = await api.delete(`/agent/sessions/${sessionId}`)
+  return r.data as { ok: boolean }
+}
+
+/** 对话附件上传（图片/视频，魔数+大小校验，不建任务行）。 */
+export async function uploadChatAttachment(file: File) {
+  const form = new FormData()
+  form.append('file', file)
+  const r = await api.post('/agent/uploads', form)
+  return r.data as { path: string }
+}
+
+export async function getModelInfo() {
+  const r = await api.get('/agent/model-info')
+  return r.data as ModelInfo
+}
+
+/** 文本合成语音（mp3 bytes）；未配置时后端 501 → 上层弹能力提示。 */
+export async function agentTts(text: string): Promise<Blob> {
+  const r = await api.post('/agent/tts', { text },
+    { responseType: 'blob' })
+  return r.data as Blob
+}
+
 // ---------- alarms ----------
 
 export async function listAlarms(limit = 200) {
@@ -163,6 +276,12 @@ export async function reviewOrder(orderId: string, approve: boolean, reason = ''
 export async function exportOrderExcel(orderId: string) {
   const r = await api.post(`/orders/${orderId}/export`)
   return r.data as { ok: boolean; file: { name: string; download_url: string } }
+}
+
+/** 工单 AI 弹窗：仅携带当前工单上下文的只读问答（责任人/管理员）。 */
+export async function askOrder(orderId: string, question: string) {
+  const r = await api.post(`/orders/${orderId}/ask`, { question })
+  return r.data as { status: string; provider?: string; answer: string }
 }
 
 // ---------- history / reports ----------

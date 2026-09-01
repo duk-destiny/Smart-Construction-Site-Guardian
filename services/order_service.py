@@ -203,3 +203,68 @@ def review_order(order_id: str, reviewer_user_id: str | None,
 def scan_overdue(as_of: str, hours_ahead: float = 0.0) -> dict:
     with scoped() as conn:
         return DispatchService(conn).scan_overdue(as_of=as_of)
+
+
+def ask_order(order_id: str, user_id: str, question: str) -> dict:
+    """工单 AI 弹窗（v2.2）：仅携带当前工单上下文的只读问答。
+
+    权限：本单责任人本人或 admin/safety；跨属主 403、不存在 404。
+    实现：单轮 ChatClient（不进 Plan-and-Execute 内核、零工具调用、
+    零写入），上下文=工单行+风险等级+要求条款+RAG 命中条款；LLM 全链
+    不可用时降级为可读提示（不编造、不断链路）。
+    """
+    from dao.models import RiskDAO, UserDAO, WorkOrderDAO
+    with scoped() as conn:
+        wo = WorkOrderDAO(conn).get(order_id)
+        if wo is None:
+            raise LookupError("工单不存在")
+        row = dict(wo)
+        u = UserDAO(conn).get_by_id(user_id)
+        role = u["role"] if u else ""
+        if role not in ("admin", "safety") and row.get("assignee_id") != user_id:
+            raise PermissionError("仅本单责任人或管理员可问询")
+        risk = RiskDAO(conn).get_by_task(row["task_id"])
+        ctx = {
+            "risk_level": (risk["risk_level"] if risk else None)
+            or row.get("risk_level"),
+            "hazard_desc": row.get("hazard_desc"),
+            "clause": row.get("clause"),
+            "requirement": row.get("requirement"),
+            "status": row.get("status"),
+            "deadline": row.get("deadline"),
+            "submitted_note": row.get("submitted_note"),
+            "review_reason": row.get("review_reason"),
+        }
+    # RAG 条款检索（只读，失败降级为空集不阻断）
+    clauses: list[str] = []
+    try:
+        from core.rag_engine import RagEngine
+        items = RagEngine().query(question, top_k=3)
+        clauses = [str(it) for it in (items or [])][:3]
+    except Exception:  # noqa: BLE001 检索不可用即不带条款作答
+        clauses = []
+
+    from core.chat_client import get_chat_client
+    client = get_chat_client()
+    provider = client.available_provider()
+    if not provider:
+        return {"status": "failed",
+                "answer": "AI 问答通道当前不可用（未配置或断网）。"
+                          "可先阅读工单原文的条款与整改要求，稍后再试。"}
+    system = (
+        "你是工地整改工单的读单助手。只基于【工单上下文】与【参考条款】"
+        "回答用户问题，回答限于：规范依据解释、整改要求解读、验收要点咨询；"
+        "不得编造上下文与条款里没有的内容，不得改变风险定级，"
+        "不回答与该工单无关的问题。不超过 250 字，分点作答。")
+    ctx_text = json.dumps(ctx, ensure_ascii=False)
+    clause_text = json.dumps(clauses, ensure_ascii=False)
+    user_msg = (f"【工单上下文】{ctx_text}\n\n"
+                f"【参考条款】{clause_text}\n\n"
+                f"【用户问题】{question}")
+    result = client.chat(system, user_msg, max_tokens=600,
+                         total_deadline_sec=20.0)
+    if result.status == "failed" or not (result.content or "").strip():
+        return {"status": "failed", "provider": result.provider,
+                "answer": "本次问答未能完成（AI 通道繁忙或超时），请稍后重试。"}
+    return {"status": result.status, "provider": result.provider,
+            "answer": str(result.content).strip()}

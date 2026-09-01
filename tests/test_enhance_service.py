@@ -1,6 +1,7 @@
-"""AI 提取预填服务测试（v0.6 双 Provider → v0.8 多 Provider 链）。
+"""AI 提取预填服务测试（v0.6 双 Provider → v0.8 多 Provider 链 → v2.1 统一入口）。
 
 不触网：provider 调用统一 monkeypatch `_call`/`_chat_cloud`/`_chat_local`，
+云端通道经统一 ChatClient（v2.1 后改 mock `get_chat_client`），
 本地探活 monkeypatch `core.llm_engine.LlmEngine`。
 重点验证：链序与降级（列表序=降级序、legacy 单槽合成等价链）、
 逐家白名单硬校验（越界即弃试下一家）、总预算止血、连通性自检、
@@ -251,20 +252,25 @@ def test_chat_unknown_provider():
 
 
 def test_chat_cloud_returns_text(monkeypatch):
-    class _Resp:
-        def __enter__(self):
-            return self
+    """v2.1：云端通道改经统一 ChatClient（裸 urllib 退役）；
+    mock get_chat_client 返回预设 ChatResult。"""
+    from core.chat_client import ChatResult
 
-        def __exit__(self, *a):
-            return False
+    class _FakeClient:
+        def __init__(self):
+            self.calls: list[dict] = []
 
-        def read(self):
-            return '{"choices":[{"message":{"content":"云端润色"}}]}'.encode("utf-8")
+        def chat(self, system, user, **kw):
+            self.calls.append(kw)
+            return ChatResult(content="云端润色", provider="cloud",
+                              status="success", cost_ms=1)
 
+    fake = _FakeClient()
     eng = EnhanceEngine()
     eng.providers = [dict(CLOUD)]
-    monkeypatch.setattr("urllib.request.urlopen", lambda req, timeout=None: _Resp())
+    monkeypatch.setattr(es, "get_chat_client", lambda: fake)
     assert eng.chat("cloud", "sys", "user") == "云端润色"
+    assert fake.calls and fake.calls[0]["provider"] == "cloud"
 
 
 # ---------- 连通性自检 ----------

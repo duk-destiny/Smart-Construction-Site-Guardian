@@ -7,6 +7,7 @@ import { useParams } from 'react-router-dom'
 import * as ep from '../api/endpoints'
 import type { AgentRunRow, TaskDetail } from '../api/types'
 import { RiskTag } from '../components/Tags'
+import MediaUploadForm from '../components/MediaUploadForm'
 import PageHeader from '../components/PageHeader'
 
 const AGENT_CN: Record<string, string> = {
@@ -103,11 +104,12 @@ export default function AgentRun() {
   return (
     <>
       <PageHeader
-        title="多 Agent 研判"
-        subtitle={taskId ? `任务 ${taskId.slice(0, 16)}...` : '影像智能分析链路'}
+        title="影像研判"
+        subtitle={taskId ? `任务 ${taskId.slice(0, 16)}...` : '取证上传 · 五段流水线 · 证据链可回溯'}
       />
 
-      {!taskId && <Alert type="info" message="请从「统一上报 → 影像研判」发起任务" />}
+      {/* 影像研判窗口（v2.2）：无任务时显示发起表单（原统一上报影像 Tab 迁入） */}
+      {!taskId && <MediaUploadForm />}
 
       {taskId && !result && (entries.length === 0 || !anyRunning) && (
         <div style={{ textAlign: 'center', padding: '40px 0' }}>
@@ -119,9 +121,9 @@ export default function AgentRun() {
           <Button type="primary" loading={starting} onClick={startRun}
             style={{
               height: 44, paddingInline: 32, borderRadius: 12, fontWeight: 600,
-              background: 'linear-gradient(135deg, #c8102e 0%, #9b0a22 100%)',
+              background: 'linear-gradient(135deg, var(--accent-primary) 0%, var(--accent-primary-deep) 100%)',
             }}>
-            开始 / 重试多 Agent 研判
+            开始 / 重试影像研判
           </Button>
         </div>
       )}
@@ -150,8 +152,8 @@ export default function AgentRun() {
                   style={{
                     padding: '16px 24px',
                     borderRadius: 14,
-                    background: isRunning ? 'rgba(200,16,46,0.08)' : isDone ? 'rgba(0,212,170,0.06)' : 'rgba(255,255,255,0.03)',
-                    border: `1px solid ${isRunning ? 'rgba(200,16,46,0.2)' : isDone ? 'rgba(0,212,170,0.15)' : 'rgba(255,255,255,0.06)'}`,
+                    background: isRunning ? 'rgba(var(--accent-primary-rgb),0.08)' : isDone ? 'rgba(0,212,170,0.06)' : 'rgba(var(--fg-rgb),0.03)',
+                    border: `1px solid ${isRunning ? 'rgba(var(--accent-primary-rgb),0.2)' : isDone ? 'rgba(0,212,170,0.15)' : 'rgba(var(--fg-rgb),0.06)'}`,
                     textAlign: 'center',
                     minWidth: 120,
                     position: 'relative',
@@ -164,26 +166,26 @@ export default function AgentRun() {
                       transition={{ duration: 1.5, repeat: Infinity, ease: 'linear' }}
                       style={{
                         position: 'absolute', top: 0, left: 0, right: 0, bottom: 0,
-                        background: 'linear-gradient(90deg, transparent, rgba(200,16,46,0.06), transparent)',
+                        background: 'linear-gradient(90deg, transparent, rgba(var(--accent-primary-rgb),0.06), transparent)',
                       }}
                     />
                   )}
                   <div style={{ fontSize: 24, marginBottom: 8 }}>{AGENT_ICONS[agent]}</div>
                   <div style={{
                     fontSize: 13, fontWeight: 600,
-                    color: isRunning ? '#c8102e' : isDone ? '#00d4aa' : 'rgba(255,255,255,0.3)',
+                    color: isRunning ? 'var(--accent-primary)' : isDone ? '#00d4aa' : 'rgba(var(--fg-rgb),0.3)',
                   }}>{AGENT_CN[agent]}</div>
                   {p && (
                     <div className="mono" style={{
                       fontSize: 11, marginTop: 6,
-                      color: 'rgba(255,255,255,0.3)',
+                      color: 'rgba(var(--fg-rgb),0.3)',
                     }}>{p.cost_ms}ms</div>
                   )}
                   <div style={{
                     position: 'absolute', top: 8, right: 8,
                     width: 6, height: 6, borderRadius: 3,
-                    background: isRunning ? '#c8102e' : isDone ? '#00d4aa' : 'rgba(255,255,255,0.1)',
-                    boxShadow: isRunning ? '0 0 8px rgba(200,16,46,0.5)' : isDone ? '0 0 6px rgba(0,212,170,0.4)' : 'none',
+                    background: isRunning ? 'var(--accent-primary)' : isDone ? '#00d4aa' : 'rgba(var(--fg-rgb),0.1)',
+                    boxShadow: isRunning ? '0 0 8px rgba(var(--accent-primary-rgb),0.5)' : isDone ? '0 0 6px rgba(0,212,170,0.4)' : 'none',
                   }} />
                 </motion.div>
               )
@@ -199,19 +201,26 @@ export default function AgentRun() {
             animate={{ opacity: 1, y: 0 }}
             transition={{ duration: 0.5 }}
           >
-            {result.status !== 'success'
+            {result.status === 'failed'
               ? <div style={{
                   padding: 24, borderRadius: 14, textAlign: 'center',
-                  background: 'rgba(200,16,46,0.06)', border: '1px solid rgba(200,16,46,0.2)',
+                  background: 'rgba(var(--accent-primary-rgb),0.06)', border: '1px solid rgba(var(--accent-primary-rgb),0.2)',
                 }}>
-                  <div style={{ fontSize: 18, fontWeight: 700, color: '#c8102e', marginBottom: 8 }}>
+                  <div style={{ fontSize: 18, fontWeight: 700, color: 'var(--accent-primary)', marginBottom: 8 }}>
                     研判失败
                   </div>
-                  <div style={{ color: 'rgba(255,255,255,0.5)' }}>
+                  <div style={{ color: 'rgba(var(--fg-rgb),0.5)' }}>
                     {String(result.payload?.['error'] ?? '请重试或检查模型配置')}
                   </div>
                 </div>
-              : <div style={{
+              : <>
+            {result.status === 'degraded' && (
+              <Alert type="warning" showIcon style={{ marginBottom: 12 }}
+                message="部分能力降级（研判结论仍有效）"
+                description={String(result.payload?.['error']
+                  ?? '个别辅助环节（如 LLM 辅助/规范检索）不可用，已自动降级；检测、定级与工单结论不受影响。')} />
+            )}
+            <div style={{
                   padding: 24, borderRadius: 14,
                   background: 'rgba(0,212,170,0.04)', border: '1px solid rgba(0,212,170,0.15)',
                 }}>
@@ -222,8 +231,8 @@ export default function AgentRun() {
                       alignItems: 'center', justifyContent: 'center', fontSize: 20,
                     }}>✓</div>
                     <div>
-                      <div style={{ fontSize: 16, fontWeight: 700, color: '#fff' }}>研判完成</div>
-                      <div style={{ fontSize: 13, color: 'rgba(255,255,255,0.4)' }}>
+                      <div style={{ fontSize: 16, fontWeight: 700, color: 'var(--text-strong)' }}>研判完成</div>
+                      <div style={{ fontSize: 13, color: 'rgba(var(--fg-rgb),0.4)' }}>
                         风险等级：<RiskTag level={payloadRisk(result.payload)} />
                       </div>
                     </div>
@@ -231,11 +240,13 @@ export default function AgentRun() {
                       去工单页派发
                     </Button>
                   </div>
-                </div>}
+                </div>
+            </>}
             {(() => {
               const vision = result?.payload?.['vision'] as Record<string, unknown> | undefined
               const dets = (vision?.['payload'] as Record<string, unknown> | undefined)?.['detections']
-              if (result?.status === 'success' && Array.isArray(dets) && dets.length === 0) {
+              if ((result?.status === 'success' || result?.status === 'degraded')
+                  && Array.isArray(dets) && dets.length === 0) {
                 return <Alert style={{ marginTop: 12 }} type="info" showIcon
                   message="本帧未检出隐患目标"
                   description="模型识别范围有限（火花/烟雾/灭火器/安全帽/反光衣等），普通场景照片没有可识别对象属正常现象。" />
@@ -245,10 +256,10 @@ export default function AgentRun() {
             {Object.keys(wo).length > 0 && (
               <div style={{
                 marginTop: 16, padding: 20, borderRadius: 14,
-                background: 'rgba(255,255,255,0.02)', border: '1px solid rgba(255,255,255,0.06)',
+                background: 'rgba(var(--fg-rgb),0.02)', border: '1px solid rgba(var(--fg-rgb),0.06)',
               }}>
                 <div style={{
-                  fontSize: 12, fontWeight: 600, color: 'rgba(255,255,255,0.4)',
+                  fontSize: 12, fontWeight: 600, color: 'rgba(var(--fg-rgb),0.4)',
                   textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: 14,
                 }}>处置工单</div>
                 <Descriptions column={1} size="small">
@@ -300,7 +311,7 @@ export default function AgentRun() {
             <pre style={{
               whiteSpace: 'pre-wrap', margin: 0,
               fontFamily: 'var(--font-mono)', fontSize: 12,
-              color: 'rgba(255,255,255,0.6)', lineHeight: 1.7,
+              color: 'rgba(var(--fg-rgb),0.6)', lineHeight: 1.7,
             }}>{advice}</pre>
           </motion.div>
         )
@@ -313,16 +324,16 @@ export default function AgentRun() {
           transition={{ delay: 0.4 }}
           style={{
             marginTop: 20, padding: 20, borderRadius: 14,
-            background: 'rgba(255,255,255,0.02)', border: '1px solid rgba(255,255,255,0.06)',
+            background: 'rgba(var(--fg-rgb),0.02)', border: '1px solid rgba(var(--fg-rgb),0.06)',
           }}>
           <div style={{
-            fontSize: 12, fontWeight: 600, color: 'rgba(255,255,255,0.4)',
+            fontSize: 12, fontWeight: 600, color: 'rgba(var(--fg-rgb),0.4)',
             textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: 16,
           }}>Agent 运行证据链</div>
           <div style={{ position: 'relative', paddingLeft: 20 }}>
             <div style={{
               position: 'absolute', left: 5, top: 0, bottom: 0, width: 1,
-              background: 'rgba(255,255,255,0.06)',
+              background: 'rgba(var(--fg-rgb),0.06)',
             }} />
             {runs.map((r, i) => (
               <motion.div
@@ -336,30 +347,30 @@ export default function AgentRun() {
                 <div style={{
                   position: 'absolute', left: -18, top: 4,
                   width: 10, height: 10, borderRadius: 5,
-                  background: r.status === 'success' ? '#00d4aa' : r.status === 'failed' ? '#c8102e' : '#3b82f6',
-                  boxShadow: `0 0 8px ${r.status === 'success' ? 'rgba(0,212,170,0.4)' : r.status === 'failed' ? 'rgba(200,16,46,0.4)' : 'rgba(59,130,246,0.4)'}`,
+                  background: r.status === 'success' ? '#00d4aa' : r.status === 'failed' ? 'var(--accent-primary)' : '#3b82f6',
+                  boxShadow: `0 0 8px ${r.status === 'success' ? 'rgba(0,212,170,0.4)' : r.status === 'failed' ? 'rgba(var(--accent-primary-rgb),0.4)' : 'rgba(59,130,246,0.4)'}`,
                 }} />
                 <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
-                  <span style={{ fontWeight: 600, color: '#fff' }}>
+                  <span style={{ fontWeight: 600, color: 'var(--text-strong)' }}>
                     {AGENT_ICONS[r.agent]} {AGENT_CN[r.agent] || r.agent}
                   </span>
                   <Tag style={{
-                    background: r.status === 'success' ? 'rgba(0,212,170,0.1)' : 'rgba(200,16,46,0.1)',
+                    background: r.status === 'success' ? 'rgba(0,212,170,0.1)' : 'rgba(var(--accent-primary-rgb),0.1)',
                     border: 'none',
-                    color: r.status === 'success' ? '#00d4aa' : '#c8102e',
+                    color: r.status === 'success' ? '#00d4aa' : 'var(--accent-primary)',
                     fontSize: 10,
                   }}>{r.status}</Tag>
-                  <span className="mono" style={{ fontSize: 11, color: 'rgba(255,255,255,0.3)' }}>
+                  <span className="mono" style={{ fontSize: 11, color: 'rgba(var(--fg-rgb),0.3)' }}>
                     {r.cost_ms}ms
                   </span>
                 </div>
                 {r.error && (
-                  <div style={{ fontSize: 12, color: '#c8102e', marginBottom: 4 }}>{r.error}</div>
+                  <div style={{ fontSize: 12, color: 'var(--accent-primary)', marginBottom: 4 }}>{r.error}</div>
                 )}
                 <pre style={{
                   margin: 0, padding: 12, borderRadius: 8,
                   background: 'rgba(0,0,0,0.3)',
-                  border: '1px solid rgba(255,255,255,0.04)',
+                  border: '1px solid rgba(var(--fg-rgb),0.04)',
                   fontSize: 11, maxHeight: 140, overflow: 'auto',
                   fontFamily: 'var(--font-mono)',
                   color: 'rgba(0,212,170,0.7)',

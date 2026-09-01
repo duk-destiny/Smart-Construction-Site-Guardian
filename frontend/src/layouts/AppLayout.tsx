@@ -1,22 +1,24 @@
 import { useState } from 'react'
 import { Outlet, useLocation, useNavigate } from 'react-router-dom'
-import { Dropdown, Form, Input, Modal, App as AntApp } from 'antd'
+import { Button, Dropdown, Form, Input, Modal, Switch, App as AntApp } from 'antd'
 import {
-  CameraOutlined, FileTextOutlined, LogoutOutlined, KeyOutlined,
-  LineChartOutlined, ToolOutlined, UploadOutlined, UserOutlined,
-  AuditOutlined, RobotOutlined,
+  BgColorsOutlined, CameraOutlined, CheckOutlined, FileTextOutlined,
+  LogoutOutlined, KeyOutlined, LineChartOutlined, MoonOutlined,
+  SunOutlined, ToolOutlined, UserOutlined,
+  AuditOutlined, PictureOutlined, RobotOutlined,
 } from '@ant-design/icons'
 import { AnimatePresence } from 'framer-motion'
 import { changePassword } from '../api/endpoints'
 import { useAuth } from '../auth/AuthContext'
 import type { MenuItem } from '../router'
 import { menuItemsFor } from '../router'
+import { THEME_PRESETS, useTheme } from '../theme'
 import Dock from '../components/Dock'
 import PageTransition from '../components/PageTransition'
 
 const ICON_MAP: Record<string, React.ReactNode> = {
-  '/report': <UploadOutlined />,
-  '/agents': <RobotOutlined />,
+  '/chat': <RobotOutlined />,
+  '/agents': <PictureOutlined />,
   '/orders': <FileTextOutlined />,
   '/history': <LineChartOutlined />,
   '/realtime': <CameraOutlined />,
@@ -29,6 +31,7 @@ export default function AppLayout() {
   const navigate = useNavigate()
   const location = useLocation()
   const { message } = AntApp.useApp()
+  const { theme, mode, setThemeKey, setMode } = useTheme()
   const [pwdOpen, setPwdOpen] = useState(false)
   const [form] = Form.useForm()
 
@@ -79,33 +82,66 @@ export default function AppLayout() {
         alignItems: 'center',
         justifyContent: 'space-between',
         padding: '0 24px',
-        background: 'rgba(7, 11, 20, 0.8)',
+        background: 'var(--topbar-bg)',
         backdropFilter: 'blur(16px)',
         WebkitBackdropFilter: 'blur(16px)',
-        borderBottom: '1px solid rgba(255,255,255,0.04)',
+        borderBottom: '1px solid rgba(var(--fg-rgb),0.04)',
       }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
           <div style={{
             width: 8,
             height: 8,
             borderRadius: 4,
-            background: '#c8102e',
-            boxShadow: '0 0 8px rgba(200,16,46,0.5)',
+            background: 'var(--accent-primary)',
+            boxShadow: '0 0 8px rgba(var(--accent-primary-rgb),0.5)',
             animation: 'pulse-glow 2s ease-in-out infinite',
           }} />
           <span style={{
             fontSize: 14,
             fontWeight: 700,
-            color: '#fff',
+            color: 'var(--text-strong)',
             letterSpacing: '0.02em',
           }}>智护工地</span>
           <span style={{
             fontSize: 11,
-            color: 'rgba(255,255,255,0.25)',
+            color: 'rgba(var(--fg-rgb),0.25)',
             fontFamily: 'var(--font-mono)',
             marginLeft: 8,
-          }}>v2.0</span>
+          }}>v2.2</span>
         </div>
+
+        {/* 明暗模式切换（v2.2）：暗色默认，亮色为新增主题 */}
+        <Switch
+          checked={mode === 'light'}
+          checkedChildren={<SunOutlined />}
+          unCheckedChildren={<MoonOutlined />}
+          onChange={(v) => setMode(v ? 'light' : 'dark')}
+          title="暗色 / 亮色主题"
+        />
+        {/* 主题色切换（v2.2）：纯前端本地偏好，四预设 */}
+        <Dropdown menu={{
+          items: THEME_PRESETS.map((t) => ({
+            key: t.key,
+            label: (
+              <span style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                <span style={{
+                  width: 12, height: 12, borderRadius: 6, display: 'inline-block',
+                  background: t.primary,
+                  boxShadow: `0 0 6px ${t.primary}`,
+                }} />
+                {t.label}
+                {theme.key === t.key && (
+                  <CheckOutlined style={{ marginLeft: 'auto', color: 'var(--accent-primary)' }} />
+                )}
+              </span>
+            ),
+          })),
+          onClick: ({ key }) => setThemeKey(String(key)),
+          selectedKeys: [theme.key],
+        }}>
+          <Button type="text" size="small" title="主题色"
+            icon={<BgColorsOutlined style={{ fontSize: 16 }} />} />
+        </Dropdown>
 
         <Dropdown menu={{
           items: [
@@ -124,9 +160,9 @@ export default function AppLayout() {
             cursor: 'pointer',
             padding: '6px 12px',
             borderRadius: 10,
-            background: 'rgba(255,255,255,0.04)',
-            border: '1px solid rgba(255,255,255,0.06)',
-            color: 'rgba(255,255,255,0.6)',
+            background: 'rgba(var(--fg-rgb),0.04)',
+            border: '1px solid rgba(var(--fg-rgb),0.06)',
+            color: 'rgba(var(--fg-rgb),0.6)',
             fontSize: 13,
             transition: 'all 0.2s',
           }}>
@@ -136,8 +172,8 @@ export default function AppLayout() {
               fontSize: 10,
               padding: '2px 6px',
               borderRadius: 4,
-              background: user.role === 'admin' ? 'rgba(200,16,46,0.15)' : 'rgba(0,212,170,0.1)',
-              color: user.role === 'admin' ? '#c8102e' : '#00d4aa',
+              background: user.role === 'admin' ? 'rgba(var(--accent-primary-rgb),0.15)' : 'rgba(0,212,170,0.1)',
+              color: user.role === 'admin' ? 'var(--accent-primary)' : '#00d4aa',
               fontWeight: 600,
             }}>{user.role}</span>
           </div>
@@ -147,7 +183,7 @@ export default function AppLayout() {
       <main style={{
         position: 'relative',
         zIndex: 1,
-        padding: '72px 24px 100px',
+        padding: '72px 24px 130px',
         maxWidth: 1280,
         margin: '0 auto',
       }}>

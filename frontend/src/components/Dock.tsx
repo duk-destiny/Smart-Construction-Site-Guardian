@@ -25,11 +25,11 @@ export default function Dock({ items }: { items: DockItem[] }) {
         gap: 4,
         padding: '8px 12px',
         borderRadius: 20,
-        background: 'rgba(10, 14, 26, 0.85)',
+        background: 'var(--dock-bg)',
         backdropFilter: 'blur(24px)',
         WebkitBackdropFilter: 'blur(24px)',
-        border: '1px solid rgba(255,255,255,0.08)',
-        boxShadow: '0 8px 32px rgba(0,0,0,0.4), 0 0 0 1px rgba(255,255,255,0.03)',
+        border: '1px solid rgba(var(--fg-rgb),0.08)',
+        boxShadow: '0 8px 32px rgba(0,0,0,0.4), 0 0 0 1px rgba(var(--fg-rgb),0.03)',
       }}
     >
       {items.map((item) => (
@@ -55,9 +55,9 @@ function DockButton({ item }: { item: DockItem }) {
         padding: '10px 16px',
         border: 'none',
         borderRadius: 14,
-        background: item.active ? 'rgba(200, 16, 46, 0.15)' : 'transparent',
+        background: item.active ? 'rgba(var(--accent-primary-rgb), 0.15)' : 'transparent',
         cursor: 'pointer',
-        color: item.active ? '#c8102e' : 'rgba(255,255,255,0.5)',
+        color: item.active ? 'var(--accent-primary)' : 'rgba(var(--fg-rgb),0.5)',
         transition: 'background 0.2s, color 0.2s',
       }}
     >
@@ -78,8 +78,8 @@ function DockButton({ item }: { item: DockItem }) {
             width: 4,
             height: 4,
             borderRadius: 2,
-            background: '#c8102e',
-            boxShadow: '0 0 8px rgba(200,16,46,0.6)',
+            background: 'var(--accent-primary)',
+            boxShadow: '0 0 8px rgba(var(--accent-primary-rgb),0.6)',
           }}
           transition={{ type: 'spring', stiffness: 350, damping: 30 }}
         />

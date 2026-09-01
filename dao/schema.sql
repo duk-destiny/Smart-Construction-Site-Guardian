@@ -1,5 +1,5 @@
 -- 智护工地 · 施工安全智能体 数据库 Schema（SQLite 3, WAL）
--- 12 表 + 索引 + 审计仅追加触发器 + 3 视图
+-- 16 表 + 索引 + 审计仅追加触发器 + 3 视图
 -- 全部使用 IF NOT EXISTS，保证 init_db() 幂等可重复执行
 -- 类型约定：时间用 TEXT(ISO8601)，布尔用 INTEGER(0/1)；外键需 PRAGMA foreign_keys=ON
 
@@ -249,3 +249,82 @@ SELECT a.id, a.user_id, u.username, a.action, a.detail_json, a.created_at
 FROM audit_logs a
 LEFT JOIN users u ON u.id = a.user_id
 ORDER BY a.created_at DESC;
+
+-- ============================================================
+-- 认知层（Agent 对话式认知任务）四表（设计文档 §5.5）
+-- 与 agent_runs 完全独立：聊天发起的认知任务无对应 tasks 行，
+-- 不复用、不修改 agent_runs；两者经 agent_chat_runs.task_id 桥接（可空回填）
+-- ============================================================
+
+-- 认知层会话表：一次对话窗口（标题/场景），消息与认知任务均挂会话
+CREATE TABLE IF NOT EXISTS chat_sessions (
+    id         TEXT PRIMARY KEY,
+    user_id    TEXT NOT NULL REFERENCES users(id),
+    title      TEXT,                     -- 会话标题（可含场景名，首条消息截取/模型生成）
+    archived   INTEGER NOT NULL DEFAULT 0, -- 归档标记（0=活跃 1=归档；删除为物理删）
+    created_at TEXT NOT NULL,
+    updated_at TEXT                      -- 最后活跃时间（最近一条消息），可空兼容老行
+);
+
+-- 认知任务主表：一次对话触发的 Plan-and-Execute 运行（RunContext 持久化）
+-- status 七态状态机（设计文档 §5.6）：
+-- pending → running → pending_confirm → running → completed / degraded / failed；
+-- 任一非终态可置 cancelled；孤儿扫描按 (status, updated_at) 索引。
+CREATE TABLE IF NOT EXISTS agent_chat_runs (
+    id               TEXT PRIMARY KEY,           -- run_id
+    session_id       TEXT NOT NULL REFERENCES chat_sessions(id),
+    user_id          TEXT NOT NULL REFERENCES users(id),
+    intent           TEXT,                       -- 路由意图（可空=未分类）
+    user_input       TEXT NOT NULL,              -- 用户原文（留痕与恢复上下文）
+    status           TEXT NOT NULL DEFAULT 'pending' CHECK(status IN
+        ('pending','running','pending_confirm','completed','degraded','failed','cancelled')),
+    plan_json        TEXT,                       -- Plan 序列化（挂起时含待确认计划）
+    current_step_idx INTEGER NOT NULL DEFAULT -1, -- 下一步待执行索引，-1=未开始
+    need_confirm     INTEGER NOT NULL DEFAULT 0, -- 计划含副作用工具时代码强制置 1（不信 LLM 自报）
+    confirm_payload  TEXT,                       -- 挂起时的副作用步骤确认卡（序列化）
+    result_json      TEXT,                       -- 最终答案/错误（结构化）
+    error            TEXT,                       -- 失败原因（终态为 failed 时）
+    task_id          TEXT,                       -- 若最终创建 tasks 行则回填；可空、不加外键（桥接上传任务）
+    attachments_json TEXT,                       -- 本轮对话附件（服务端校验后的相对路径 JSON 数组，可空）
+    deadline_sec     REAL NOT NULL DEFAULT 30.0, -- run 级墙钟总预算（周报/视频剧本 60.0）
+    created_at       TEXT NOT NULL,
+    updated_at       TEXT NOT NULL
+);
+
+-- 认知任务步骤明细表：每步落库（失败也留痕）；
+-- UNIQUE(run_id, step_idx) 为幂等恢复的落库依据（恢复前查已有 success 则跳过）
+CREATE TABLE IF NOT EXISTS agent_chat_run_steps (
+    id            INTEGER PRIMARY KEY AUTOINCREMENT,
+    run_id        TEXT NOT NULL REFERENCES agent_chat_runs(id),
+    step_idx      INTEGER NOT NULL,
+    tool          TEXT NOT NULL,                 -- 工具注册表白名单内的工具名
+    args_json     TEXT,                          -- 工具入参（已过 args_schema 校验）
+    status        TEXT NOT NULL DEFAULT 'pending' CHECK(status IN
+        ('pending','success','degraded','failed')),
+    result_digest TEXT,                          -- 代码生成的结果摘要（不存原始输出）
+    cost_ms       INTEGER NOT NULL DEFAULT 0,
+    error         TEXT,
+    created_at    TEXT NOT NULL,
+    UNIQUE(run_id, step_idx)
+);
+
+-- 认知层消息表：只存用户原文/助手最终答案与代码生成摘要，不存原始工具输出；
+-- run_id 指向 agent_chat_runs（新表），不指向 agent_runs；软引用（可空）
+CREATE TABLE IF NOT EXISTS chat_messages (
+    id         INTEGER PRIMARY KEY AUTOINCREMENT,
+    session_id TEXT NOT NULL REFERENCES chat_sessions(id),
+    role       TEXT NOT NULL CHECK(role IN ('user','assistant')),
+    content    TEXT,                             -- 用户原文 / 助手最终答案
+    intent     TEXT,                             -- 本轮路由意图（可空）
+    run_id     TEXT REFERENCES agent_chat_runs(id),
+    digest     TEXT,                             -- 本轮代码生成摘要（≤300字），供下一轮拼上下文
+    attachments TEXT,                            -- 消息附件路径 JSON 数组（用户消息，可空）
+    created_at TEXT NOT NULL
+);
+
+-- 认知层索引：消息按会话时序读取；孤儿 run 扫描按 (status, updated_at)
+CREATE INDEX IF NOT EXISTS idx_chatmsg_session      ON chat_messages(session_id, created_at);
+CREATE INDEX IF NOT EXISTS idx_chatsess_user        ON chat_sessions(user_id, updated_at);
+CREATE INDEX IF NOT EXISTS idx_agentchat_status     ON agent_chat_runs(status, updated_at);
+CREATE INDEX IF NOT EXISTS idx_agentchat_session    ON agent_chat_runs(session_id, created_at);
+CREATE INDEX IF NOT EXISTS idx_agentchat_steps      ON agent_chat_run_steps(run_id, step_idx);

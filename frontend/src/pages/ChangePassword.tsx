@@ -90,7 +90,7 @@ export default function ChangePassword() {
           <h1 style={{
             fontSize: 36,
             fontWeight: 800,
-            color: '#fff',
+            color: 'var(--text-strong)',
             margin: 0,
             lineHeight: 1.2,
             letterSpacing: '-0.02em',
@@ -99,7 +99,7 @@ export default function ChangePassword() {
           </h1>
           <p style={{
             fontSize: 14,
-            color: 'rgba(255,255,255,0.35)',
+            color: 'rgba(var(--fg-rgb),0.35)',
             margin: '16px 0 0',
             lineHeight: 1.6,
           }}>
@@ -110,12 +110,12 @@ export default function ChangePassword() {
 
           <div style={{ marginTop: 48, display: 'flex', gap: 32 }}>
             <div>
-              <div className="mono" style={{ fontSize: 22, fontWeight: 700, color: '#fff' }}>AES-256</div>
-              <div style={{ fontSize: 11, color: 'rgba(255,255,255,0.3)', marginTop: 4 }}>加密传输</div>
+              <div className="mono" style={{ fontSize: 22, fontWeight: 700, color: 'var(--text-strong)' }}>AES-256</div>
+              <div style={{ fontSize: 11, color: 'rgba(var(--fg-rgb),0.3)', marginTop: 4 }}>加密传输</div>
             </div>
             <div>
-              <div className="mono" style={{ fontSize: 22, fontWeight: 700, color: '#fff' }}>≥8位</div>
-              <div style={{ fontSize: 11, color: 'rgba(255,255,255,0.3)', marginTop: 4 }}>密码强度</div>
+              <div className="mono" style={{ fontSize: 22, fontWeight: 700, color: 'var(--text-strong)' }}>≥8位</div>
+              <div style={{ fontSize: 11, color: 'rgba(var(--fg-rgb),0.3)', marginTop: 4 }}>密码强度</div>
             </div>
           </div>
         </motion.div>
@@ -135,37 +135,37 @@ export default function ChangePassword() {
             background: 'rgba(17, 24, 39, 0.6)',
             backdropFilter: 'blur(24px)',
             WebkitBackdropFilter: 'blur(24px)',
-            border: '1px solid rgba(255,255,255,0.08)',
+            border: '1px solid rgba(var(--fg-rgb),0.08)',
             boxShadow: '0 20px 60px rgba(0,0,0,0.3)',
           }}
         >
           <Form form={form} layout="vertical" onFinish={onFinish}>
-            <Form.Item name="old" label={<span style={{ color: 'rgba(255,255,255,0.5)' }}>原密码</span>}
+            <Form.Item name="old" label={<span style={{ color: 'rgba(var(--fg-rgb),0.5)' }}>原密码</span>}
               rules={[{ required: true }]}>
               <Input.Password placeholder="输入当前密码" />
             </Form.Item>
-            <Form.Item name="new1" label={<span style={{ color: 'rgba(255,255,255,0.5)' }}>新密码</span>}
+            <Form.Item name="new1" label={<span style={{ color: 'rgba(var(--fg-rgb),0.5)' }}>新密码</span>}
               rules={[{ required: true }, { min: 8, message: '至少 8 位' }]}>
               <Input.Password placeholder="至少 8 位" />
             </Form.Item>
-            <Form.Item name="new2" label={<span style={{ color: 'rgba(255,255,255,0.5)' }}>确认新密码</span>}
+            <Form.Item name="new2" label={<span style={{ color: 'rgba(var(--fg-rgb),0.5)' }}>确认新密码</span>}
               rules={[{ required: true }]}>
               <Input.Password placeholder="再次输入新密码" />
             </Form.Item>
             <Button type="primary" htmlType="submit" block loading={loading}
               style={{
                 height: 48, borderRadius: 12, fontWeight: 600, marginTop: 8,
-                background: 'linear-gradient(135deg, #c8102e 0%, #9b0a22 100%)',
-                boxShadow: '0 4px 16px rgba(200,16,46,0.25)',
+                background: 'linear-gradient(135deg, var(--accent-primary) 0%, var(--accent-primary-deep) 100%)',
+                boxShadow: '0 4px 16px rgba(var(--accent-primary-rgb),0.25)',
               }}>
               提交修改
             </Button>
             {!forced && (
               <Button block style={{
                 marginTop: 12, borderRadius: 12,
-                background: 'rgba(255,255,255,0.04)',
-                border: '1px solid rgba(255,255,255,0.08)',
-                color: 'rgba(255,255,255,0.5)',
+                background: 'rgba(var(--fg-rgb),0.04)',
+                border: '1px solid rgba(var(--fg-rgb),0.08)',
+                color: 'rgba(var(--fg-rgb),0.5)',
               }} onClick={() => {
                 logout()
                 navigate('/login', { replace: true })

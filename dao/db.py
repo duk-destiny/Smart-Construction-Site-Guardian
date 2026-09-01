@@ -11,7 +11,9 @@ import sqlite3
 import threading
 from pathlib import Path
 
-DEFAULT_DB_PATH = str(Path(__file__).resolve().parent.parent / "data" / "app.db")
+# HZZ_DB_PATH 环境变量可重定向库文件（多实例/临时库测试隔离用；生产不设即默认路径）
+DEFAULT_DB_PATH = os.environ.get("HZZ_DB_PATH") or str(
+    Path(__file__).resolve().parent.parent / "data" / "app.db")
 
 _MIGRATIONS: dict[str, list[tuple[str, str]]] = {
     "detection_records": [
@@ -54,6 +56,16 @@ _MIGRATIONS: dict[str, list[tuple[str, str]]] = {
         ("must_change_password", "INTEGER NOT NULL DEFAULT 0"),
         ("disabled", "INTEGER NOT NULL DEFAULT 0"),
     ],
+    # v2.2 对话窗口：会话归档标记 + 对话附件（老库自动 ALTER 补列）
+    "chat_sessions": [
+        ("archived", "INTEGER NOT NULL DEFAULT 0"),
+    ],
+    "agent_chat_runs": [
+        ("attachments_json", "TEXT"),
+    ],
+    "chat_messages": [
+        ("attachments", "TEXT"),
+    ],
 }
 
 # 追加式索引迁移（Phase 1）：高频查询路径补索引，幂等可重复执行
@@ -83,6 +95,9 @@ def get_conn(db_path: str | None = None) -> sqlite3.Connection:
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA journal_mode=WAL;")
     conn.execute("PRAGMA foreign_keys=ON;")
+    # 双进程（Streamlit + FastAPI）共享同一物理库：写锁竞争时等待 3s 而非立即报
+    # database is locked，认知层孤儿扫描/状态翻转与实时帧落库并发时兜底（§5.6）。
+    conn.execute("PRAGMA busy_timeout=3000;")
     return conn
 
 

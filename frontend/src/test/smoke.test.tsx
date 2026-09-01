@@ -27,9 +27,9 @@ describe('Login', () => {
         </AuthProvider>
       </MemoryRouter>,
     )
-    expect(screen.getByLabelText('用户名')).toBeInTheDocument()
-    expect(screen.getByLabelText('密码')).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: /登\s*录/ })).toBeInTheDocument()
+    expect(screen.getByPlaceholderText('用户名')).toBeInTheDocument()
+    expect(screen.getByPlaceholderText('密码')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '进入系统' })).toBeInTheDocument()
   })
 })
 

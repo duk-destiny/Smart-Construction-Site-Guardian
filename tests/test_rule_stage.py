@@ -2,8 +2,8 @@
 
 import pytest
 from fpdf import FPDF
-from agents.base import AgentMessage
-from agents.rule_agent import RuleAgent
+from pipeline.base import StageMessage
+from pipeline.rule import RuleStage
 from core.rag_engine import RagEngine
 from tests.cjk_font import cjk_font_path
 
@@ -26,7 +26,7 @@ def _make_cjk_pdf(save_path: str, lines: list[str]):
 
 @pytest.fixture
 def ready_rag(tmp_path):
-    """预置 RAG 的 RuleAgent fixture。"""
+    """预置 RAG 的 RuleStage fixture。"""
     p = str(tmp_path / "spec.pdf")
     _make_cjk_pdf(p, [
         "第一条 动火作业必须设置专职监火人，监火人不得擅离职守。",
@@ -37,12 +37,12 @@ def ready_rag(tmp_path):
     chroma_dir = str(tmp_path / "chroma_rule")
     eng = RagEngine(chroma_dir=chroma_dir)
     eng.build([p])
-    return RuleAgent(rag=eng)
+    return RuleStage(rag=eng)
 
 
 def test_rule_agent_output(ready_rag):
     """规范 Agent 输出含 compliance + training_tips。"""
-    msg = AgentMessage(
+    msg = StageMessage(
         task_id="t1", agent="rule", status="pending",
         payload={
             "permit_info": {"watcher": "", "extinguisher": "无", "fire_blanket": "未设置", "approval": "否"},
@@ -65,7 +65,7 @@ def test_rule_agent_output(ready_rag):
 
 def test_rule_agent_compliance_all_pass(ready_rag):
     """全合规场景：作业票字段齐全。"""
-    msg = AgentMessage(
+    msg = StageMessage(
         task_id="t2", agent="rule", status="pending",
         payload={
             "permit_info": {
@@ -87,7 +87,7 @@ def test_rule_agent_compliance_all_pass(ready_rag):
 
 def test_rule_agent_cost_ms(ready_rag):
     """Agent 运行时记录 cost_ms。"""
-    msg = AgentMessage(
+    msg = StageMessage(
         task_id="t3", agent="rule", status="pending",
         payload={"permit_info": {}, "violation_descs": []},
         error=None, cost_ms=0,

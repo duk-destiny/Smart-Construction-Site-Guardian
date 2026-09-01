@@ -12,6 +12,28 @@ from playwright.sync_api import sync_playwright, expect
 from _common import BASE, ROOT, SHOTS, check, login, logout, exit_with_summary
 
 PDF = ROOT / "docs" / "说明文档.pdf"
+if not PDF.exists():
+    # 自举夹具：仓库不附带说明文档.pdf 时用 fpdf2 现场生成一份中文规范
+    # PDF（条款切分器按"第X条/1."切分，须有条款结构与 CJK 字体才可入库）
+    import sys as _sys
+    from fpdf import FPDF
+    _sys.path.insert(0, str(ROOT / "tests"))
+    from cjk_font import cjk_font_path
+
+    _doc = FPDF()
+    _doc.add_page()
+    _doc.add_font("cjk", "", cjk_font_path())
+    _doc.set_font("cjk", size=12)
+    for line in (
+        "动火作业安全管理规定（E2E 夹具）",
+        "第一条 动火作业前应当清理作业周边易燃物，距离不少于十米。",
+        "第二条 动火作业期间应当配备监火人，监火人不得离岗。",
+        "第三条 作业现场应当配置不少于两具合格灭火器，并设置防火毯。",
+        "第四条 作业结束后应当确认无残留火种，经复查合格后方可离场。",
+    ):
+        _doc.cell(text=line, new_x="LMARGIN", new_y="NEXT")
+    PDF.parent.mkdir(parents=True, exist_ok=True)
+    _doc.output(str(PDF))
 
 
 def switch_tab(page, label):
@@ -23,7 +45,7 @@ def main():
     with sync_playwright() as p:
         browser = p.chromium.launch(headless=True)
         page = browser.new_page(viewport={"width": 1440, "height": 900})
-        login(page, "admin", "Admin@E2E123", "/report")
+        login(page, "admin", "Admin@E2E123", "/chat")
         page.goto(BASE + "/admin", wait_until="networkidle")
         expect(page.get_by_text("管理端", exact=True).first).to_be_visible(timeout=8000)
         for t in ("用户治理", "模型版本", "知识库", "推送通道", "系统自检", "审计日志", "纠偏样本"):
@@ -90,12 +112,17 @@ def main():
         # ===== 3. 知识库：导入 PDF =====
         switch_tab(page, "知识库")
         check("知识库导入按钮", page.get_by_text("导入规范 PDF").count() > 0)
-        page.locator("input[type=file]").first.set_input_files(str(PDF))
-        try:
-            expect(page.get_by_text(re.compile("导入成功")).first).to_be_visible(timeout=60000)
-            check("PDF 导入成功", True)
-        except Exception as e:
-            check("PDF 导入成功", False, str(e)[:100])
+        for attempt in range(2):
+            page.locator("input[type=file]").first.set_input_files(str(PDF))
+            try:
+                expect(page.get_by_text(re.compile("导入成功")).first
+                       ).to_be_visible(timeout=60000)
+                check("PDF 导入成功", True)
+                break
+            except Exception as e:
+                # BGE 子进程冷启偶发失败（后端自动留痕"下次重试"），再试一次
+                if attempt == 1:
+                    check("PDF 导入成功", False, str(e)[:100])
         page.wait_for_timeout(600)
         kb_rows = page.locator(".ant-table-tbody tr.ant-table-row")
         check("知识库文档列表更新", kb_rows.count() >= 1

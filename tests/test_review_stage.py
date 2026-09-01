@@ -1,17 +1,17 @@
 """复核 Agent 测试：高风险低置信度与条款未匹配进入人工复核。"""
 
-from agents.base import AgentMessage
-from agents.review_agent import ReviewAgent
+from pipeline.base import StageMessage
+from pipeline.review import ReviewStage
 
 
-def _msg(payload: dict) -> AgentMessage:
-    return AgentMessage(
+def _msg(payload: dict) -> StageMessage:
+    return StageMessage(
         task_id="t_review", agent="review", status="pending",
         payload=payload, error=None, cost_ms=0)
 
 
 def test_low_conf_critical_requires_review():
-    out = ReviewAgent().run(_msg({
+    out = ReviewStage().run(_msg({
         "risk_level": "重大",
         "detections": [{"cls": "spark", "conf": 0.42}],
         "compliance": [],
@@ -22,7 +22,7 @@ def test_low_conf_critical_requires_review():
 
 
 def test_high_conf_critical_no_review():
-    out = ReviewAgent().run(_msg({
+    out = ReviewStage().run(_msg({
         "risk_level": "重大",
         "detections": [{"cls": "spark", "conf": 0.93}],
         "compliance": [{"needs_review": False}],
@@ -31,7 +31,7 @@ def test_high_conf_critical_no_review():
 
 
 def test_rule_missing_clause_requires_review():
-    out = ReviewAgent().run(_msg({
+    out = ReviewStage().run(_msg({
         "risk_level": "较大",
         "detections": [],
         "compliance": [{"label": "火花", "needs_review": True}],
@@ -46,7 +46,7 @@ def test_low_conf_high_risk_at_low_risk_level_requires_review():
     导致 PPE 类（no_helmet/no_vest）不在 hot_work 矩阵、风险升不上去时
     复核被完全跳过，UI 显示"无需人工复核"。
     """
-    out = ReviewAgent().run(_msg({
+    out = ReviewStage().run(_msg({
         "risk_level": "低",
         "detections": [{"cls": "no_helmet", "conf": 0.30}],
         "compliance": [],
@@ -57,7 +57,7 @@ def test_low_conf_high_risk_at_low_risk_level_requires_review():
 
 def test_permit_noncompliant_at_low_risk_requires_review():
     """盲区回归：risk_level=低 时作业票不合规也须复核。"""
-    out = ReviewAgent().run(_msg({
+    out = ReviewStage().run(_msg({
         "risk_level": "低",
         "detections": [],
         "compliance": [{"verdict": "不合规", "label": "监火人"}],
@@ -89,19 +89,22 @@ def assist_env(tmp_path, monkeypatch):
 
 
 class FakeEng:
-    """可编程 LLM 桩：返回固定建议/抛异常/不可用。"""
+    """可编程 ChatClient 桩：返回固定建议/抛异常/无可用 provider。"""
     outcome = "ok"
     text = "可能原因:距离远。复核要点:核对灭火器压力表。建议:2小时内复核。"
 
-    def available(self):
-        return FakeEng.outcome != "unavailable"
+    def available_provider(self):
+        return None if FakeEng.outcome == "unavailable" else "local"
 
-    def chat(self, system, user, num_predict=None):
+    def chat(self, system, user, **kwargs):
+        from core.chat_client import ChatResult
         if FakeEng.outcome == "raise":
             raise RuntimeError("ollama down")
         if FakeEng.outcome == "empty":
-            return None
-        return FakeEng.text
+            return ChatResult(content=None, provider="local",
+                              status="failed", cost_ms=1, error="LLM 空输出")
+        return ChatResult(content=FakeEng.text, provider="local",
+                          status="degraded", cost_ms=1)
 
 
 def _wait_assist(conn, tid, timeout=8.0):
@@ -116,11 +119,12 @@ def _wait_assist(conn, tid, timeout=8.0):
 
 
 def test_assist_async_persists_advice(assist_env, monkeypatch):
-    from agents.review_agent import ReviewAgent
+    from pipeline.review import ReviewStage
 
     conn, tid = assist_env
-    monkeypatch.setattr("agents.review_agent.LlmEngine", FakeEng)
-    ReviewAgent().assist_async(
+    monkeypatch.setattr("pipeline.review.get_chat_client",
+                        lambda: FakeEng())
+    ReviewStage().assist_async(
         tid, [{"cls": "smoke", "conf": 0.40, "scene": "hot_work"}],
         [], "重大", ["smoke 置信度 0.40 低于 0.55，属高风险项，建议人工复核"])
     row = _wait_assist(conn, tid)
@@ -132,12 +136,13 @@ def test_assist_async_persists_advice(assist_env, monkeypatch):
 
 
 def test_assist_async_llm_unavailable_skips(assist_env, monkeypatch):
-    from agents.review_agent import ReviewAgent
+    from pipeline.review import ReviewStage
 
     conn, tid = assist_env
     FakeEng.outcome = "unavailable"
-    monkeypatch.setattr("agents.review_agent.LlmEngine", FakeEng)
-    ReviewAgent().assist_async(tid, [{"cls": "smoke", "conf": 0.4}], [], "重大",
+    monkeypatch.setattr("pipeline.review.get_chat_client",
+                        lambda: FakeEng())
+    ReviewStage().assist_async(tid, [{"cls": "smoke", "conf": 0.4}], [], "重大",
                                ["低置信"])
     row = _wait_assist(conn, tid)
     assert row is not None and row["status"] == "skipped"
@@ -145,12 +150,13 @@ def test_assist_async_llm_unavailable_skips(assist_env, monkeypatch):
 
 
 def test_assist_async_llm_error_lands_failed(assist_env, monkeypatch):
-    from agents.review_agent import ReviewAgent
+    from pipeline.review import ReviewStage
 
     conn, tid = assist_env
     FakeEng.outcome = "raise"
-    monkeypatch.setattr("agents.review_agent.LlmEngine", FakeEng)
-    ReviewAgent().assist_async(tid, [{"cls": "smoke", "conf": 0.4}], [], "重大",
+    monkeypatch.setattr("pipeline.review.get_chat_client",
+                        lambda: FakeEng())
+    ReviewStage().assist_async(tid, [{"cls": "smoke", "conf": 0.4}], [], "重大",
                                ["低置信"])
     row = _wait_assist(conn, tid)
     assert row is not None and row["status"] == "failed"

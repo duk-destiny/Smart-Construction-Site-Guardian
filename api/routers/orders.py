@@ -12,7 +12,7 @@ from urllib.parse import quote
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
 
 from api.deps import CurrentUser, get_current_user, require_roles
-from api.schemas import DispatchIn, ReviewIn
+from api.schemas import DispatchIn, OrderAskIn, ReviewIn
 from api.uploads import UploadedLike
 from services import lookup_service, order_service
 
@@ -111,3 +111,19 @@ def export(order_id: str, user=Depends(_staff)) -> dict:
     return {"ok": True,
             "file": {"name": name,
                      "download_url": f"/api/reports/exports/{quote(name)}"}}
+
+
+@router.post("/{order_id}/ask")
+def ask_order(order_id: str, body: OrderAskIn,
+              user: CurrentUser = Depends(get_current_user)) -> dict:
+    """工单 AI 弹窗（v2.2）：仅携带当前工单上下文的只读问答。
+
+    权限在服务层强制：本单责任人本人或 admin/safety（跨属主 403 /
+    不存在 404）；单轮 LLM 问答不进认知内核、零工具调用、零写入。
+    """
+    try:
+        return order_service.ask_order(order_id, user.user_id, body.question)
+    except LookupError:
+        raise HTTPException(status_code=404, detail="工单不存在")
+    except PermissionError:
+        raise HTTPException(status_code=403, detail="仅本单责任人或管理员可问询")

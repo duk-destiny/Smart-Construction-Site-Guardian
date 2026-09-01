@@ -1,4 +1,4 @@
-"""融合 Agent（M05）：消费视觉检测结果 + 规范合规结论，定级风险并过滤误报。
+"""融合定级段（M05）：消费视觉检测结果 + 规范合规结论，定级风险并过滤误报。
 
 逻辑（LLD §3.1~3.3）：
 - 遍历 detections，按 (detect类别, compliance结论) 查矩阵取最高风险等级；
@@ -11,7 +11,7 @@ import os
 
 import yaml
 
-from agents.base import AgentBase, AgentMessage
+from pipeline.base import StageBase, StageMessage
 from core.config import ConfigLoader
 from core.false_positive import filter_ppe_contradiction, filter_smoke_vest_conflict
 from core.yolo_engine import WHITELIST
@@ -24,8 +24,8 @@ RISK_ORDER = {"低": 0, "一般": 1, "较大": 2, "重大": 3}
 _DEFAULT_RULES = "config/rules/hot_work.yaml"
 
 
-class FusionAgent(AgentBase):
-    """风险融合定级 Agent。"""
+class FusionStage(StageBase):
+    """风险融合定级段。"""
 
     def __init__(self, rules_path: str | None = None, scene_id: str | None = None):
         if scene_id:
@@ -56,7 +56,7 @@ class FusionAgent(AgentBase):
                 return row.get("risk"), row.get("reason", "")
         return None, ""
 
-    def _execute(self, msg: AgentMessage) -> AgentMessage:
+    def _execute(self, msg: StageMessage) -> StageMessage:
         detections = msg.payload.get("detections", []) or []
         compliance = msg.payload.get("compliance", []) or []
         verdicts = {c.get("verdict", "") for c in compliance if c.get("verdict")}

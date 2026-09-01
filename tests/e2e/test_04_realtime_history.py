@@ -40,7 +40,7 @@ def main():
     with sync_playwright() as p:
         browser = p.chromium.launch(headless=True)
         page = browser.new_page(viewport={"width": 1440, "height": 900})
-        login(page, "admin", "Admin@E2E123", "/report")
+        login(page, "admin", "Admin@E2E123", "/chat")
 
         # ===== 1. 实时监测页结构 =====
         page.goto(BASE + "/realtime", wait_until="networkidle")

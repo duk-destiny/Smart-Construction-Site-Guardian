@@ -38,7 +38,7 @@ class PdfParser:
     def parse(path: str | Path) -> list[dict[str, str]]:
         """解析 PDF，返回 [{"clause_no": str, "clause_text": str}, ...]。
 
-        异常不抛出，返回空列表并打印错误（满足 AgentBase 规范）。
+        异常不抛出，返回空列表并打印错误（满足 StageBase 规范）。
         """
         try:
             import fitz  # PyMuPDF

@@ -26,7 +26,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
-from api.routers import (admin, alarms, auth, history, media, orders,
+from api.routers import (admin, agent, alarms, auth, history, media, orders,
                          reports, tasks, ws)
 from core.config import ConfigError, shared_config  # 白名单（情况1）：只读配置
 from core.logging import get_logger      # 白名单（情况1）：日志
@@ -81,6 +81,13 @@ async def _lifespan(_: FastAPI):
         session_entry.ensure_ready()
     except Exception as exc:  # noqa: BLE001 自举失败不阻断进程，但必须留痕
         log.warning(f"启动自举失败（建库/种子账号/模型注册）: {exc}")
+    try:
+        # 认知层孤儿 run 扫描（§5.6.3）：与现有预热同序，启动时处置
+        # 进程重启遗留的 pending/running（标 failed 不自动重跑）
+        from services.agent.run_service import PlanRunService
+        PlanRunService.scan_orphans()
+    except Exception as exc:  # noqa: BLE001 扫描失败不阻断启动，下次读路径惰性兼容
+        log.warning(f"认知层孤儿扫描失败: {exc}")
     hub = None
     try:
         # Phase 4：实时 Hub（后端唯一推理循环）——config.realtime.enabled
@@ -170,13 +177,15 @@ def _mount_frontend(app: FastAPI) -> None:
             candidate = (_DIST / full_path).resolve()
             if candidate.is_file() and str(candidate).startswith(dist_root):
                 return FileResponse(candidate)
-        return FileResponse(index)
+        # index.html 不缓存：构建后 hash 变化，浏览器缓存旧 index 会引用
+        # 已删除的旧 bundle 导致白屏（assets 指纹文件可安全长缓存）
+        return FileResponse(index, headers={"Cache-Control": "no-cache"})
 
 
 def create_app() -> FastAPI:
     app = FastAPI(
         title="智护工地 API",
-        version="1.0.0",
+        version="2.2.0",
         description="施工安全 AI 监控系统（动火作业 + 施工 PPE）。"
                     "认证：POST /api/auth/login 取 JWT，"
                     "后续请求带 Authorization: Bearer <token>。离线内网部署。",
@@ -191,7 +200,7 @@ def create_app() -> FastAPI:
                 "version": app.version}
 
     for mod in (auth, tasks, alarms, orders, reports, admin, history,
-                media, ws):
+                media, agent, ws):
         app.include_router(mod.router, prefix=_API_PREFIX)
 
     # 前端构建产物存在才挂载（Phase 3 产物；SPA fallback 含在内）

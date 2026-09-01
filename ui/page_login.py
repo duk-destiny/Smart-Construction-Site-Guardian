@@ -55,7 +55,7 @@ def _render_forced_change(pending: dict) -> None:
 @safe_page("登录")
 def render_login() -> None:
     st.title("🌊 智护工地 · 施工安全智能体")
-    st.caption("本地离线 · 多Agent 安全研判")
+    st.caption("本地离线 · 智能安全研判")
 
     pending = st.session_state.get("_pending_pwd_user")
     if pending:

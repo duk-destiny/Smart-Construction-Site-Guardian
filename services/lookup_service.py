@@ -44,6 +44,31 @@ def history_orders() -> list[dict]:
         return [dict(r) for r in WorkOrderDAO(conn).list_all_with_risk()]
 
 
+# 问候/身份/能力询问（规则快路径零 LLM 直答，v2.2 补闲聊归宿）
+_GREETING_RE = None
+
+
+def greeting_re():
+    global _GREETING_RE
+    if _GREETING_RE is None:
+        import re
+        _GREETING_RE = re.compile(
+            r"^(?:(?:你好|您好|嗨|哈喽|hi|hello|在吗|你是谁|你叫什么名字?|"
+            r"你是干什么的|你能做什么|你能干什么|你会什么|帮助|help)"
+            r"[!！。？?～~，,\s]*)+$", re.I)
+    return _GREETING_RE
+
+
+def greeting_reply() -> dict:
+    """问候/寒暄的确定性回复（ChatRoute 同构，前端欢迎卡渲染）。"""
+    return {
+        "action": "greeting", "tier": "rule", "status": None,
+        "days": None, "order_id": None,
+        "hint": "你好！我是智护工地安全助手",
+        "candidates": [], "data": None,
+    }
+
+
 def chat_execute(text: str) -> dict:
     """对话式只读查询（API 用）：路由 + 按动作执行只读取数，一次返回。
 
@@ -64,7 +89,15 @@ def chat_execute(text: str) -> dict:
             return {"action": "order_list", "tier": "rule", "status": None,
                     "days": 7, "order_id": None, "hint": "最新待办工单",
                     "candidates": [r["id"] for r in rows], "data": rows}
+        if greeting_re().match(text.strip()):
+            return greeting_reply()
         route = router.route(text)
+        if route.path == "cognitive":
+            # 认知意图（周报/根因/证据问答/视频分析）：本函数仅处理快路径，
+            # 透传 path:"cognitive" 标记，执行交由 /agent/chat 异步 run（§5.11）
+            out = dataclasses.asdict(route)
+            out["data"] = None
+            return out
         data = None
         action = route.action
         if action == "order_detail" and route.order_id:

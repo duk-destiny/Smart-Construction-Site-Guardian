@@ -59,9 +59,13 @@ api.interceptors.response.use(
       // 任务轮询（/tasks/{id}/result|progress）的 404 属正常态（结果未就绪），静默不提示；仍 reject 由调用方处理
       const url: string = error?.config?.url || ''
       const method: string = (error?.config?.method || '').toUpperCase()
-      const isTaskPoll404 =
-        status === 404 && method === 'GET' && /\/tasks\/[^/]+\/(result|progress)$/.test(url)
-      if (!isTaskPoll404) message.error(detail)
+      // 轮询类 404 属正常态（任务/认知 run 未就绪或已随会话删除），静默不提示；仍 reject 由调用方处理
+      const isPoll404 =
+        status === 404 && method === 'GET' &&
+        (/\/tasks\/[^/]+\/(result|progress)$/.test(url) ||
+         /\/agent\/runs\/[^/]+\/(progress|trace)$/.test(url))
+      // 501 = 能力未配置（asr/tts），由调用方弹「模型暂未拥有该能力」提示，此处不重复 toast
+      if (!isPoll404 && status !== 501) message.error(detail)
     }
     return Promise.reject(new Error(detail))
   },
@@ -69,7 +73,9 @@ api.interceptors.response.use(
 
 /** 下载二进制（导出 CSV/Excel/PDF）：走同一鉴权，成功后触发浏览器保存。 */
 export async function downloadFile(url: string, fallbackName: string) {
-  const resp = await api.get(url, { responseType: 'blob' })
+  // 后端返回的 download_url 自带 /api 前缀，axios baseURL 又是 /api——归一化防 /api/api
+  const path = url.startsWith('/api/') ? url.slice(4) : url
+  const resp = await api.get(path, { responseType: 'blob' })
   const dispo: string = resp.headers['content-disposition'] || ''
   const m = /filename\*?=(?:UTF-8'')?"?([^";]+)"?/i.exec(dispo)
   const name = m ? decodeURIComponent(m[1]) : fallbackName

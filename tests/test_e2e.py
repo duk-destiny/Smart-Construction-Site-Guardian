@@ -3,17 +3,17 @@
 YOLO ONNX 未就绪，注入 StubVision 提供 detections，验证：
 - 工单生成、risk_level 合理、审计有记录
 - 主链路耗时 < 8s（C3）
-- 降级：LLM 不可用时 ActionAgent 走模板（已在 P4 验证），此处验证 Ollama 宕机不影响主流程
+- 降级：LLM 不可用时 ActionStage 走模板（已在 P4 验证），此处验证 Ollama 宕机不影响主流程
 """
 import time
 
 import fpdf
 import pytest
-from agents.base import AgentMessage
-from agents.orchestrator import Orchestrator
-from agents.rule_agent import RuleAgent
-from agents.fusion_agent import FusionAgent
-from agents.action_agent import ActionAgent
+from pipeline.base import StageMessage
+from pipeline.orchestrator import Orchestrator
+from pipeline.rule import RuleStage
+from pipeline.fusion import FusionStage
+from pipeline.action import ActionStage
 from dao.db import get_conn, init_db
 from dao.models import UserDAO, TaskDAO, AuditDAO, WorkOrderDAO, RiskDAO
 from services.task_service import TaskService
@@ -30,7 +30,7 @@ if not os.path.isdir("data/models/BAAI--bge-small-zh-v1.5/snapshots/master"):
 
 class StubVision:
     """合成视觉：返回火花检测（模拟 YOLO 实检输出）。"""
-    def run(self, msg: AgentMessage) -> AgentMessage:
+    def run(self, msg: StageMessage) -> StageMessage:
         msg.status = "success"
         msg.payload = {
             "detections": [{"cls": "spark", "conf": 0.93}],
@@ -64,9 +64,9 @@ def e2e_env(tmp_path):
     init_db(conn)
     uid = UserDAO(conn).insert("demo", "h", "safety")
     kb = _build_kb(tmp_path)
-    rule = RuleAgent(rag=kb)
+    rule = RuleStage(rag=kb)
     orch = Orchestrator(
-        vision=StubVision(), rule=rule, fusion=FusionAgent(), action=ActionAgent(),
+        vision=StubVision(), rule=rule, fusion=FusionStage(), action=ActionStage(),
         progress_cb=TaskService(conn).update_progress,
     )
     return {"conn": conn, "uid": uid, "orch": orch, "task_svc": TaskService(conn)}
@@ -121,7 +121,7 @@ class _BoomLlm:
 def test_e2e_llm_down_degrade(e2e_env):
     """降级演练：Ollama 报错/宕机时，主链路仍返回模板工单，不崩溃（C4 可用性）。"""
     orch = e2e_env["orch"]
-    orch.action = ActionAgent(llm=_BoomLlm())
+    orch.action = ActionStage(llm=_BoomLlm())
     tid = e2e_env["task_svc"].create_task(e2e_env["uid"], [], {"watcher": "李四"})
     out = orch.execute(tid, images=[], permit_info={"watcher": "李四"})
     assert out.status in ("success", "degraded")

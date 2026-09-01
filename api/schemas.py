@@ -44,6 +44,46 @@ class ChatQueryIn(BaseModel):
     text: str = Field(default="", max_length=500)
 
 
+class AgentChatIn(BaseModel):
+    """认知层对话入口（§5.12）：session_id 可空=新建会话。
+
+    text 允许空串：空文本=最新待办清单契约（§5.11）在快路径侧保留，
+    与旧 /tasks/query-chat 行为一致（dispatch_chat 内分流）。
+    attachments 为 /api/agent/uploads 返回的相对路径（服务端校验后
+    强制绑定给 run_video_pipeline，不经 LLM 之手）。
+    """
+
+    text: str = Field(default="", max_length=2000)
+    session_id: str | None = Field(default=None, max_length=64)
+    attachments: list[str] = Field(default_factory=list, max_length=4)
+
+
+class SessionCreateIn(BaseModel):
+    """新建空会话（对话窗口「新建对话」按钮）。"""
+
+    title: str | None = Field(default=None, max_length=64)
+
+
+class SessionPatchIn(BaseModel):
+    """会话改名/归档（对话窗口侧栏管理）。至少提供一个字段。"""
+
+    title: str | None = Field(default=None, max_length=64)
+    archived: bool | None = None
+
+
+class OrderAskIn(BaseModel):
+    """工单 AI 弹窗问询（责任人/管理员读单助手）。"""
+
+    question: str = Field(min_length=1, max_length=500)
+
+
+class AgentConfirmIn(BaseModel):
+    """挂起确认（§5.6.2）：confirm 可携带 modified_plan（删步/改参数）。"""
+
+    action: Literal["confirm", "cancel"]
+    modified_plan: dict | None = None
+
+
 class OverrideIn(BaseModel):
     new_level: Literal["重大", "较大", "一般", "低"]
     reason: str = Field(min_length=1, max_length=500)

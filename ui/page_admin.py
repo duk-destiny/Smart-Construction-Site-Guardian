@@ -480,7 +480,16 @@ def render_admin() -> None:
         for m in models:
             families.setdefault(m["name"], []).append(m)
         for name, rows in families.items():
-            rows = sorted(rows, key=lambda r: int(r["version"].lstrip("v") or 0), reverse=True)
+            def _ver_num(ver: str) -> int:
+                digits = ""
+                for ch in ver.lstrip("v"):
+                    if ch.isdigit():
+                        digits += ch
+                    else:
+                        break
+                return int(digits or 0)
+
+            rows = sorted(rows, key=lambda r: _ver_num(r["version"]), reverse=True)
             ver_to_row = {r["version"]: r for r in rows}
             active = next((r for r in rows if r["active"]), None)
             active_ver = active["version"] if active else rows[0]["version"]

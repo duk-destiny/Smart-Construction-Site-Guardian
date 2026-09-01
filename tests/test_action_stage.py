@@ -1,7 +1,7 @@
 """闭环处置 Agent 测试（TDD：工单组装 + LLM 润色/模板降级，注入假 LLM）。"""
 
-from agents.action_agent import ActionAgent
-from agents.base import AgentMessage
+from pipeline.action import ActionStage
+from pipeline.base import StageMessage
 
 
 class _FakeLlm:
@@ -16,7 +16,7 @@ class _FakeLlm:
 
 def test_action_template_fallback():
     """LLM 不可用（返回 None）→ 模板降级必有 worker_notice。"""
-    msg = AgentMessage(
+    msg = StageMessage(
         task_id="t1", agent="action", status="pending",
         payload={
             "risk_level": "重大",
@@ -26,7 +26,7 @@ def test_action_template_fallback():
         },
         error=None, cost_ms=0,
     )
-    out = ActionAgent(llm=_FakeLlm(None)).run(msg)
+    out = ActionStage(llm=_FakeLlm(None)).run(msg)
     assert out.status == "success"
     wo = out.payload["work_order"]
     assert wo["risk_level"] == "重大"
@@ -53,7 +53,7 @@ def test_action_llm_polish_used():
     """
     import time as _t
     wo_dao = _FakeWoDao()
-    msg = AgentMessage(
+    msg = StageMessage(
         task_id="t2", agent="action", status="pending",
         payload={
             "risk_level": "较大", "reasons": ["未戴面罩"],
@@ -61,7 +61,7 @@ def test_action_llm_polish_used():
         },
         error=None, cost_ms=0,
     )
-    agent = ActionAgent(llm=_FakeLlm("兄弟，动火记得戴面罩！"), work_order_dao=wo_dao)
+    agent = ActionStage(llm=_FakeLlm("兄弟，动火记得戴面罩！"), work_order_dao=wo_dao)
     out = agent.run(msg)
     assert out.status == "success"
     # 主链路返回的是模板（快速、可计时）
@@ -79,12 +79,12 @@ def test_action_llm_polish_used():
 
 def test_action_low_risk_complete():
     """一般风险：工单字段完整。"""
-    msg = AgentMessage(
+    msg = StageMessage(
         task_id="t3", agent="action", status="pending",
         payload={"risk_level": "一般", "reasons": ["周边易燃物未清理"],
                  "compliance": [], "training_tips": []},
         error=None, cost_ms=0,
     )
-    out = ActionAgent(llm=_FakeLlm(None)).run(msg)
+    out = ActionStage(llm=_FakeLlm(None)).run(msg)
     assert out.status == "success"
     assert out.payload["work_order"]["risk_level"] == "一般"

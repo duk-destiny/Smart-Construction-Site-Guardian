@@ -53,11 +53,12 @@ class _BgeProxy:
         env["OMP_NUM_THREADS"] = "1"
         env["TOKENIZERS_PARALLELISM"] = "false"
         cwd = str(Path(__file__).resolve().parent.parent)
+        self._stderr_tail: list[str] = []
         self._proc = subprocess.Popen(
             [sys.executable, "-m", "core.bge_worker"],
             stdin=subprocess.PIPE,
             stdout=subprocess.PIPE,
-            stderr=subprocess.DEVNULL,
+            stderr=subprocess.PIPE,
             env=env,
             cwd=cwd,
             text=True,
@@ -69,11 +70,25 @@ class _BgeProxy:
         self._queue: queue.Queue[dict | None] = queue.Queue()
         self._reader_thread = threading.Thread(target=self._reader_loop, daemon=True)
         self._reader_thread.start()
+        self._err_thread = threading.Thread(target=self._stderr_loop, daemon=True)
+        self._err_thread.start()
         atexit.register(self._cleanup)
-        ready = self._recv(timeout=60)
+        ready = self._recv(timeout=120)   # 冷启（加载 safetensors + 重负载机器）实测可超 60s
         if not ready or not ready.get("ok"):
             self._cleanup()
-            raise RuntimeError(f"BGE worker 启动失败: {ready}")
+            tail = " | ".join(self._stderr_tail[-3:])[-200:]
+            raise RuntimeError(f"BGE worker 启动失败: {ready}"
+                               + (f"（stderr: {tail}）" if tail else ""))
+
+    def _stderr_loop(self) -> None:
+        """留存子进程 stderr 尾部（启动崩溃时并入异常消息，替代 DEVNULL 黑盒）。"""
+        try:
+            for line in self._proc.stderr:
+                self._stderr_tail.append(line.rstrip())
+                if len(self._stderr_tail) > 10:
+                    self._stderr_tail.pop(0)
+        except Exception:
+            pass
 
     def _reader_loop(self) -> None:
         """持久读取线程：逐行读 stdout 并放入队列，避免多线程竞争。"""

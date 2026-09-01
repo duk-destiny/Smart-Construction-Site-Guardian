@@ -184,6 +184,12 @@ def _tab3_lookup() -> None:
         return
 
     route = lookup_service.route(text)
+    if route.path == "cognitive":
+        # 认知能力（周报解读/根因/证据问答/视频分析）不接入 Streamlit，
+        # 仅提示引导；规则 action 集合不变，以下派发逻辑零改动。
+        st.info("🧠 该问题命中认知分析能力（周报解读 / 根因分析 / 证据问答 / "
+                "视频分析），请前往网页版「统一上报 → 对话查询」使用。")
+        return
     if route.tier == "llm":
         st.caption("🤖 已理解（本地模型）")
 

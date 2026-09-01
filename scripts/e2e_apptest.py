@@ -158,12 +158,12 @@ def g_agents():
     fires = glob.glob("data/uploads/*fire1_mp4-26*.jpg")
     at = open_page("agents", uid, {"current_task_id": tid, "permit_info": permit, "scene": "hot_work",
         "uploaded_path": fires[0], "_ran": False}, timeout=180)
-    click_btn(at, "运行多Agent研判")
+    click_btn(at, "运行影像研判")
     subs = [s.value for s in at.subheader]
     exp_labels = [str(e.label) for e in at.expander]
     has_chain = any("证据链" in l for l in exp_labels)
     cards = all(any(kw in s for s in subs) for kw in ["感知视觉", "闭环处置", "风险融合", "复核"])
-    rec("多Agent研判(含LLM润色)", cards and has_chain, f"cards={cards} chain={has_chain} subs={subs[:5]} err={errs(at)}")
+    rec("影像研判(含LLM润色)", cards and has_chain, f"cards={cards} chain={has_chain} subs={subs[:5]} err={errs(at)}")
     result = ssg(at, "_result")
     before_xlsx = len(glob.glob("data/exports/*.xlsx"))
     at = open_page("report", uid, {"report_result": result, "current_task_id": tid}, timeout=120)
@@ -199,7 +199,7 @@ def g_nav():
     at.file_uploader[0].upload("fire1.jpg", open(fires[0], "rb").read()).run()
     fsb = next((b for b in at.button if "开始智能研判" in str(b.label)), None)
     if fsb: fsb.click().run()
-    on_agents = any("运行多Agent研判" in str(b.label) for b in at.button) or any("多Agent" in s.value for s in at.subheader)
+    on_agents = any("运行影像研判" in str(b.label) for b in at.button) or any("影像研判" in s.value for s in at.subheader)
     rec("页面切换:上传->研判", bool(on_agents), f"buttons={[b.label for b in at.button][:4]} subs={[s.value for s in at.subheader][:3]} err={errs(at)}")
 
 

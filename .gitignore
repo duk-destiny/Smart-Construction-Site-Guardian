@@ -131,3 +131,11 @@ docs/*.png
 data/tmp_e2e_test.db*
 tests/e2e/shots/
 tests/e2e/phase2_ids.txt
+
+# 统一云端密钥（本地）
+.env
+
+# 本地演示材料不入库（v2.2）
+演示视频.mp4
+data/e2e_tmp/
+docs/*.md

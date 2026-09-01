@@ -126,7 +126,7 @@ def main() -> None:
         page_map = {
             "upload": st.Page(page_upload.render_upload, title="统一上报", icon="📤"),
             "realtime": st.Page(page_realtime.render_realtime, title="实时摄像头监测", icon="📷"),
-            "agents": st.Page(page_agents.render_agents, title="多Agent研判", icon="🤖"),
+            "agents": st.Page(page_agents.render_agents, title="影像智能研判", icon="🤖"),
             "lab": st.Page(page_lab.render_lab, title="Agent 测试场", icon="🧪"),
             "report": st.Page(page_report.render_report, title="工单/改判/导出", icon="📋"),
             "history": st.Page(page_history.render_history, title="检测历史与分析", icon="📊"),

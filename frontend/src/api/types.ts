@@ -92,6 +92,59 @@ export interface ChatRoute {
   data?: unknown
 }
 
+// ---------- 认知层（§5.11 双层响应 / §5.12 六端点） ----------
+
+/** /agent/chat 快路径：旧 ChatRoute 结构 + path:"fast"（空文本契约响应无 path 字段，按 fast 处理）。 */
+export interface AgentChatFast extends ChatRoute {
+  path?: 'fast'
+}
+
+/** /agent/chat 认知路径：异步 run，前端轮询 progress。status: pending | busy。 */
+export interface AgentChatCognitive {
+  path: 'cognitive'
+  run_id?: string
+  session_id?: string
+  status: string
+}
+
+/** 双层判别联合：以 path === 'cognitive' 为判别字段。 */
+export type AgentChatReply = AgentChatFast | AgentChatCognitive
+
+export interface AgentPlanStep {
+  tool: string
+  args?: Record<string, unknown>
+  reason?: string
+}
+
+/** /agent/runs/{id}/progress 与 /trace 的响应视图。 */
+export interface AgentRunProgress {
+  run_id: string
+  session_id: string
+  status: string
+  intent?: string | null
+  current_step_idx?: number | null
+  need_confirm?: boolean
+  plan?: { goal?: string; steps?: AgentPlanStep[]; need_confirm?: boolean } | null
+  confirm_payload?: Record<string, unknown> | null
+  result?: Record<string, unknown> | null
+  error?: string | null
+  task_id?: string | null
+  steps?: Record<string, unknown>[]
+  created_at?: string
+  updated_at?: string
+}
+
+/** /agent/sessions/{id}/history 的消息行（只存摘要）。 */
+export interface AgentMessageRow {
+  role: string
+  content?: string | null
+  intent?: string | null
+  run_id?: string | null
+  digest?: string | null
+  attachments?: string[] | string | null
+  created_at?: string
+}
+
 export interface UserRow {
   id: string
   username: string

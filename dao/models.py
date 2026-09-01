@@ -635,3 +635,249 @@ class ModelRegistryDAO:
         self.conn.execute(
             "UPDATE model_registry SET active=1 WHERE id=?", (model_id,))
         self.conn.commit()
+
+
+class AgentChatDAO:
+    """认知层存储（设计文档 §5.5/§5.6）：会话/消息/认知任务 run/步骤四表合一。
+
+    与 AgentRunDAO 完全独立（不碰 agent_runs）；状态翻转为条件 UPDATE，
+    返回 rowcount 供调用方校验（配合认知层 _RUN_LOCK 原子「查再置」防 TOCTOU）。
+    """
+
+    def __init__(self, conn: sqlite3.Connection) -> None:
+        self.conn = conn
+
+    # ---------- chat_sessions：会话 ----------
+
+    def create_session(self, user_id: str, title: str | None = None) -> str:
+        sid = _new_id("cs")
+        self.conn.execute(
+            "INSERT INTO chat_sessions(id,user_id,title,created_at,updated_at) "
+            "VALUES(?,?,?,datetime('now'),datetime('now'))",
+            (sid, user_id, title))
+        self.conn.commit()
+        return sid
+
+    def get_session(self, session_id: str):
+        return self.conn.execute(
+            "SELECT * FROM chat_sessions WHERE id=?", (session_id,)).fetchone()
+
+    def list_sessions(self, user_id: str, limit: int = 50,
+                      include_archived: bool = False,
+                      archived_only: bool = False) -> list:
+        """按最近活跃倒序列出用户会话（对话窗口默认只看活跃档）。"""
+        cond = "user_id=?"
+        if archived_only:
+            cond += " AND archived=1"
+        elif not include_archived:
+            cond += " AND archived=0"
+        return self.conn.execute(
+            f"SELECT * FROM chat_sessions WHERE {cond} "
+            "ORDER BY COALESCE(updated_at, created_at) DESC LIMIT ?",
+            (user_id, limit)).fetchall()
+
+    def rename_session(self, session_id: str, title: str) -> None:
+        self.conn.execute(
+            "UPDATE chat_sessions SET title=?, updated_at=datetime('now') "
+            "WHERE id=?", (title, session_id))
+        self.conn.commit()
+
+    def set_session_archived(self, session_id: str, archived: bool) -> None:
+        self.conn.execute(
+            "UPDATE chat_sessions SET archived=? WHERE id=?",
+            (int(bool(archived)), session_id))
+        self.conn.commit()
+
+    def cancel_active_runs(self, session_id: str) -> int:
+        """删除会话前的兜底：未完结 run 一律条件翻转为 cancelled。
+
+        防两类问题：删除后进行中 run 的进度轮询 404（前端误报
+        「任务不存在」）；僵尸 worker 向已删会话写步骤（FK 失败）。
+        """
+        cur = self.conn.execute(
+            "UPDATE agent_chat_runs SET status='cancelled', "
+            "error=COALESCE(NULLIF(error,''),'会话删除，自动取消'), "
+            "updated_at=datetime('now') "
+            "WHERE session_id=? AND status IN "
+            "('pending','running','pending_confirm')", (session_id,))
+        self.conn.commit()
+        return cur.rowcount
+
+    def delete_session(self, session_id: str) -> int:
+        """物理删除会话及其全部消息/认知 run/步骤（管理页删除，不可逆）。
+
+        逐表先删子再删父，返回删除的会话数（0/1）供调用方判定存在性。
+        """
+        # 删除顺序满足外键：消息.run_id → runs；steps.run_id → runs
+        self.conn.execute(
+            "DELETE FROM agent_chat_run_steps WHERE run_id IN "
+            "(SELECT id FROM agent_chat_runs WHERE session_id=?)", (session_id,))
+        self.conn.execute(
+            "DELETE FROM chat_messages WHERE session_id=?", (session_id,))
+        self.conn.execute(
+            "DELETE FROM agent_chat_runs WHERE session_id=?", (session_id,))
+        cur = self.conn.execute(
+            "DELETE FROM chat_sessions WHERE id=?", (session_id,))
+        self.conn.commit()
+        return cur.rowcount
+
+    # ---------- chat_messages：消息 ----------
+
+    def insert_message(self, session_id: str, role: str, content: str,
+                       run_id: str | None = None, intent: str | None = None,
+                       digest: str | None = None,
+                       attachments_json: str | None = None,
+                       commit: bool = True) -> int:
+        """写一条消息并刷新会话活跃时间，返回自增 id。"""
+        cur = self.conn.execute(
+            "INSERT INTO chat_messages"
+            "(session_id,role,content,intent,run_id,digest,attachments,"
+            "created_at) VALUES(?,?,?,?,?,?,?,datetime('now'))",
+            (session_id, role, content, intent, run_id, digest,
+             attachments_json))
+        self.conn.execute(
+            "UPDATE chat_sessions SET updated_at=datetime('now') WHERE id=?",
+            (session_id,))
+        if commit:
+            self.conn.commit()
+        return cur.lastrowid
+
+    def list_messages(self, session_id: str, limit: int = 200) -> list:
+        """按时间正序取会话消息（渲染与拼上下文同序）。"""
+        return self.conn.execute(
+            "SELECT * FROM chat_messages WHERE session_id=? "
+            "ORDER BY created_at ASC, id ASC LIMIT ?",
+            (session_id, limit)).fetchall()
+
+    # ---------- agent_chat_runs：认知任务主表 ----------
+
+    def create_run(self, session_id: str, user_id: str, user_input: str,
+                   intent: str | None = None,
+                   deadline_sec: float = 30.0,
+                   attachments_json: str | None = None) -> str:
+        rid = _new_id("acr")
+        self.conn.execute(
+            "INSERT INTO agent_chat_runs"
+            "(id,session_id,user_id,intent,user_input,status,deadline_sec,"
+            "attachments_json,created_at,updated_at) "
+            "VALUES(?,?,?,?,?,'pending',?,?,datetime('now'),datetime('now'))",
+            (rid, session_id, user_id, intent, user_input, float(deadline_sec),
+             attachments_json))
+        self.conn.commit()
+        return rid
+
+    def get_run(self, run_id: str):
+        return self.conn.execute(
+            "SELECT * FROM agent_chat_runs WHERE id=?", (run_id,)).fetchone()
+
+    def get_run_by_session(self, session_id: str):
+        """会话最近一次认知任务（消息回填 run_id 前的兜底查询）。"""
+        return self.conn.execute(
+            "SELECT * FROM agent_chat_runs WHERE session_id=? "
+            "ORDER BY created_at DESC LIMIT 1", (session_id,)).fetchone()
+
+    def update_run(self, run_id: str, commit: bool = True, **fields) -> None:
+        """条件更新 run 非状态字段（白名单制，防任意列写入）。
+
+        支持字段：intent/plan_json/current_step_idx/need_confirm/
+        confirm_payload/result_json/error/task_id/deadline_sec/
+        attachments_json。
+        """
+        allowed = {"intent", "plan_json", "current_step_idx", "need_confirm",
+                   "confirm_payload", "result_json", "error", "task_id",
+                   "deadline_sec", "attachments_json"}
+        sets = [f"{k}=?" for k in fields if k in allowed]
+        if not sets:
+            return
+        params = [fields[k] for k in fields if k in allowed]
+        if "need_confirm" in fields:
+            params[sets.index("need_confirm=?")] = int(fields["need_confirm"])
+        sql = (f"UPDATE agent_chat_runs SET {', '.join(sets)}, "
+               "updated_at=datetime('now') WHERE id=?")
+        self.conn.execute(sql, (*params, run_id))
+        if commit:
+            self.conn.commit()
+
+    def transition_status(self, run_id: str, expected: str, new: str,
+                          error: str | None = None,
+                          result_json: str | None = None,
+                          commit: bool = True) -> bool:
+        """条件状态翻转：仅当前状态为 expected 时置 new，返回是否生效。
+
+        调用方必须校验返回值（竞争失败/孤儿扫描已处置时返回 False，
+        副作用不得重复执行）。配合认知层 _RUN_LOCK 原子「查再置」。
+        """
+        cur = self.conn.execute(
+            "UPDATE agent_chat_runs SET status=?, error=?, result_json=?, "
+            "updated_at=datetime('now') "
+            "WHERE id=? AND status=?",
+            (new, error, result_json, run_id, expected))
+        if commit:
+            self.conn.commit()
+        return cur.rowcount == 1
+
+    def list_runs_by_status(self, statuses: tuple[str, ...],
+                            updated_before: str | None = None,
+                            limit: int = 200) -> list:
+        """按状态集列 run（孤儿扫描：status 且 updated_at 超阈）。"""
+        placeholders = ",".join("?" for _ in statuses)
+        sql = (f"SELECT * FROM agent_chat_runs WHERE status IN ({placeholders})")
+        params: list = list(statuses)
+        if updated_before:
+            sql += " AND updated_at < ?"
+            params.append(updated_before)
+        sql += " ORDER BY updated_at ASC LIMIT ?"
+        params.append(limit)
+        return self.conn.execute(sql, params).fetchall()
+
+    # ---------- agent_chat_run_steps：步骤明细 ----------
+
+    def insert_step(self, run_id: str, step_idx: int, tool: str,
+                    args_json: str | None = None, status: str = "pending",
+                    commit: bool = True) -> int:
+        """写入一步；(run_id, step_idx) 冲突抛 sqlite3.IntegrityError，
+        由调用方按幂等恢复语义处置（查已有 success 则跳过）。"""
+        cur = self.conn.execute(
+            "INSERT INTO agent_chat_run_steps"
+            "(run_id,step_idx,tool,args_json,status,created_at) "
+            "VALUES(?,?,?,?,?,datetime('now'))",
+            (run_id, step_idx, tool, args_json, status))
+        if commit:
+            self.conn.commit()
+        return cur.lastrowid
+
+    def get_step(self, run_id: str, step_idx: int):
+        return self.conn.execute(
+            "SELECT * FROM agent_chat_run_steps WHERE run_id=? AND step_idx=?",
+            (run_id, step_idx)).fetchone()
+
+    def list_steps(self, run_id: str) -> list:
+        """按执行顺序取 run 全部步骤（证据链/断点恢复）。"""
+        return self.conn.execute(
+            "SELECT * FROM agent_chat_run_steps WHERE run_id=? "
+            "ORDER BY step_idx ASC", (run_id,)).fetchall()
+
+    def update_step(self, run_id: str, step_idx: int, status: str,
+                    result_digest: str | None = None,
+                    error: str | None = None, cost_ms: int = 0,
+                    tool: str | None = None,
+                    args_json: str | None = None) -> None:
+        """步骤执行完毕后回填结果（失败也留痕）。
+
+        tool/args_json 可选回填：改计划（modified_plan）替换执行时，
+        同一 (run_id, step_idx) 行记录的实际执行工具与入参随之改写，
+        保证证据链与真实执行一致（§5.6.2）。
+        """
+        sets = ["status=?", "result_digest=?", "error=?", "cost_ms=?"]
+        vals: list = [status, result_digest, error, int(cost_ms)]
+        if tool is not None:
+            sets.append("tool=?")
+            vals.append(tool)
+        if args_json is not None:
+            sets.append("args_json=?")
+            vals.append(args_json)
+        vals += [run_id, step_idx]
+        self.conn.execute(
+            f"UPDATE agent_chat_run_steps SET {', '.join(sets)} "
+            "WHERE run_id=? AND step_idx=?", vals)
+        self.conn.commit()

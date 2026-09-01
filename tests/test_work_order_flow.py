@@ -1,7 +1,7 @@
 """工单闭环全生命周期测试（v0.2 P0）。
 
 覆盖：派发规则解析、权限边界（override/rectify/非本人）、状态机流转
-（open→submitted→closed；驳回退回 open 再改）、逾期巡检计数与越级、
+（open→submitted→closed；驳回置 rejected 可再改）、逾期巡检计数与越级、
 任务来源标记进台账。时间相关断言用固定字面量时刻，保证确定性。
 """
 from __future__ import annotations
@@ -137,7 +137,9 @@ def test_safety_cannot_submit_rectification(env):
 
 # ---------- 验收 ----------
 
-def test_reject_requires_reason_and_returns_to_open(env):
+def test_reject_requires_reason_and_marks_rejected(env):
+    """驳回必填原因；驳回后单据置 rejected（一等状态，责任人在办视图
+    可见并可再改），驳回原因留档。"""
     svc = env["svc"]
     svc.dispatch_order(env["task_id"], env["ids"]["safety"], scene_id="hot_work")
     order = svc.orders.get_by_task(env["task_id"])
@@ -146,8 +148,11 @@ def test_reject_requires_reason_and_returns_to_open(env):
         svc.review_order(order["id"], env["ids"]["admin"], approve=False)
     svc.review_order(order["id"], env["ids"]["admin"], approve=False, reason="现场仍有残留")
     after = svc.orders.get(order["id"])
-    assert after["status"] == "open"
+    assert after["status"] == "rejected"
     assert after["review_reason"] == "现场仍有残留"
+    # 责任人可基于 rejected 再改重提（回到待验收）
+    svc.submit_rectification(order["id"], env["ids"]["lisi"], "已清理重新提交")
+    assert svc.orders.get(order["id"])["status"] == "submitted"
 
 
 def test_full_lifecycle_open_to_closed(env):

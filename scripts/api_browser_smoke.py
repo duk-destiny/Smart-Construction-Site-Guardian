@@ -68,7 +68,7 @@ def login_and_change_pwd(page, username: str, old_pwd: str, new_pwd: str) -> Non
     page.wait_for_timeout(400)
     page.get_by_placeholder("用户名").fill(username)
     page.get_by_placeholder("密码", exact=True).fill(old_pwd)
-    page.get_by_role("button", name="登 录").click()
+    page.get_by_role("button", name="进入系统").click()
     # 种子账号带初始密码标记 → 强制改密页。
     # 注意：SPA 的 pushState 路由下 Playwright 的 page.url 可能不刷新，
     # 路由断言一律用页面内 location（wait_for_function），不用 wait_for_url。
@@ -83,17 +83,16 @@ def login_and_change_pwd(page, username: str, old_pwd: str, new_pwd: str) -> Non
         print("[diag] user:", page.evaluate("localStorage.getItem('zhg_user')"))
         raise
     page.get_by_label("原密码").fill(old_pwd)
-    page.get_by_label("新密码（至少 8 位）", exact=True).fill(new_pwd)
+    page.get_by_label("新密码", exact=True).fill(new_pwd)
     page.get_by_label("确认新密码").fill(new_pwd)
     page.get_by_role("button", name="提交修改").click()
     page.wait_for_function("!location.pathname.includes('change-password')",
                            timeout=20_000)
 
 
-def logout(page) -> None:
-    page.get_by_text("（admin）").or_(
-        page.get_by_text("（safety）")).or_(
-        page.get_by_text("（responsible）")).first.click()
+def logout(page, username: str) -> None:
+    # React 顶栏用户触发器只显示用户名（v1.0 改版后无"（角色）"后缀）
+    page.get_by_text(username, exact=True).first.click()
     page.get_by_text("退出登录").click()
     page.wait_for_function("location.pathname.includes('login')",
                            timeout=15_000)
@@ -122,7 +121,8 @@ def _api(method: str, path: str, token: str, body: dict | None = None):
 def main() -> int:
     from playwright.sync_api import sync_playwright
 
-    with tempfile.TemporaryDirectory(prefix="zhg_smoke_") as tmp:
+    with tempfile.TemporaryDirectory(prefix="zhg_smoke_",
+                                     ignore_cleanup_errors=True) as tmp:
         db_path = Path(tmp) / "smoke.db"
         photo = Path(tmp) / "fix.png"
         photo.write_bytes(PNG)
@@ -159,19 +159,20 @@ def main() -> int:
                     # ① safety 登录 + 强制改密
                     login_and_change_pwd(page, "safety", "demo1234",
                                          "safety2026a")
-                    assert "/report" in page.url, page.url
+                    page.wait_for_function(
+                        "location.pathname.includes('chat')", timeout=15_000)
 
-                    # ② 文字线索建单（上报）
-                    page.get_by_role("tab", name="文字线索建单").click()
-                    # 限定激活面板：antd Tabs 非激活面板仍在 DOM（隐藏）
-                    pane = page.locator(".ant-tabs-tabpane-active")
-                    pane.locator(".ant-select").nth(1).click()
+                    # ② 文字线索建单（AI 助手 → 工具抽屉）
+                    page.get_by_role("button", name="工具").click()
+                    drawer = page.locator(".ant-drawer-content")
+                    expect_drawer = drawer.get_by_text("文字线索建单", exact=False).first
+                    expect_drawer.wait_for(timeout=10_000)
+                    drawer.locator(".ant-select").nth(1).click()
                     page.locator(".ant-select-item-option").first.click()
                     desc = "冒烟测试：3号楼地库配电箱旁堆放易燃纸箱"
-                    page.get_by_placeholder(
-                        "例：3号楼西侧电焊机旁堆着纸箱没人清理，也没有监火人").fill(desc)
-                    page.get_by_role("button", name="创建文字隐患单").click()
-                    page.wait_for_selector("text=文字隐患单已创建", timeout=10_000)
+                    drawer.get_by_placeholder("例：电焊机旁堆着纸箱没人清理").fill(desc)
+                    drawer.get_by_role("button", name="创建隐患单").click()
+                    page.wait_for_selector("text=文字线索建单：", timeout=15_000)
 
                     # ③ 查结果：工单台账出现该隐患
                     page.get_by_text("工单闭环").click()
@@ -186,7 +187,7 @@ def main() -> int:
                          admin_token, body={"assignee": "lisi", "hours": 24})
 
                     # ④ responsible 登录 → 提交整改（拍照/传图）
-                    logout(page)
+                    logout(page, "safety")
                     login_and_change_pwd(page, "lisi", "demo1234", "lisi2026a")
                     assert "/my-orders" in page.url, page.url
                     page.get_by_placeholder(
@@ -197,11 +198,11 @@ def main() -> int:
                     page.wait_for_selector("text=已提交验收", timeout=10_000)
 
                     # ⑤ admin 登录 → 待验收 → 通过销项
-                    logout(page)
+                    logout(page, "lisi")
                     login_and_change_pwd(page, "admin", "admin123",
                                          "admin2026a")
                     page.get_by_text("工单闭环").click()
-                    page.get_by_role("tab", name="待验收").click()
+                    page.get_by_text("待验收", exact=True).first.click()
                     # AntD 对两字按钮自动插空格：渲染为「通 过」
                     page.get_by_role("button", name="通 过").first.click()
                     page.get_by_role("button", name="确 定").click()

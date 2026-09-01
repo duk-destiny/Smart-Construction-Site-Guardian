@@ -51,15 +51,15 @@ def main():
               or page.locator(".ant-form-item-explain-error").count() > 0)
         check("不一致未跳转", "/change-password" in page.url)
 
-        # 6. 正确改密 → 进入 admin 首页 /report
+        # 6. 正确改密 → 进入 admin 首页 /chat
         page.get_by_label("确认新密码", exact=True).fill("Admin@E2E123")
         page.get_by_role("button", name="提交修改").click()
-        page.wait_for_url("**/report", timeout=8000)
-        check("改密成功进入 /report", "/report" in page.url, page.url)
+        page.wait_for_url("**/chat", timeout=8000)
+        check("改密成功进入 /chat", "/chat" in page.url, page.url)
 
         # 7. admin 布局：顶栏品牌 + Dock 六项
         check("顶栏品牌可见", page.get_by_text("智护工地", exact=True).first.is_visible())
-        dock_labels = ["统一上报", "多 Agent 研判", "工单闭环", "历史分析", "实时监测", "管理端"]
+        dock_labels = ["AI 助手", "影像研判", "工单闭环", "历史分析", "实时监测", "管理端"]
         missing = [t for t in dock_labels if page.get_by_text(t, exact=True).count() == 0]
         check("admin Dock 六项齐全", not missing, f"missing={missing}")
 
@@ -69,10 +69,10 @@ def main():
         page.wait_for_url("**/login", timeout=8000)
         check("退出登录回到 /login", "/login" in page.url, page.url)
 
-        # 9. 新密码再登录 → 不再强制改密，直达 /report
+        # 9. 新密码再登录 → 不再强制改密，直达 /chat
         login(page, "admin", "Admin@E2E123")
-        page.wait_for_url("**/report", timeout=8000)
-        check("新密码登录直达 /report", "/report" in page.url, page.url)
+        page.wait_for_url("**/chat", timeout=8000)
+        check("新密码登录直达 /chat", "/chat" in page.url, page.url)
 
         # 10. 旧密码应失效
         page.get_by_text("admin", exact=True).first.click()
@@ -100,7 +100,7 @@ def main():
         page.wait_for_timeout(600)
         check("/admin 守卫拦回 /my-orders", "/my-orders" in page.url, page.url)
 
-        # 13. safety 首登 → /report，无管理端入口
+        # 13. safety 首登 → /chat，无管理端入口
         page.get_by_text("lisi", exact=True).first.click()
         page.get_by_text("退出登录").click()
         page.wait_for_url("**/login", timeout=8000)
@@ -110,8 +110,8 @@ def main():
         page.get_by_label("新密码", exact=True).fill("Safety@E2E123")
         page.get_by_label("确认新密码", exact=True).fill("Safety@E2E123")
         page.get_by_role("button", name="提交修改").click()
-        page.wait_for_url("**/report", timeout=8000)
-        check("safety 落地 /report", "/report" in page.url, page.url)
+        page.wait_for_url("**/chat", timeout=8000)
+        check("safety 落地 /chat", "/chat" in page.url, page.url)
         check("safety 无管理端入口", page.get_by_text("管理端", exact=True).count() == 0)
 
         page.screenshot(path=str(SHOTS / "shot_after_login.png"))

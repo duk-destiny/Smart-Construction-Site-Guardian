@@ -28,8 +28,14 @@ def env():
 
 # ---------- AsrEngine ----------
 
-def test_asr_silent_when_unconfigured():
-    # 默认 config.yaml 中 asr.enabled=false → available 必须为 False（静默约定）
+def test_asr_silent_when_unconfigured(monkeypatch):
+    # asr 段为空（未配置）→ available 必须为 False（静默约定）。
+    # 显式注入而非依赖本地环境：统一云端通道（.env）就绪时 asr 可用属正常态。
+    import core.config as cc
+
+    orig = cc.ConfigLoader.load
+    monkeypatch.setattr(cc.ConfigLoader, "load",
+                        lambda self: {**orig(self), "asr": {}})
     assert AsrEngine().available() is False
 
 

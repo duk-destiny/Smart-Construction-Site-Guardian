@@ -1,16 +1,45 @@
-"""闭环处置 Agent（M06）：组装整改工单，生成工人白话提示，落库 work_orders。
+"""闭环处置段（M06）：组装整改工单，生成工人白话提示，落库 work_orders。
 
-worker_notice = LlmEngine.polish（可选，异步不计时）或模板降级拼接（LLD §3.5/§5.1）。
+worker_notice = 模板主链路（同步、可计时）+ 落库后经 polish() 异步润色回填。
+润色默认实现改走统一 LLM 入口 ChatClient（v2.1 §5.1，云端→本地降级），
+保留 llm= 构造参数与 available()/polish() 鸭子接口（测试缝）；模板兜底不变。
 """
 from __future__ import annotations
 
 from concurrent.futures import ThreadPoolExecutor
 
-from agents.base import AgentBase, AgentMessage
+from pipeline.base import StageBase, StageMessage
+from core.chat_client import get_chat_client
 from core.llm_engine import LlmEngine
+from core.llm_engine import _SYSTEM as _POLISH_SYSTEM
 
 # 润色后台线程池：LLM 调用耗时但并发量低，2 worker 足够消化
 _POLISH_POOL = ThreadPoolExecutor(max_workers=2)
+
+
+class _ChatClientLlm:
+    """默认润色实现：经统一 ChatClient（云端→本地降级链）。
+
+    保留 available()/polish() 鸭子接口，与 LlmEngine 可互换；
+    全链失败返回 None 触发模板兜底（异步路径，不进 ≤8s 主链路）。
+    """
+
+    def available(self) -> bool:
+        try:
+            return get_chat_client().available_provider() is not None
+        except Exception:  # noqa: BLE001 配置/探活异常视同不可用→模板兜底
+            return False
+
+    def polish(self, prompt: str) -> str | None:
+        try:
+            result = get_chat_client().chat(
+                _POLISH_SYSTEM, prompt, max_tokens=512,
+                total_deadline_sec=30.0)
+        except Exception:  # noqa: BLE001 润色失败保留模板文案
+            return None
+        if result.status == "failed" or not isinstance(result.content, str):
+            return None
+        return result.content.strip() or None
 
 # 按风险等级动态生成整改要求话术（降级路径）
 # 避免低风险场景仍套用"立即停止作业"等过度严厉的固定模板
@@ -39,11 +68,12 @@ _DEADLINES = {
 }
 
 
-class ActionAgent(AgentBase):
-    """闭环处置 Agent。"""
+class ActionStage(StageBase):
+    """闭环处置段。"""
 
     def __init__(self, llm: LlmEngine | None = None, work_order_dao=None):
-        self._llm = llm or LlmEngine()
+        # llm 鸭子接口（available/polish）可注入测试桩；缺省走统一 ChatClient
+        self._llm = llm or _ChatClientLlm()
         self._wo_dao = work_order_dao
 
     def _template(self, hazard_desc: str, clause_text: str, risk_level: str) -> str:
@@ -59,7 +89,7 @@ class ActionAgent(AgentBase):
             f"处理时限：{deadline}"
         )
 
-    def _execute(self, msg: AgentMessage) -> AgentMessage:
+    def _execute(self, msg: StageMessage) -> StageMessage:
         risk_level = msg.payload.get("risk_level", "一般")
         reasons = msg.payload.get("reasons", []) or []
         compliance = msg.payload.get("compliance", []) or []

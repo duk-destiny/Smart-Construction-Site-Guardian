@@ -7,7 +7,7 @@ import type { ReactNode } from 'react'
 import type { UserInfo } from './api/types'
 import {
   AuditOutlined, CameraOutlined, FileTextOutlined, LineChartOutlined,
-  RobotOutlined, ToolOutlined, UploadOutlined,
+  PictureOutlined, RobotOutlined, ToolOutlined,
 } from '@ant-design/icons'
 
 export interface MenuItem {
@@ -21,8 +21,8 @@ export function menuItemsFor(role: UserInfo['role']): MenuItem[] {
     return [{ key: '/my-orders', icon: <ToolOutlined />, label: '我的整改单' }]
   }
   const items: MenuItem[] = [
-    { key: '/report', icon: <UploadOutlined />, label: '统一上报' },
-    { key: '/agents', icon: <RobotOutlined />, label: '多 Agent 研判' },
+    { key: '/chat', icon: <RobotOutlined />, label: 'AI 助手' },
+    { key: '/agents', icon: <PictureOutlined />, label: '影像研判' },
     { key: '/orders', icon: <FileTextOutlined />, label: '工单闭环' },
     { key: '/history', icon: <LineChartOutlined />, label: '历史分析' },
     { key: '/realtime', icon: <CameraOutlined />, label: '实时监测' },
@@ -33,9 +33,9 @@ export function menuItemsFor(role: UserInfo['role']): MenuItem[] {
   return items
 }
 
-/** 默认落地页按角色：responsible → 我的整改单；其余 → 统一上报。 */
+/** 默认落地页按角色：responsible → 我的整改单；admin/safety → AI 助手。 */
 export function homeFor(role: UserInfo['role']): string {
-  return role === 'responsible' ? '/my-orders' : '/report'
+  return role === 'responsible' ? '/my-orders' : '/chat'
 }
 
 export function RequireRole({ roles, children }: {

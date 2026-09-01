@@ -1,18 +1,18 @@
 """融合 Agent 测试（TDD：风险定级 + 误报过滤 + 白名单外过滤）。"""
 
 import pytest
-from agents.base import AgentMessage
-from agents.fusion_agent import FusionAgent
+from pipeline.base import StageMessage
+from pipeline.fusion import FusionStage
 
 
 @pytest.fixture
 def fusion():
-    return FusionAgent()
+    return FusionStage()
 
 
 def test_fusion_major(fusion):
     """火花 + 不合规 → 重大。"""
-    msg = AgentMessage(
+    msg = StageMessage(
         task_id="t1", agent="fusion", status="pending",
         payload={
             "detections": [{"cls": "spark", "conf": 0.92}],
@@ -27,7 +27,7 @@ def test_fusion_major(fusion):
 
 def test_fusion_spark_compliant_low(fusion):
     """火花 + 合规 → 一般（不升级重大）。"""
-    msg = AgentMessage(
+    msg = StageMessage(
         task_id="t2", agent="fusion", status="pending",
         payload={
             "detections": [{"cls": "spark", "conf": 0.9}],
@@ -41,7 +41,7 @@ def test_fusion_spark_compliant_low(fusion):
 
 def test_fp_filter(fusion):
     """spark 低置信 → 入 filtered_fp，不升级重大。"""
-    msg = AgentMessage(
+    msg = StageMessage(
         task_id="t3", agent="fusion", status="pending",
         payload={
             "detections": [{"cls": "spark", "conf": 0.30}],
@@ -56,7 +56,7 @@ def test_fp_filter(fusion):
 
 def test_fusion_safe_ppe_signals_low(fusion):
     """检测到防护面罩 / 灭火器 → 低风险正向信号。"""
-    msg = AgentMessage(
+    msg = StageMessage(
         task_id="t4", agent="fusion", status="pending",
         payload={
             "detections": [{"cls": "face_shield", "conf": 0.8}],
@@ -67,7 +67,7 @@ def test_fusion_safe_ppe_signals_low(fusion):
     out = fusion.run(msg)
     assert out.payload["risk_level"] == "低"
 
-    msg = AgentMessage(
+    msg = StageMessage(
         task_id="t4b", agent="fusion", status="pending",
         payload={
             "detections": [{"cls": "extinguisher", "conf": 0.8}],
@@ -81,7 +81,7 @@ def test_fusion_safe_ppe_signals_low(fusion):
 
 def test_whitelist_filtered(fusion):
     """白名单外目标不纳入风险定级。"""
-    msg = AgentMessage(
+    msg = StageMessage(
         task_id="t5", agent="fusion", status="pending",
         payload={
             "detections": [{"cls": "person", "conf": 0.9}],
@@ -96,7 +96,7 @@ def test_whitelist_filtered(fusion):
 
 def test_no_detection_low(fusion):
     """无检出 → 低。"""
-    msg = AgentMessage(
+    msg = StageMessage(
         task_id="t6", agent="fusion", status="pending",
         payload={"detections": [], "compliance": []},
         error=None, cost_ms=0,
@@ -107,7 +107,7 @@ def test_no_detection_low(fusion):
 
 def test_ppe_contradiction_filtered(fusion):
     """helmet/no_helmet 矛盾框进入误报，不触发 PPE 风险。"""
-    msg = AgentMessage(
+    msg = StageMessage(
         task_id="t7", agent="fusion", status="pending",
         payload={
             "detections": [

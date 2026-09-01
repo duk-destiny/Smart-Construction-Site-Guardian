@@ -1,4 +1,4 @@
-"""页面3：多Agent分步结果面板（page_agents）★核心演示页。
+"""页面3：影像研判分步结果面板（page_agents）★核心演示页。
 
 交互：对当前任务运行总控编排器，4 张 Agent 卡片展示状态/输出/耗时。
 Phase 0：编排/落库/审计/进度收口到 services.task_entry，本页零 get_conn。
@@ -25,9 +25,9 @@ _AGENT_TITLE = {
 }
 
 
-@safe_page("多Agent研判")
+@safe_page("影像智能研判")
 def render_agents() -> None:
-    st.title("🤖 多Agent 分步研判")
+    st.title("🤖 影像智能 分步研判")
     task_id = st.session_state.get("current_task_id")
     if not task_id:
         st.warning("请先在上传页创建任务")
@@ -76,7 +76,7 @@ def render_agents() -> None:
     if st.session_state.get("_ran_async") and not st.session_state.get("_result"):
         _poll_async()
 
-    if st.button("▶ 运行多Agent研判", type="primary") or st.session_state.get("_sync_ran"):
+    if st.button("▶ 运行影像研判", type="primary") or st.session_state.get("_sync_ran"):
         st.session_state["_ran"] = True
         st.session_state.pop("_ran_async", None)
         st.session_state["_result"] = task_entry.run_sync(
@@ -125,7 +125,7 @@ def render_agents() -> None:
                 except ValueError:
                     st.caption(run["output_json"][:200])
 
-    # 4 张 Agent 卡片（orchestrator 返回的是 AgentMessage dict，数据在 payload 里）
+    # 4 张 Agent 卡片（orchestrator 返回的是 StageMessage dict，数据在 payload 里）
     result_payload = result.get("payload", {})
     for agent, title in _AGENT_TITLE.items():
         node = result_payload.get(agent, {})

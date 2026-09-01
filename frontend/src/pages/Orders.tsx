@@ -3,12 +3,13 @@ import {
   App as AntApp, Button, Descriptions, Drawer, Form, Input, InputNumber,
   Modal, Popconfirm, Select, Space, Table, Tag, Typography, Image,
 } from 'antd'
-import { DownloadOutlined } from '@ant-design/icons'
+import { DownloadOutlined, RobotOutlined } from '@ant-design/icons'
 import dayjs from 'dayjs'
 import * as ep from '../api/endpoints'
 import { downloadFile } from '../api/client'
 import { mediaUrl } from '../shared/media'
 import type { DispatchPanel, OrderRow } from '../api/types'
+import OrderAskDrawer from '../components/OrderAskDrawer'
 import { OrderStatusTag, RiskTag } from '../components/Tags'
 import PageHeader from '../components/PageHeader'
 
@@ -120,6 +121,7 @@ function LedgerTab({ refreshKey }: { refreshKey: number }) {
   const { message } = AntApp.useApp()
   const [rows, setRows] = useState<OrderRow[]>([])
   const [selected, setSelected] = useState<OrderRow | null>(null)
+  const [askOrder, setAskOrder] = useState<string | null>(null)
 
   const load = useCallback(async () => {
     setRows(await ep.listOrders())
@@ -167,14 +169,21 @@ function LedgerTab({ refreshKey }: { refreshKey: number }) {
           <>
             <DispatchPanelForm taskId={selected.task_id} onDone={load} />
             <OverrideForm taskId={selected.task_id} onDone={load} />
-            <Button style={{ marginTop: 12 }}
-              icon={<DownloadOutlined />}
-              onClick={() => void doExport(selected.id)}>
-              导出台账 Excel
-            </Button>
+            <Space style={{ marginTop: 12 }} wrap>
+              <Button icon={<DownloadOutlined />}
+                onClick={() => void doExport(selected.id)}>
+                导出台账 Excel
+              </Button>
+              <Button icon={<RobotOutlined />} style={{ color: '#7c4dff' }}
+                onClick={() => setAskOrder(selected.id)}>
+                问 AI（本单上下文）
+              </Button>
+            </Space>
           </>
         )}
       </Drawer>
+      <OrderAskDrawer orderId={askOrder} open={!!askOrder}
+        onClose={() => setAskOrder(null)} />
     </>
   )
 }
@@ -300,9 +309,9 @@ export default function Orders() {
               style={{
                 padding: '12px 16px', marginBottom: 4, borderRadius: 10,
                 cursor: 'pointer',
-                background: activeTab === t.key ? 'rgba(200,16,46,0.08)' : 'transparent',
-                border: `1px solid ${activeTab === t.key ? 'rgba(200,16,46,0.2)' : 'transparent'}`,
-                color: activeTab === t.key ? '#fff' : 'rgba(255,255,255,0.4)',
+                background: activeTab === t.key ? 'rgba(var(--accent-primary-rgb),0.08)' : 'transparent',
+                border: `1px solid ${activeTab === t.key ? 'rgba(var(--accent-primary-rgb),0.2)' : 'transparent'}`,
+                color: activeTab === t.key ? '#fff' : 'rgba(var(--fg-rgb),0.4)',
                 fontWeight: activeTab === t.key ? 600 : 400,
                 fontSize: 13, transition: 'all 0.2s',
               }}>

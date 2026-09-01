@@ -232,8 +232,8 @@ function NotifyTab() {
         <pre style={{
           maxHeight: 220, overflow: 'auto', padding: 16, fontSize: 12,
           background: 'rgba(0,0,0,0.3)', borderRadius: 10,
-          border: '1px solid rgba(255,255,255,0.06)',
-          fontFamily: 'var(--font-mono)', color: 'rgba(255,255,255,0.6)',
+          border: '1px solid rgba(var(--fg-rgb),0.06)',
+          fontFamily: 'var(--font-mono)', color: 'rgba(var(--fg-rgb),0.6)',
         }}>
           {JSON.stringify(capture, null, 2)}
         </pre>
@@ -363,9 +363,9 @@ export default function Admin() {
                 marginBottom: 4,
                 borderRadius: 12,
                 cursor: 'pointer',
-                background: activeTab === t.key ? 'rgba(200,16,46,0.08)' : 'transparent',
-                border: `1px solid ${activeTab === t.key ? 'rgba(200,16,46,0.2)' : 'transparent'}`,
-                color: activeTab === t.key ? '#fff' : 'rgba(255,255,255,0.4)',
+                background: activeTab === t.key ? 'rgba(var(--accent-primary-rgb),0.08)' : 'transparent',
+                border: `1px solid ${activeTab === t.key ? 'rgba(var(--accent-primary-rgb),0.2)' : 'transparent'}`,
+                color: activeTab === t.key ? '#fff' : 'rgba(var(--fg-rgb),0.4)',
                 fontWeight: activeTab === t.key ? 600 : 400,
                 fontSize: 13,
                 transition: 'background 0.2s, border-color 0.2s, color 0.2s',

@@ -2,11 +2,12 @@ import { useCallback, useEffect, useState } from 'react'
 import {
   App as AntApp, Button, Empty, Form, Input, Tag, Upload,
 } from 'antd'
-import { CameraOutlined, SendOutlined } from '@ant-design/icons'
+import { CameraOutlined, RobotOutlined, SendOutlined } from '@ant-design/icons'
 import { motion } from 'framer-motion'
 import dayjs from 'dayjs'
 import * as ep from '../api/endpoints'
 import type { OrderRow } from '../api/types'
+import OrderAskDrawer from '../components/OrderAskDrawer'
 import { OrderStatusTag, RiskTag } from '../components/Tags'
 import PageHeader from '../components/PageHeader'
 
@@ -14,7 +15,7 @@ function deadlineInfo(deadline: string | null): { text: string; color: string; p
   if (!deadline) return null
   const total = 48
   const hours = dayjs(deadline).diff(dayjs(), 'hour')
-  if (hours < 0) return { text: `已逾期 ${-hours} 小时`, color: '#c8102e', pct: 100 }
+  if (hours < 0) return { text: `已逾期 ${-hours} 小时`, color: 'var(--accent-primary)', pct: 100 }
   if (hours < 24) return { text: `剩余 ${hours} 小时`, color: '#f59e0b', pct: ((24 - hours) / 24) * 100 }
   return { text: `剩余 ${Math.round(hours / 24)} 天`, color: '#00d4aa', pct: ((48 - hours) / 48) * 100 }
 }
@@ -43,7 +44,7 @@ function RectifyForm({ order, onDone }: { order: OrderRow; onDone: () => void })
   return (
     <div style={{
       marginTop: 16, paddingTop: 16,
-      borderTop: '1px solid rgba(255,255,255,0.06)',
+      borderTop: '1px solid rgba(var(--fg-rgb),0.06)',
     }}>
       <Input.TextArea
         value={note} onChange={(e) => setNote(e.target.value)}
@@ -62,7 +63,7 @@ function RectifyForm({ order, onDone }: { order: OrderRow; onDone: () => void })
         onClick={submit} size="large"
         style={{
           height: 44, borderRadius: 12, fontWeight: 600, marginTop: 8,
-          background: 'linear-gradient(135deg, #c8102e 0%, #9b0a22 100%)',
+          background: 'linear-gradient(135deg, var(--accent-primary) 0%, var(--accent-primary-deep) 100%)',
         }}>
         提交整改，等待验收
       </Button>
@@ -73,6 +74,7 @@ function RectifyForm({ order, onDone }: { order: OrderRow; onDone: () => void })
 export default function MyOrders() {
   const [rows, setRows] = useState<OrderRow[]>([])
   const [loading, setLoading] = useState(true)
+  const [askOrder, setAskOrder] = useState<string | null>(null)
 
   const load = useCallback(async () => {
     setLoading(true)
@@ -96,7 +98,7 @@ export default function MyOrders() {
         {rows.map((r, i) => {
           const dl = deadlineInfo(r.deadline)
           const canSubmit = ['open', 'rejected'].includes(r.status)
-          const borderColor = dl?.color || 'rgba(255,255,255,0.06)'
+          const borderColor = dl?.color || 'rgba(var(--fg-rgb),0.06)'
           return (
             <motion.div
               key={r.id}
@@ -106,7 +108,7 @@ export default function MyOrders() {
               style={{
                 padding: 20,
                 borderRadius: 16,
-                background: 'rgba(255,255,255,0.02)',
+                background: 'rgba(var(--fg-rgb),0.02)',
                 border: `1px solid ${borderColor}33`,
                 borderLeft: `3px solid ${borderColor}`,
                 position: 'relative',
@@ -116,9 +118,15 @@ export default function MyOrders() {
               <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 12, flexWrap: 'wrap' }}>
                 <RiskTag level={r.risk_level} />
                 <OrderStatusTag status={r.status} />
-                <span className="mono" style={{ fontSize: 11, color: 'rgba(255,255,255,0.3)' }}>
+                <span className="mono" style={{ fontSize: 11, color: 'rgba(var(--fg-rgb),0.3)' }}>
                   {r.id.slice(0, 12)}...
                 </span>
+                <Button size="small" type="text" icon={<RobotOutlined />}
+                  title="AI 读单助手（仅本单上下文，只读）"
+                  style={{ marginLeft: 4, color: '#7c4dff' }}
+                  onClick={() => setAskOrder(r.id)}>
+                  问 AI
+                </Button>
                 {dl && (
                   <span style={{
                     marginLeft: 'auto', fontSize: 12, fontWeight: 600,
@@ -132,7 +140,7 @@ export default function MyOrders() {
               {dl && dl.pct > 0 && (
                 <div style={{
                   height: 2, borderRadius: 1, marginBottom: 12,
-                  background: 'rgba(255,255,255,0.04)',
+                  background: 'rgba(var(--fg-rgb),0.04)',
                   overflow: 'hidden',
                 }}>
                   <div style={{
@@ -144,25 +152,25 @@ export default function MyOrders() {
                 </div>
               )}
 
-              <p style={{ margin: '6px 0', fontSize: 14, color: 'rgba(255,255,255,0.7)' }}>
-                <span style={{ color: 'rgba(255,255,255,0.35)', fontSize: 12 }}>隐患 </span>
+              <p style={{ margin: '6px 0', fontSize: 14, color: 'rgba(var(--fg-rgb),0.7)' }}>
+                <span style={{ color: 'rgba(var(--fg-rgb),0.35)', fontSize: 12 }}>隐患 </span>
                 {r.hazard_desc}
               </p>
-              <p style={{ margin: '6px 0', fontSize: 13, color: 'rgba(255,255,255,0.5)' }}>
-                <span style={{ color: 'rgba(255,255,255,0.35)', fontSize: 12 }}>要求 </span>
+              <p style={{ margin: '6px 0', fontSize: 13, color: 'rgba(var(--fg-rgb),0.5)' }}>
+                <span style={{ color: 'rgba(var(--fg-rgb),0.35)', fontSize: 12 }}>要求 </span>
                 {r.requirement || '—'}
               </p>
               {r.clause && (
-                <p style={{ margin: '6px 0', fontSize: 12, color: 'rgba(255,255,255,0.3)' }}>
+                <p style={{ margin: '6px 0', fontSize: 12, color: 'rgba(var(--fg-rgb),0.3)' }}>
                   {r.clause}
                 </p>
               )}
               {r.status === 'rejected' && (
                 <div style={{
                   marginTop: 8, padding: '8px 12px', borderRadius: 8,
-                  background: 'rgba(200,16,46,0.06)',
-                  border: '1px solid rgba(200,16,46,0.15)',
-                  fontSize: 13, color: '#c8102e',
+                  background: 'rgba(var(--accent-primary-rgb),0.06)',
+                  border: '1px solid rgba(var(--accent-primary-rgb),0.15)',
+                  fontSize: 13, color: 'var(--accent-primary)',
                 }}>
                   驳回原因：{r.review_reason || '—'}
                 </div>
@@ -182,6 +190,8 @@ export default function MyOrders() {
           )
         })}
       </div>
+      <OrderAskDrawer orderId={askOrder} open={!!askOrder}
+        onClose={() => setAskOrder(null)} />
     </>
   )
 }

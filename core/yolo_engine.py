@@ -1,4 +1,4 @@
-"""YOLO 推理引擎：本地 ONNX Runtime 推理（CPU EP），零外网依赖（C1）。
+"""YOLO 推理引擎：本地 ONNX Runtime 推理（CPU EP）——模型推理与数据链路本地化（C1 收窄语义：不覆盖 LLM 认知通道，其走云端、断链降级）。
 
 类别处理（数据驱动，支持任意 YOLOv8 导出权重）：
 - `load()` 自动读取 ONNX 元数据中的 `names` 得到模型真实类别名（如 Fire/default/smoke）；
@@ -59,7 +59,7 @@ def _parse_names(meta_str: str | None) -> list[str] | None:
 
 
 # 进程级 ONNX 会话缓存：按 (绝对路径, intra_op上限) 复用 InferenceSession，
-# 避免离线任务链每任务重载同一权重（RealtimeEngine / VisionAgent / 自检页共享）。
+# 避免离线任务链每任务重载同一权重（RealtimeEngine / VisionStage / 自检页共享）。
 # LRU 逐出上限 8 槽，防止长期运行累积过多会话占用内存。
 _SESSIONS: OrderedDict[tuple[str, int], "ort.InferenceSession"] = OrderedDict()
 _SESSION_LOCK = threading.Lock()
@@ -71,7 +71,7 @@ def _get_session(onnx_path: str, intra_op_threads: int | None) -> "ort.Inference
 
     多个 YoloEngine 实例加载同一权重时共享同一 InferenceSession（run() 线程安全），
     省去每任务重读磁盘+重建会话的开销；不同 intra_op 上限视为不同会话（封顶是
-    创建期参数，不可跨 cap 复用，故 RealtimeEngine(cap=5) 与 VisionAgent(默认) 各占一槽）。
+    创建期参数，不可跨 cap 复用，故 RealtimeEngine(cap=5) 与 VisionStage(默认) 各占一槽）。
     """
     cap = int(intra_op_threads) if intra_op_threads and intra_op_threads > 0 else 0
     key = (os.path.abspath(onnx_path), cap)
@@ -111,7 +111,7 @@ class YoloEngine:
 
         intra_op_threads: 每个会话 intra-op 线程上限。多头并行时按 cpu//引擎数
         分核，避免多个 InferenceSession 同时各吃满核导致抢核反而变慢；None/0=自动。
-        会话按 (绝对路径, intra_op上限) 进程级缓存，RealtimeEngine/VisionAgent/自检页
+        会话按 (绝对路径, intra_op上限) 进程级缓存，RealtimeEngine/VisionStage/自检页
         加载同一权重时复用，避免离线任务链每任务重载 ONNX（见 _get_session）。
         """
         if not os.path.exists(onnx_path):
