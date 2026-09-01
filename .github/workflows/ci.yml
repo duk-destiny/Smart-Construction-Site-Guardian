@@ -30,7 +30,7 @@ jobs:
         # --only-binary :all: 防 setup.py 执行(S8541/S8544)
         run: |
           pip install --disable-pip-version-check --only-binary :all: ruff==0.15.20
-          ruff check agents api core dao services ui scripts app.py
+          ruff check pipeline api core dao services ui scripts app.py
       # Phase 1 配置出库后真实 config.yaml 不入 git：CI 用 example 引导
       # （fresh clone 与本仓库测试均假设 config/config.yaml 存在）
       - name: Bootstrap config from example
