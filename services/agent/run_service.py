@@ -299,11 +299,15 @@ class PlanRunService:
         """终态写回 + 助手消息（只存摘要，§5.7）+ 审计。"""
         if outcome.status in ("pending_confirm", "cancelled"):
             return                       # 挂起已在内核落库；取消由 cancel 落
+        # 终态/助手消息/审计单次提交：读端（历史页在 run 完结即刷新）不会
+        # 撞见「状态已完结但助手回复尚未落库」的中间态（CI 慢机上实测暴露）
         ok = dao.transition_status(row["id"], "running", outcome.status,
                                    error=outcome.error,
-                                   result_json=outcome.result_json)
+                                   result_json=outcome.result_json,
+                                   commit=False)
         if not ok:
-            return                       # 竞态下已被取消/孤儿处置，不覆盖
+            dao.conn.rollback()          # 竞态下已被取消/孤儿处置，不覆盖
+            return
         digest = None
         if outcome.result_json:
             try:
@@ -313,11 +317,13 @@ class PlanRunService:
                 digest = None
         dao.insert_message(row["session_id"], "assistant",
                            outcome.answer or "", run_id=row["id"],
-                           intent=row.get("intent"), digest=digest)
+                           intent=row.get("intent"), digest=digest,
+                           commit=False)
         AuditDAO(dao.conn).insert(
             row["user_id"], "agent_chat_finish",
             json.dumps({"run_id": row["id"], "status": outcome.status},
-                       ensure_ascii=False))
+                       ensure_ascii=False), commit=False)
+        dao.conn.commit()
 
     # ---------- 确认 / 取消 ----------
 
